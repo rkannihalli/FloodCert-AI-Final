@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flood Determination Result — {{ data.loan_id }}</title>
+  <link rel="stylesheet" href="/static/css/main.css" />
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <div class="header-seal">🌊</div>
+    <div class="header-text">
+      <h1>FEMA Flood Certificate Generator</h1>
+      <p>Standard Flood Hazard Determination — National Flood Hazard Layer</p>
+    </div>
+    <span class="header-badge">Official Use Only</span>
+  </div>
+</header>
+
+<main class="main">
+
+  <div class="result-header">
+    <h2>Flood Hazard Determination Result</h2>
+    <p>Determined on {{ data.determination_date }} &nbsp;|&nbsp; Loan ID: <strong>{{ data.loan_id }}</strong></p>
+  </div>
+
+  {% set sfha = data.sfha_status == 'Yes' %}
+  {% set undetermined = data.flood_zone == 'UNDETERMINED' %}
+
+  <div class="zone-banner {{ 'sfha' if sfha else ('undetermined' if undetermined else 'non-sfha') }}">
+    <div class="zone-badge">{{ data.flood_zone }}</div>
+    <div class="zone-info">
+      <h3>
+        {% if sfha %}Special Flood Hazard Area (SFHA)
+        {% elif undetermined %}Flood Zone Undetermined
+        {% else %}Non-Special Flood Hazard Area
+        {% endif %}
+      </h3>
+      <p>{{ data.flood_zone_description }}</p>
+    </div>
+    <div class="insurance-tag {{ 'required' if sfha else ('check' if undetermined else 'not-required') }}">
+      {% if sfha %}Insurance Required
+      {% elif undetermined %}Verify Insurance
+      {% else %}Not Required
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="detail-grid">
+
+    <div class="detail-card">
+      <div class="detail-card-header">Property &amp; Loan Information</div>
+      <div class="detail-card-body">
+        <div class="detail-row">
+          <span class="detail-label">Borrower</span>
+          <span class="detail-value">{{ data.borrower_name }}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Lender</span>
+          <span class="detail-value">{{ data.lender_name }}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Loan ID</span>
+          <span class="detail-value">{{ data.loan_id }}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Address Entered</span>
+          <span class="detail-value">{{ data.property_address }}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Matched Address</span>
+          <span class="detail-value">{{ data.matched_address }}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Coordinates</span>
+          <span class="detail-value">{{ "%.5f" | format(data.lat | float) }}, {{ "%.5f" | format(data.lon | float) }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="detail-card">
+      <div class="detail-card-header">FIRM &amp; Community Data</div>
+      <div class="detail-card-body">
+        <div class="detail-row">
+          <span class="detail-label">Flood Zone</span>
+          <span class="detail-value">{{ data.flood_zone }}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">SFHA Status</span>
+          <span class="detail-value">{{ data.sfha_status }}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Insurance Required</span>
+          <span class="detail-value">{{ data.insurance_required }}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">FIRM Panel Number</span>
+          <span class="detail-value">{{ data.panel_number }}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Panel Effective Date</span>
+          <span class="detail-value">{{ data.panel_effective_date }}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Community Number</span>
+          <span class="detail-value">{{ data.community_number }}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Determination Date</span>
+          <span class="detail-value">{{ data.determination_date }}</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Download section — uses two separate forms with all fields as hidden inputs -->
+  <div class="downloads-section">
+    <h3>Download Documents</h3>
+    <p>Generate and download the official flood determination certificate and borrower notice as PDF documents.</p>
+
+    <div class="download-buttons">
+
+      <form method="POST" action="/download/certificate" target="_blank">
+        <input type="hidden" name="property_address"      value="{{ data.property_address }}" />
+        <input type="hidden" name="matched_address"       value="{{ data.matched_address }}" />
+        <input type="hidden" name="loan_id"               value="{{ data.loan_id }}" />
+        <input type="hidden" name="borrower_name"         value="{{ data.borrower_name }}" />
+        <input type="hidden" name="lender_name"           value="{{ data.lender_name }}" />
+        <input type="hidden" name="lat"                   value="{{ data.lat }}" />
+        <input type="hidden" name="lon"                   value="{{ data.lon }}" />
+        <input type="hidden" name="flood_zone"            value="{{ data.flood_zone }}" />
+        <input type="hidden" name="flood_zone_description" value="{{ data.flood_zone_description }}" />
+        <input type="hidden" name="sfha_status"           value="{{ data.sfha_status }}" />
+        <input type="hidden" name="insurance_required"    value="{{ data.insurance_required }}" />
+        <input type="hidden" name="panel_number"          value="{{ data.panel_number }}" />
+        <input type="hidden" name="panel_effective_date"  value="{{ data.panel_effective_date }}" />
+        <input type="hidden" name="community_number"      value="{{ data.community_number }}" />
+        <input type="hidden" name="community_name"        value="{{ data.community_name }}" />
+        <input type="hidden" name="determination_date"    value="{{ data.determination_date }}" />
+        <input type="hidden" name="determination_date_iso" value="{{ data.determination_date_iso }}" />
+        <button type="submit" class="btn-download">📄 Download Flood Certificate (PDF)</button>
+      </form>
+
+      <form method="POST" action="/download/notice" target="_blank">
+        <input type="hidden" name="property_address"      value="{{ data.property_address }}" />
+        <input type="hidden" name="matched_address"       value="{{ data.matched_address }}" />
+        <input type="hidden" name="loan_id"               value="{{ data.loan_id }}" />
+        <input type="hidden" name="borrower_name"         value="{{ data.borrower_name }}" />
+        <input type="hidden" name="lender_name"           value="{{ data.lender_name }}" />
+        <input type="hidden" name="lat"                   value="{{ data.lat }}" />
+        <input type="hidden" name="lon"                   value="{{ data.lon }}" />
+        <input type="hidden" name="flood_zone"            value="{{ data.flood_zone }}" />
+        <input type="hidden" name="flood_zone_description" value="{{ data.flood_zone_description }}" />
+        <input type="hidden" name="sfha_status"           value="{{ data.sfha_status }}" />
+        <input type="hidden" name="insurance_required"    value="{{ data.insurance_required }}" />
+        <input type="hidden" name="panel_number"          value="{{ data.panel_number }}" />
+        <input type="hidden" name="panel_effective_date"  value="{{ data.panel_effective_date }}" />
+        <input type="hidden" name="community_number"      value="{{ data.community_number }}" />
+        <input type="hidden" name="community_name"        value="{{ data.community_name }}" />
+        <input type="hidden" name="determination_date"    value="{{ data.determination_date }}" />
+        <input type="hidden" name="determination_date_iso" value="{{ data.determination_date_iso }}" />
+        <button type="submit" class="btn-download secondary">📋 Download Borrower Notice (PDF)</button>
+      </form>
+
+    </div>
+  </div>
+
+  <div class="disclaimer">
+    <strong>Disclaimer:</strong> This determination is based on publicly available FEMA National Flood Hazard Layer (NFHL) data and the US Census Geocoder. Results are for informational purposes and should be verified against the official FEMA Flood Insurance Rate Map (FIRM) for the subject property. This tool is not affiliated with FEMA. Lenders and loan officers should confirm determinations using a certified flood determination service for regulatory compliance.
+  </div>
+
+  <div style="margin-top:18px;">
+    <a href="/" class="btn-secondary">← New Determination</a>
+  </div>
+
+</main>
+
+</body>
+</html>

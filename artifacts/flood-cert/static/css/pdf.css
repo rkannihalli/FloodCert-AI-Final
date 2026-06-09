@@ -1,0 +1,313 @@
+@page {
+  size: letter;
+  margin: 0.75in 0.85in;
+  @bottom-center {
+    content: "Page " counter(page) " of " counter(pages);
+    font-size: 9pt;
+    color: #888;
+  }
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 10pt;
+  color: #1e2530;
+  line-height: 1.4;
+}
+
+/* ── PDF Header ── */
+.pdf-header {
+  border-bottom: 3pt solid #003366;
+  padding-bottom: 10pt;
+  margin-bottom: 14pt;
+  display: flex;
+  align-items: flex-start;
+  gap: 14pt;
+}
+
+.pdf-logo-block {
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.pdf-logo-circle {
+  width: 60pt;
+  height: 60pt;
+  border: 3pt solid #003366;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26pt;
+  margin-bottom: 4pt;
+}
+
+.pdf-logo-label {
+  font-size: 7pt;
+  font-weight: bold;
+  color: #003366;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.pdf-header-text {
+  flex: 1;
+}
+
+.pdf-header-text h1 {
+  font-size: 15pt;
+  font-weight: bold;
+  color: #003366;
+  line-height: 1.1;
+  margin-bottom: 4pt;
+}
+
+.pdf-header-text .subtitle {
+  font-size: 9pt;
+  color: #5a6470;
+}
+
+.pdf-header-meta {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.pdf-header-meta .meta-label {
+  font-size: 7.5pt;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pdf-header-meta .meta-value {
+  font-size: 9pt;
+  font-weight: bold;
+  color: #003366;
+}
+
+/* ── Zone Banner ── */
+.zone-banner {
+  border: 2pt solid #003366;
+  border-radius: 4pt;
+  padding: 10pt 14pt;
+  margin-bottom: 12pt;
+  display: flex;
+  align-items: center;
+  gap: 14pt;
+}
+
+.zone-banner.sfha {
+  background: #fdf0ef;
+  border-color: #c0392b;
+}
+
+.zone-banner.non-sfha {
+  background: #e6f4ed;
+  border-color: #1a7a4a;
+}
+
+.zone-banner.undetermined {
+  background: #fdf3e3;
+  border-color: #e67e22;
+}
+
+.zone-code {
+  font-size: 24pt;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  min-width: 60pt;
+}
+
+.zone-banner.sfha .zone-code { color: #c0392b; }
+.zone-banner.non-sfha .zone-code { color: #1a7a4a; }
+.zone-banner.undetermined .zone-code { color: #e67e22; }
+
+.zone-text h3 {
+  font-size: 10pt;
+  font-weight: bold;
+  margin-bottom: 3pt;
+}
+
+.zone-banner.sfha .zone-text h3 { color: #c0392b; }
+.zone-banner.non-sfha .zone-text h3 { color: #1a7a4a; }
+.zone-banner.undetermined .zone-text h3 { color: #e67e22; }
+
+.zone-text p {
+  font-size: 8.5pt;
+  color: #5a6470;
+}
+
+/* ── Section ── */
+.section {
+  margin-bottom: 12pt;
+  break-inside: avoid;
+}
+
+.section-title {
+  font-size: 8.5pt;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #003366;
+  background: #e8f0fb;
+  padding: 5pt 8pt;
+  margin-bottom: 0;
+  border-top: 1.5pt solid #003366;
+  border-left: 1.5pt solid #003366;
+  border-right: 1.5pt solid #003366;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1.5pt solid #003366;
+}
+
+.data-table td {
+  padding: 5pt 8pt;
+  border-bottom: 0.5pt solid #d0d8e0;
+  vertical-align: top;
+}
+
+.data-table tr:last-child td { border-bottom: none; }
+
+.data-table .label {
+  font-size: 8pt;
+  color: #5a6470;
+  font-weight: bold;
+  width: 35%;
+  background: #f5f7fa;
+}
+
+.data-table .value {
+  font-size: 9pt;
+  color: #1e2530;
+  font-weight: normal;
+}
+
+.data-table .value.highlight {
+  font-weight: bold;
+  color: #003366;
+}
+
+/* ── Two column tables ── */
+.two-col {
+  display: flex;
+  gap: 10pt;
+}
+
+.two-col .section {
+  flex: 1;
+}
+
+/* ── Certification box ── */
+.cert-box {
+  border: 2pt solid #003366;
+  border-radius: 3pt;
+  padding: 10pt 12pt;
+  margin-bottom: 12pt;
+  background: #f5f7fa;
+  break-inside: avoid;
+}
+
+.cert-box p {
+  font-size: 8.5pt;
+  color: #3a4450;
+  line-height: 1.55;
+  margin-bottom: 6pt;
+}
+
+.cert-box p:last-child { margin-bottom: 0; }
+
+/* ── Signature area ── */
+.sig-area {
+  display: flex;
+  gap: 20pt;
+  margin-top: 12pt;
+  break-inside: avoid;
+}
+
+.sig-block {
+  flex: 1;
+}
+
+.sig-line {
+  border-bottom: 1pt solid #1e2530;
+  height: 22pt;
+  margin-bottom: 3pt;
+}
+
+.sig-label {
+  font-size: 7.5pt;
+  color: #5a6470;
+}
+
+/* ── Footer ── */
+.pdf-footer {
+  border-top: 1pt solid #d0d8e0;
+  padding-top: 8pt;
+  margin-top: 10pt;
+  font-size: 7.5pt;
+  color: #888;
+  line-height: 1.4;
+}
+
+/* ── Notice page ── */
+.notice-title {
+  font-size: 13pt;
+  font-weight: bold;
+  color: #003366;
+  text-align: center;
+  margin-bottom: 8pt;
+}
+
+.notice-subtitle {
+  font-size: 9pt;
+  color: #5a6470;
+  text-align: center;
+  margin-bottom: 14pt;
+}
+
+.notice-body p {
+  font-size: 9.5pt;
+  line-height: 1.6;
+  margin-bottom: 10pt;
+  color: #1e2530;
+}
+
+.notice-highlight {
+  background: #e6f4ed;
+  border-left: 3pt solid #1a7a4a;
+  padding: 8pt 12pt;
+  margin: 10pt 0;
+  font-size: 9pt;
+  color: #1a4030;
+}
+
+.notice-highlight.warning {
+  background: #fdf0ef;
+  border-left-color: #c0392b;
+  color: #6a1a14;
+}
+
+.notice-highlight.info {
+  background: #e8f0fb;
+  border-left-color: #003366;
+  color: #002244;
+}
+
+.ack-block {
+  margin-top: 20pt;
+  break-inside: avoid;
+}
+
+.ack-title {
+  font-size: 9pt;
+  font-weight: bold;
+  color: #003366;
+  margin-bottom: 10pt;
+  border-bottom: 1pt solid #d0d8e0;
+  padding-bottom: 4pt;
+}

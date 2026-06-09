@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FEMA Flood Certificate Generator</title>
+  <link rel="stylesheet" href="/static/css/main.css" />
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <div class="header-seal">🌊</div>
+    <div class="header-text">
+      <h1>FEMA Flood Certificate Generator</h1>
+      <p>Standard Flood Hazard Determination — National Flood Hazard Layer</p>
+    </div>
+    <span class="header-badge">Official Use Only</span>
+  </div>
+</header>
+
+<main class="main">
+
+  {% if errors %}
+  <div class="error-box">
+    <h3>⚠ Please correct the following errors:</h3>
+    <ul>
+      {% for err in errors %}<li>{{ err }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <div class="form-card">
+    <div class="form-card-header">
+      <h2>Flood Hazard Determination Request</h2>
+      <p>Enter property and loan information to generate a FEMA-style flood determination certificate.</p>
+    </div>
+
+    <div class="form-body">
+      <form method="POST" action="/generate" id="mainForm" onsubmit="showLoading()">
+
+        <div class="form-grid">
+          <div class="form-group full-width">
+            <label for="property_address">Property Address</label>
+            <input
+              type="text"
+              id="property_address"
+              name="property_address"
+              placeholder="e.g. 1600 Pennsylvania Ave NW, Washington, DC 20500"
+              value="{{ form.property_address if form else '' }}"
+              required
+            />
+            <span class="form-hint">Include full street address, city, state, and ZIP code for best results.</span>
+          </div>
+
+          <div class="form-group">
+            <label for="loan_id">Loan ID / File Number</label>
+            <input
+              type="text"
+              id="loan_id"
+              name="loan_id"
+              placeholder="e.g. 2024-001234"
+              value="{{ form.loan_id if form else '' }}"
+              required
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="borrower_name">Borrower Name</label>
+            <input
+              type="text"
+              id="borrower_name"
+              name="borrower_name"
+              placeholder="e.g. Jane A. Smith"
+              value="{{ form.borrower_name if form else '' }}"
+              required
+            />
+          </div>
+
+          <div class="form-group full-width">
+            <label for="lender_name">Lender / Institution Name</label>
+            <input
+              type="text"
+              id="lender_name"
+              name="lender_name"
+              placeholder="e.g. First National Bank"
+              value="{{ form.lender_name if form else '' }}"
+              required
+            />
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn-primary">🔍 Generate Flood Determination</button>
+          <button type="reset" class="btn-secondary">Clear Form</button>
+        </div>
+
+      </form>
+
+      <div class="info-notice">
+        <strong>Data Sources:</strong> This tool queries the US Census Bureau Geocoder for address validation and the FEMA National Flood Hazard Layer (NFHL) ArcGIS REST API for flood zone data. Results reflect the most current published FIRM panels. This tool uses only free, publicly available government APIs.
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="spinner"></div>
+  <div class="loading-text">Geocoding address and querying FEMA NFHL…</div>
+</div>
+
+<script>
+  function showLoading() {
+    document.getElementById('loadingOverlay').classList.add('active');
+  }
+</script>
+
+</body>
+</html>

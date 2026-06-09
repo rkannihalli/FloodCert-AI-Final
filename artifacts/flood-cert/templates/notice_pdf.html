@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Borrower Flood Insurance Notice</title>
+</head>
+<body>
+
+<!-- Header -->
+<div class="pdf-header">
+  <div class="pdf-logo-block">
+    <div class="pdf-logo-circle">🌊</div>
+    <div class="pdf-logo-label">FEMA</div>
+  </div>
+  <div class="pdf-header-text">
+    <h1>Notice of Special Flood Hazard &amp;<br />Availability of Federal Disaster Relief Assistance</h1>
+    <div class="subtitle">
+      Required under the Flood Disaster Protection Act of 1973, as amended by the<br />
+      National Flood Insurance Reform Act of 1994 (42 U.S.C. 4104a)
+    </div>
+  </div>
+  <div class="pdf-header-meta">
+    <div class="meta-label">Date</div>
+    <div class="meta-value">{{ determination_date }}</div>
+    <br />
+    <div class="meta-label">Loan / File No.</div>
+    <div class="meta-value">{{ loan_id }}</div>
+  </div>
+</div>
+
+<!-- Borrower / Property Section -->
+<div class="section">
+  <div class="section-title">Borrower and Property Information</div>
+  <table class="data-table">
+    <tr>
+      <td class="label">Borrower Name</td>
+      <td class="value highlight">{{ borrower_name }}</td>
+      <td class="label">Loan / File No.</td>
+      <td class="value highlight">{{ loan_id }}</td>
+    </tr>
+    <tr>
+      <td class="label">Lender / Institution</td>
+      <td class="value" colspan="3">{{ lender_name }}</td>
+    </tr>
+    <tr>
+      <td class="label">Property Address</td>
+      <td class="value" colspan="3">{{ property_address }}</td>
+    </tr>
+    <tr>
+      <td class="label">Flood Zone</td>
+      <td class="value highlight">{{ flood_zone }}</td>
+      <td class="label">SFHA</td>
+      <td class="value highlight">{{ sfha_status }}</td>
+    </tr>
+  </table>
+</div>
+
+<!-- Notice Body -->
+<div class="notice-body">
+
+  {% set sfha = sfha_status == 'Yes' %}
+  {% set undetermined = flood_zone == 'UNDETERMINED' %}
+
+  {% if sfha %}
+  <div class="notice-highlight warning">
+    <strong>IMPORTANT NOTICE:</strong> The property securing your loan is located in a Special Flood Hazard Area (SFHA), Flood Zone {{ flood_zone }}. Federal law requires that you obtain and maintain flood insurance for the life of this loan.
+  </div>
+  {% elif undetermined %}
+  <div class="notice-highlight info">
+    <strong>NOTICE:</strong> The flood zone status for the property securing your loan could not be determined from available FEMA NFHL data. You should contact your lender or a certified flood determination service for further review.
+  </div>
+  {% else %}
+  <div class="notice-highlight">
+    <strong>NOTICE:</strong> Based on the current FEMA National Flood Hazard Layer (NFHL), the property securing your loan is located in Flood Zone {{ flood_zone }}, which is NOT in a Special Flood Hazard Area. Federal mandatory purchase of flood insurance does not apply to this loan.
+  </div>
+  {% endif %}
+
+  <p>
+    We are providing this notice because the building or mobile home securing the loan for which you have applied is or will be located in an area with special flood hazards. The area has been identified by the Director of the Federal Emergency Management Agency (FEMA) as a special flood hazard area using the National Flood Hazard Layer (NFHL). The NFHL and FIRM panels are used to determine flood insurance requirements.
+  </p>
+
+  {% if sfha %}
+  <p>
+    <strong>Flood Insurance Requirement:</strong> The National Flood Insurance Reform Act of 1994 requires federally regulated lenders to require flood insurance for loans secured by improved real property located in an SFHA in a community participating in the NFIP. <strong>This requirement applies to your loan.</strong>
+  </p>
+
+  <p>
+    <strong>Amount of Coverage:</strong> Flood insurance coverage must be maintained for the term of your loan in an amount at least equal to the lesser of: (1) the outstanding principal balance of the loan; (2) the maximum amount of coverage available under the NFIP for the type of structure; or (3) the insurable value of the structure. The maximum amount of coverage available through the NFIP is $250,000 for residential buildings and $500,000 for non-residential structures.
+  </p>
+
+  <p>
+    <strong>Where to Obtain Coverage:</strong> Flood insurance coverage under the NFIP may be purchased through an insurance agent who will obtain the policy either directly through the NFIP or through a private insurance company that participates in the NFIP "Write Your Own" (WYO) program. You may also explore private flood insurance options from non-NFIP insurers.
+  </p>
+  {% else %}
+  <p>
+    Although federal law does not require flood insurance for property in Flood Zone {{ flood_zone }}, we encourage you to consider purchasing flood insurance voluntarily. Floods can and do occur outside of high-risk flood zones. Flood insurance is available through the National Flood Insurance Program (NFIP) to owners of property in participating communities.
+  </p>
+  {% endif %}
+
+  <p>
+    <strong>Availability of Federal Disaster Assistance:</strong> Federal disaster assistance generally is available to persons whose property has been damaged by floods in areas that are declared major disasters by the President. However, this assistance is usually available only if the community where the property is located has been declared a federal disaster area. Furthermore, such assistance may be limited and subject to change at any time. You should not rely on the availability of federal disaster assistance in lieu of obtaining flood insurance.
+  </p>
+
+  <p>
+    <strong>NFIP Community Participation:</strong> The mandatory purchase requirement applies only if the community in which the property is located participates in the NFIP. If the community does not participate in the NFIP, federally regulated lenders cannot make, increase, extend, or renew loans secured by property located in an SFHA unless the community has been identified as having special flood hazards for at least one year. You should confirm NFIP participation status with FEMA.
+  </p>
+
+</div>
+
+<!-- Acknowledgment block -->
+<div class="ack-block">
+  <div class="ack-title">Borrower Acknowledgment</div>
+  <p style="font-size:8.5pt; color:#3a4450; line-height:1.55; margin-bottom:14pt;">
+    I/We hereby acknowledge receipt of this notice regarding the flood hazard determination for the subject property. I/We understand the flood zone designation and the federal requirements regarding flood insurance as explained above.
+  </p>
+
+  <div class="sig-area">
+    <div class="sig-block">
+      <div class="sig-line"></div>
+      <div class="sig-label">Borrower Signature</div>
+    </div>
+    <div class="sig-block">
+      <div class="sig-line"></div>
+      <div class="sig-label">Printed Name</div>
+    </div>
+    <div class="sig-block">
+      <div class="sig-line"></div>
+      <div class="sig-label">Date</div>
+    </div>
+  </div>
+
+  <div class="sig-area" style="margin-top:14pt;">
+    <div class="sig-block">
+      <div class="sig-line"></div>
+      <div class="sig-label">Co-Borrower Signature (if applicable)</div>
+    </div>
+    <div class="sig-block">
+      <div class="sig-line"></div>
+      <div class="sig-label">Printed Name</div>
+    </div>
+    <div class="sig-block">
+      <div class="sig-line"></div>
+      <div class="sig-label">Date</div>
+    </div>
+  </div>
+</div>
+
+<!-- Footer -->
+<div class="pdf-footer">
+  <strong>Lender:</strong> {{ lender_name }} &nbsp;|&nbsp; <strong>Loan ID:</strong> {{ loan_id }} &nbsp;|&nbsp; <strong>Property:</strong> {{ property_address }}<br />
+  <strong>Reference:</strong> Flood Disaster Protection Act of 1973 | National Flood Insurance Reform Act of 1994 (42 U.S.C. 4104a) | FEMA NFHL<br />
+  Generated: {{ determination_date }}
+</div>
+
+</body>
+</html>

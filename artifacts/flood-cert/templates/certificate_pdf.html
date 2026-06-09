@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Standard Flood Hazard Determination</title>
+</head>
+<body>
+
+<!-- Header -->
+<div class="pdf-header">
+  <div class="pdf-logo-block">
+    <div class="pdf-logo-circle">🌊</div>
+    <div class="pdf-logo-label">FEMA</div>
+  </div>
+  <div class="pdf-header-text">
+    <h1>Standard Flood Hazard Determination Form</h1>
+    <div class="subtitle">
+      Pursuant to the Flood Disaster Protection Act of 1973 as amended by the National Flood Insurance Reform Act of 1994<br />
+      National Flood Hazard Layer (NFHL) — FEMA ArcGIS REST Service Query
+    </div>
+  </div>
+  <div class="pdf-header-meta">
+    <div class="meta-label">Determination Date</div>
+    <div class="meta-value">{{ determination_date }}</div>
+    <br />
+    <div class="meta-label">Loan / File No.</div>
+    <div class="meta-value">{{ loan_id }}</div>
+  </div>
+</div>
+
+<!-- Zone Banner -->
+{% set sfha = sfha_status == 'Yes' %}
+{% set undetermined = flood_zone == 'UNDETERMINED' %}
+
+<div class="zone-banner {{ 'sfha' if sfha else ('undetermined' if undetermined else 'non-sfha') }}">
+  <div class="zone-code">{{ flood_zone }}</div>
+  <div class="zone-text">
+    <h3>
+      {% if sfha %}SPECIAL FLOOD HAZARD AREA (SFHA)
+      {% elif undetermined %}FLOOD ZONE UNDETERMINED
+      {% else %}NON-SPECIAL FLOOD HAZARD AREA
+      {% endif %}
+    </h3>
+    <p>{{ flood_zone_description }}</p>
+  </div>
+</div>
+
+<!-- Section A: Loan / Property Info -->
+<div class="section">
+  <div class="section-title">Section A — Loan and Property Information</div>
+  <table class="data-table">
+    <tr>
+      <td class="label">Borrower Name</td>
+      <td class="value highlight">{{ borrower_name }}</td>
+      <td class="label">Loan / File No.</td>
+      <td class="value highlight">{{ loan_id }}</td>
+    </tr>
+    <tr>
+      <td class="label">Lender / Institution</td>
+      <td class="value" colspan="3">{{ lender_name }}</td>
+    </tr>
+    <tr>
+      <td class="label">Property Address</td>
+      <td class="value" colspan="3">{{ property_address }}</td>
+    </tr>
+    <tr>
+      <td class="label">Geocoded / Matched Address</td>
+      <td class="value" colspan="3">{{ matched_address }}</td>
+    </tr>
+    <tr>
+      <td class="label">Latitude / Longitude</td>
+      <td class="value" colspan="3">
+        {{ "%.5f"|format(lat|float) }}, {{ "%.5f"|format(lon|float) }}
+        (WGS84 — NAD83)
+      </td>
+    </tr>
+  </table>
+</div>
+
+<!-- Section B: Flood Zone Determination -->
+<div class="section">
+  <div class="section-title">Section B — Flood Zone Determination</div>
+  <table class="data-table">
+    <tr>
+      <td class="label">FIRM Community Number</td>
+      <td class="value highlight">{{ community_number }}</td>
+      <td class="label">Community Name</td>
+      <td class="value">{{ community_name }}</td>
+    </tr>
+    <tr>
+      <td class="label">FIRM Panel Number</td>
+      <td class="value highlight">{{ panel_number }}</td>
+      <td class="label">FIRM Panel Effective Date</td>
+      <td class="value">{{ panel_effective_date }}</td>
+    </tr>
+    <tr>
+      <td class="label">Flood Zone</td>
+      <td class="value highlight">{{ flood_zone }}</td>
+      <td class="label">SFHA (Special Flood Hazard Area)</td>
+      <td class="value highlight">{{ sfha_status }}</td>
+    </tr>
+    <tr>
+      <td class="label">Zone Description</td>
+      <td class="value" colspan="3">{{ flood_zone_description }}</td>
+    </tr>
+    <tr>
+      <td class="label">Federal Flood Insurance Required</td>
+      <td class="value highlight" colspan="3">{{ insurance_required }}</td>
+    </tr>
+    <tr>
+      <td class="label">Determination Date</td>
+      <td class="value">{{ determination_date }}</td>
+      <td class="label">Data Source</td>
+      <td class="value">FEMA NFHL ArcGIS REST API &amp; US Census Geocoder</td>
+    </tr>
+  </table>
+</div>
+
+<!-- Section C: Certification -->
+<div class="cert-box">
+  <p>
+    <strong>Certification:</strong> This determination has been made using the current effective FEMA National Flood Hazard Layer (NFHL) and the US Census Bureau Geocoder. The NFHL is the digital version of the official Flood Insurance Rate Maps (FIRMs) published by the Federal Emergency Management Agency (FEMA). This form meets the requirements of the National Flood Insurance Program as set forth in the Flood Disaster Protection Act of 1973, as amended by the National Flood Insurance Reform Act of 1994 (42 U.S.C. 4104b).
+  </p>
+  <p>
+    If the subject property is located in a Special Flood Hazard Area (SFHA), the lender is required to notify the borrower that federal flood insurance may be available and, in certain cases, required as a condition of the loan. The mandatory purchase requirement applies to loans made by federally regulated lenders for properties located in an SFHA that participates in the National Flood Insurance Program (NFIP).
+  </p>
+</div>
+
+<!-- Signature area -->
+<div class="sig-area">
+  <div class="sig-block">
+    <div class="sig-line"></div>
+    <div class="sig-label">Authorized Signature / Flood Determination Officer</div>
+  </div>
+  <div class="sig-block">
+    <div class="sig-line"></div>
+    <div class="sig-label">Title / Position</div>
+  </div>
+  <div class="sig-block">
+    <div class="sig-line"></div>
+    <div class="sig-label">Date</div>
+  </div>
+</div>
+
+<!-- Footer -->
+<div class="pdf-footer">
+  <strong>Data Sources:</strong> FEMA National Flood Hazard Layer (NFHL) — hazards.fema.gov/arcgis | US Census Bureau Geocoder — geocoding.geo.census.gov<br />
+  <strong>Disclaimer:</strong> This determination is based on publicly available digital flood map data. It should be verified against official FEMA FIRM panels for regulatory compliance. This document is not issued by FEMA.<br />
+  Generated: {{ determination_date }} | Loan ID: {{ loan_id }}
+</div>
+
+</body>
+</html>
