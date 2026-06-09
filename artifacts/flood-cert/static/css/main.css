@@ -715,6 +715,258 @@ input[type="text"]::placeholder {
 }
 .saved-badge:hover { background: #c8ecd9; }
 
+/* ── Batch page ── */
+.batch-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.batch-header h2 {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.batch-header p {
+  font-size: 0.85rem;
+  color: var(--gray-600);
+  margin-top: 3px;
+}
+
+.batch-instructions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.instruction-card {
+  background: var(--white);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 18px 20px;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.step-num {
+  width: 32px;
+  height: 32px;
+  background: var(--navy);
+  color: var(--white);
+  border-radius: 50%;
+  font-size: 0.9rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.instruction-card strong {
+  font-size: 0.88rem;
+  color: var(--navy);
+  display: block;
+  margin-bottom: 4px;
+}
+
+.instruction-card p {
+  font-size: 0.8rem;
+  color: var(--gray-600);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.instruction-card code {
+  background: var(--gray-100);
+  border: 1px solid var(--gray-200);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 0.75rem;
+  color: var(--navy);
+}
+
+/* ── Upload zone ── */
+.upload-zone {
+  border: 2px dashed var(--gray-200);
+  border-radius: var(--radius);
+  padding: 40px 24px;
+  text-align: center;
+  transition: border-color 0.15s, background 0.15s;
+  cursor: pointer;
+  position: relative;
+}
+
+.upload-zone.drag-over,
+.upload-zone:focus-within {
+  border-color: var(--blue);
+  background: var(--blue-light);
+}
+
+.upload-zone.has-file {
+  border-color: var(--green);
+  background: var(--green-light);
+}
+
+.upload-icon { font-size: 2.5rem; margin-bottom: 10px; }
+
+.upload-label {
+  font-size: 0.95rem;
+  color: var(--gray-600);
+  margin-bottom: 6px;
+}
+
+.upload-browse {
+  color: var(--blue);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.upload-hint {
+  font-size: 0.78rem;
+  color: var(--gray-400);
+}
+
+.upload-input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+}
+
+.upload-filename {
+  margin-top: 10px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--green);
+}
+
+/* ── CSV reference table ── */
+.csv-reference {
+  background: var(--white);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 22px 24px;
+  margin-top: 24px;
+}
+
+.csv-reference h3 {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--navy);
+  margin-bottom: 14px;
+}
+
+.ref-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+}
+
+.ref-table th {
+  background: var(--navy);
+  color: var(--white);
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ref-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--gray-200);
+  color: var(--gray-800);
+}
+
+.ref-table tr:last-child td { border-bottom: none; }
+.ref-table tr:nth-child(even) td { background: var(--gray-100); }
+
+.ref-table code {
+  background: var(--blue-light);
+  border: 1px solid #c8d8f0;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 0.8rem;
+  color: var(--navy);
+}
+
+.req-yes {
+  background: var(--red);
+  color: var(--white);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+}
+
+/* ── Batch results summary ── */
+.batch-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+.summary-card {
+  background: var(--white);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 18px 20px;
+  text-align: center;
+  border-top: 4px solid var(--gray-200);
+}
+
+.summary-total { border-top-color: var(--navy); }
+.summary-sfha  { border-top-color: var(--red); }
+.summary-ok    { border-top-color: var(--green); }
+.summary-error { border-top-color: var(--amber); }
+
+.summary-num {
+  font-size: 2.2rem;
+  font-weight: 900;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+
+.summary-total .summary-num { color: var(--navy); }
+.summary-sfha  .summary-num { color: var(--red); }
+.summary-ok    .summary-num { color: var(--green); }
+.summary-error .summary-num { color: var(--amber); }
+
+.summary-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--gray-600);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.row-error td { background: #fff8f7 !important; }
+
+.batch-status-ok {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--green);
+}
+
+.batch-status-error {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--red);
+  cursor: help;
+  border-bottom: 1px dashed var(--red);
+}
+
 /* ── Responsive ── */
 @media (max-width: 640px) {
   .form-grid { grid-template-columns: 1fr; }

@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Batch Results — FEMA Flood Certificate Generator</title>
+  <link rel="stylesheet" href="/static/css/main.css" />
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <div class="header-seal">🌊</div>
+    <div class="header-text">
+      <h1>FEMA Flood Certificate Generator</h1>
+      <p>Standard Flood Hazard Determination — National Flood Hazard Layer</p>
+    </div>
+    <a href="/history" class="header-history-link">📂 History</a>
+  </div>
+</header>
+
+<main class="main">
+
+  <div class="batch-header">
+    <div>
+      <h2>Batch Results</h2>
+      <p>{{ results|length }} propert{{ 'y' if results|length == 1 else 'ies' }} processed on {{ determination_date }}.</p>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <a href="/batch/download/{{ batch_id }}" class="btn-download">⬇ Download Results CSV</a>
+      <a href="/batch" class="btn-secondary">New Batch</a>
+    </div>
+  </div>
+
+  <!-- Summary strip -->
+  <div class="batch-summary">
+    <div class="summary-card summary-total">
+      <div class="summary-num">{{ results|length }}</div>
+      <div class="summary-label">Total Properties</div>
+    </div>
+    <div class="summary-card summary-sfha">
+      <div class="summary-num">{{ results | selectattr('sfha_status', 'equalto', 'Yes') | list | length }}</div>
+      <div class="summary-label">In SFHA (Insurance Required)</div>
+    </div>
+    <div class="summary-card summary-ok">
+      <div class="summary-num">{{ results | selectattr('sfha_status', 'equalto', 'No') | list | length }}</div>
+      <div class="summary-label">Non-SFHA</div>
+    </div>
+    <div class="summary-card summary-error">
+      <div class="summary-num">{{ results | selectattr('error', 'defined') | selectattr('error') | list | length }}</div>
+      <div class="summary-label">Errors / Could Not Determine</div>
+    </div>
+  </div>
+
+  <!-- Results table -->
+  <div class="history-table-wrap">
+    <table class="history-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Loan ID</th>
+          <th>Borrower</th>
+          <th>Address</th>
+          <th>Zone</th>
+          <th>SFHA</th>
+          <th>Insurance</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in results %}
+        {% set sfha = r.get('sfha_status') == 'Yes' %}
+        {% set undetermined = r.get('flood_zone') == 'UNDETERMINED' %}
+        {% set has_error = r.get('error') %}
+        <tr class="{{ 'row-error' if has_error else '' }}">
+          <td class="hist-id">{{ loop.index }}</td>
+          <td class="hist-loan">
+            {% if r.get('record_id') %}
+            <a href="/history/{{ r.record_id }}" class="loan-link">{{ r.loan_id }}</a>
+            {% else %}
+            {{ r.loan_id }}
+            {% endif %}
+          </td>
+          <td>{{ r.borrower_name }}</td>
+          <td class="hist-addr">{{ r.get('matched_address') or r.property_address }}</td>
+          <td>
+            {% if has_error %}
+            <span class="zone-chip chip-undetermined">—</span>
+            {% else %}
+            <span class="zone-chip {{ 'chip-sfha' if sfha else ('chip-undetermined' if undetermined else 'chip-ok') }}">
+              {{ r.flood_zone }}
+            </span>
+            {% endif %}
+          </td>
+          <td>
+            {% if has_error %}—
+            {% else %}
+            <span class="sfha-tag {{ 'sfha-yes' if sfha else 'sfha-no' }}">{{ r.sfha_status }}</span>
+            {% endif %}
+          </td>
+          <td style="font-size:0.8rem;">
+            {% if has_error %}
+            <span style="color:var(--red);">—</span>
+            {% elif sfha %}
+            <span style="color:var(--red);font-weight:600;">Required</span>
+            {% else %}
+            <span style="color:var(--green);font-weight:600;">Not Required</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if has_error %}
+            <span class="batch-status-error" title="{{ r.error }}">⚠ Error</span>
+            {% else %}
+            <span class="batch-status-ok">✅ Saved</span>
+            {% endif %}
+          </td>
+          <td class="hist-actions">
+            {% if r.get('record_id') %}
+            <a href="/history/{{ r.record_id }}" class="action-btn view-btn">👁</a>
+            <form method="POST" action="/history/{{ r.record_id }}/download/certificate" target="_blank" style="display:inline">
+              <button type="submit" class="action-btn pdf-btn" title="Certificate PDF">📄</button>
+            </form>
+            <form method="POST" action="/history/{{ r.record_id }}/download/notice" target="_blank" style="display:inline">
+              <button type="submit" class="action-btn pdf-btn" title="Borrower Notice PDF">📋</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+    <a href="/batch/download/{{ batch_id }}" class="btn-download">⬇ Download Results CSV</a>
+    <a href="/history" class="btn-secondary">📂 View Full History</a>
+    <a href="/batch" class="btn-secondary">↺ New Batch</a>
+  </div>
+
+  <div class="disclaimer" style="margin-top:20px;">
+    <strong>Note:</strong> All successfully processed determinations have been saved to History. Individual PDFs (flood certificate and borrower notice) can be downloaded from the History page or using the action buttons above. The results CSV contains all determination data for record-keeping.
+  </div>
+
+</main>
+
+</body>
+</html>

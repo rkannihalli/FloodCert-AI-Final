@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Batch Processing — FEMA Flood Certificate Generator</title>
+  <link rel="stylesheet" href="/static/css/main.css" />
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <div class="header-seal">🌊</div>
+    <div class="header-text">
+      <h1>FEMA Flood Certificate Generator</h1>
+      <p>Standard Flood Hazard Determination — National Flood Hazard Layer</p>
+    </div>
+    <a href="/history" class="header-history-link">📂 History</a>
+  </div>
+</header>
+
+<main class="main">
+
+  <div class="batch-header">
+    <div>
+      <h2>Batch Flood Determination</h2>
+      <p>Upload a CSV file to run flood determinations on multiple properties at once.</p>
+    </div>
+    <div style="display:flex;gap:10px;">
+      <a href="/batch/template" class="btn-export">⬇ Download Template</a>
+      <a href="/" class="btn-secondary">Single Lookup</a>
+    </div>
+  </div>
+
+  {% if errors %}
+  <div class="error-box">
+    <h3>⚠ Upload Error</h3>
+    <ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  <!-- Instructions -->
+  <div class="batch-instructions">
+    <div class="instruction-card">
+      <div class="step-num">1</div>
+      <div>
+        <strong>Download the template</strong>
+        <p>Use the button above to get a CSV template with the correct column headers.</p>
+      </div>
+    </div>
+    <div class="instruction-card">
+      <div class="step-num">2</div>
+      <div>
+        <strong>Fill in your properties</strong>
+        <p>Add one row per property. Required columns: <code>property_address</code>, <code>loan_id</code>, <code>borrower_name</code>, <code>lender_name</code>.</p>
+      </div>
+    </div>
+    <div class="instruction-card">
+      <div class="step-num">3</div>
+      <div>
+        <strong>Upload and process</strong>
+        <p>Upload your CSV below. Each property will be geocoded and queried against the FEMA NFHL. Results download automatically.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Upload form -->
+  <div class="form-card">
+    <div class="form-card-header">
+      <h2>Upload CSV File</h2>
+      <p>Maximum 100 rows per batch. Processing may take 10–30 seconds depending on row count.</p>
+    </div>
+    <div class="form-body">
+      <form method="POST" action="/batch" enctype="multipart/form-data" id="batchForm" onsubmit="showBatchLoading()">
+        <div class="upload-zone" id="uploadZone">
+          <div class="upload-icon">📁</div>
+          <p class="upload-label">Drag & drop your CSV here, or <label for="csv_file" class="upload-browse">browse to select</label></p>
+          <p class="upload-hint">Accepts .csv files only — max 100 rows</p>
+          <input type="file" id="csv_file" name="csv_file" accept=".csv" required class="upload-input" />
+          <div class="upload-filename" id="uploadFilename"></div>
+        </div>
+
+        <div class="form-actions" style="margin-top:20px;">
+          <button type="submit" class="btn-primary" id="submitBtn">⚡ Run Batch Determination</button>
+          <span class="form-hint">All results will be saved to History automatically.</span>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- CSV format reference -->
+  <div class="csv-reference">
+    <h3>CSV Column Reference</h3>
+    <table class="ref-table">
+      <thead>
+        <tr>
+          <th>Column</th>
+          <th>Required</th>
+          <th>Example</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>property_address</code></td>
+          <td><span class="req-yes">Yes</span></td>
+          <td>123 Main St, Houston, TX 77002</td>
+          <td>Full street address with city, state, ZIP</td>
+        </tr>
+        <tr>
+          <td><code>loan_id</code></td>
+          <td><span class="req-yes">Yes</span></td>
+          <td>2024-001234</td>
+          <td>Your internal loan or file reference number</td>
+        </tr>
+        <tr>
+          <td><code>borrower_name</code></td>
+          <td><span class="req-yes">Yes</span></td>
+          <td>Jane A. Smith</td>
+          <td>Full name of the primary borrower</td>
+        </tr>
+        <tr>
+          <td><code>lender_name</code></td>
+          <td><span class="req-yes">Yes</span></td>
+          <td>First National Bank</td>
+          <td>Lender or institution name</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</main>
+
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="spinner"></div>
+  <div class="loading-text" id="loadingText">Processing batch — geocoding addresses and querying FEMA NFHL…</div>
+</div>
+
+<script>
+  const input = document.getElementById('csv_file');
+  const nameEl = document.getElementById('uploadFilename');
+  const zone = document.getElementById('uploadZone');
+
+  input.addEventListener('change', () => {
+    if (input.files[0]) {
+      nameEl.textContent = '📄 ' + input.files[0].name;
+      zone.classList.add('has-file');
+    }
+  });
+
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    if (e.dataTransfer.files[0]) {
+      input.files = e.dataTransfer.files;
+      nameEl.textContent = '📄 ' + e.dataTransfer.files[0].name;
+      zone.classList.add('has-file');
+    }
+  });
+
+  function showBatchLoading() {
+    if (!input.files[0]) return;
+    document.getElementById('loadingOverlay').classList.add('active');
+  }
+</script>
+
+</body>
+</html>

@@ -1,7 +1,9 @@
 import os
 import csv
 import io
-from fastapi import FastAPI, Request, Form, HTTPException
+import asyncio
+import uuid
+from fastapi import FastAPI, Request, Form, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, Response, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -9,6 +11,9 @@ from datetime import date
 from pdf_generator import generate_flood_certificate_pdf, generate_borrower_notice_pdf
 from fema_lookup import geocode_address, query_fema_nfhl, determine_flood_info
 from db import init_db, save_determination, get_determination, search_determinations, list_determinations, delete_determination
+
+# In-memory store for batch CSV results (keyed by batch_id)
+_batch_results: dict[str, bytes] = {}
 
 app = FastAPI(title="FEMA Flood Certificate Generator")
 
@@ -224,6 +229,166 @@ async def history_download_notice(record_id: int):
 async def history_delete(record_id: int):
     delete_determination(record_id)
     return RedirectResponse(url="/history", status_code=303)
+
+
+@app.get("/batch", response_class=HTMLResponse)
+async def batch_page(request: Request):
+    return templates.TemplateResponse("batch.html", {"request": request})
+
+
+@app.get("/batch/template")
+async def batch_template():
+    header = "property_address,loan_id,borrower_name,lender_name\n"
+    rows = (
+        "123 Main St, Houston TX 77002,2024-001,John Doe,First National Bank\n"
+        "456 Oak Ave, Miami FL 33101,2024-002,Jane Smith,Coastal Lenders LLC\n"
+        "789 River Rd, New Orleans LA 70112,2024-003,Bob Johnson,Gulf Coast Mortgage\n"
+    )
+    csv_bytes = (header + rows).encode("utf-8-sig")
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="batch_template.csv"'},
+    )
+
+
+async def _process_row(row: dict, det_date: str, det_date_iso: str) -> dict:
+    property_address = row.get("property_address", "").strip()
+    loan_id = row.get("loan_id", "").strip()
+    borrower_name = row.get("borrower_name", "").strip()
+    lender_name = row.get("lender_name", "").strip()
+
+    if not all([property_address, loan_id, borrower_name, lender_name]):
+        return {
+            "property_address": property_address,
+            "loan_id": loan_id,
+            "borrower_name": borrower_name,
+            "lender_name": lender_name,
+            "error": "Missing required fields",
+        }
+
+    geo = await geocode_address(property_address)
+    if not geo:
+        return {
+            "property_address": property_address,
+            "loan_id": loan_id,
+            "borrower_name": borrower_name,
+            "lender_name": lender_name,
+            "error": "Address could not be geocoded",
+        }
+
+    fema_data = await query_fema_nfhl(geo["lat"], geo["lon"])
+    flood_info = determine_flood_info(fema_data)
+
+    data = {
+        "property_address": property_address,
+        "matched_address": geo.get("matched_address", property_address),
+        "loan_id": loan_id,
+        "borrower_name": borrower_name,
+        "lender_name": lender_name,
+        "lat": geo["lat"],
+        "lon": geo["lon"],
+        "flood_zone": flood_info["flood_zone"],
+        "flood_zone_description": flood_info["flood_zone_description"],
+        "sfha_status": flood_info["sfha_status"],
+        "insurance_required": flood_info["insurance_required"],
+        "panel_number": flood_info["panel_number"],
+        "panel_effective_date": flood_info["panel_effective_date"],
+        "community_number": flood_info["community_number"],
+        "community_name": flood_info["community_name"],
+        "determination_date": det_date,
+        "determination_date_iso": det_date_iso,
+    }
+    record_id = save_determination(data)
+    return {**data, "record_id": record_id}
+
+
+@app.post("/batch", response_class=HTMLResponse)
+async def batch_process(request: Request, csv_file: UploadFile = File(...)):
+    errors = []
+
+    if not csv_file.filename.lower().endswith(".csv"):
+        errors.append("File must be a .csv file.")
+        return templates.TemplateResponse("batch.html", {"request": request, "errors": errors})
+
+    raw = await csv_file.read()
+    try:
+        text = raw.decode("utf-8-sig").strip()
+    except UnicodeDecodeError:
+        try:
+            text = raw.decode("latin-1").strip()
+        except Exception:
+            errors.append("Could not decode the CSV file. Please save it as UTF-8.")
+            return templates.TemplateResponse("batch.html", {"request": request, "errors": errors})
+
+    reader = csv.DictReader(io.StringIO(text))
+    required_cols = {"property_address", "loan_id", "borrower_name", "lender_name"}
+    if not reader.fieldnames or not required_cols.issubset({c.strip().lower() for c in reader.fieldnames}):
+        errors.append(
+            f"CSV must contain these columns: {', '.join(sorted(required_cols))}. "
+            f"Found: {', '.join(reader.fieldnames or [])}."
+        )
+        return templates.TemplateResponse("batch.html", {"request": request, "errors": errors})
+
+    rows = list(reader)
+    if len(rows) == 0:
+        errors.append("The CSV file contains no data rows.")
+        return templates.TemplateResponse("batch.html", {"request": request, "errors": errors})
+    if len(rows) > 100:
+        errors.append(f"Maximum 100 rows per batch. Your file contains {len(rows)} rows.")
+        return templates.TemplateResponse("batch.html", {"request": request, "errors": errors})
+
+    # Normalise column names to lowercase stripped
+    normalised_rows = [{k.strip().lower(): v for k, v in r.items()} for r in rows]
+
+    det_date = date.today().strftime("%B %d, %Y")
+    det_date_iso = date.today().isoformat()
+
+    # Process concurrently with a semaphore to avoid hammering the APIs
+    sem = asyncio.Semaphore(5)
+
+    async def bounded(row):
+        async with sem:
+            return await _process_row(row, det_date, det_date_iso)
+
+    results = await asyncio.gather(*[bounded(r) for r in normalised_rows])
+
+    # Build CSV output
+    out_columns = [
+        "loan_id", "borrower_name", "lender_name",
+        "property_address", "matched_address", "lat", "lon",
+        "flood_zone", "flood_zone_description", "sfha_status", "insurance_required",
+        "panel_number", "panel_effective_date", "community_number", "community_name",
+        "determination_date", "record_id", "error",
+    ]
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=out_columns, extrasaction="ignore")
+    writer.writeheader()
+    for r in results:
+        writer.writerow(r)
+
+    batch_id = str(uuid.uuid4())
+    _batch_results[batch_id] = buf.getvalue().encode("utf-8-sig")
+
+    return templates.TemplateResponse("batch_results.html", {
+        "request": request,
+        "results": results,
+        "batch_id": batch_id,
+        "determination_date": det_date,
+    })
+
+
+@app.get("/batch/download/{batch_id}")
+async def batch_download(batch_id: str):
+    csv_bytes = _batch_results.get(batch_id)
+    if not csv_bytes:
+        raise HTTPException(status_code=404, detail="Batch result not found or expired. Please re-run the batch.")
+    filename = f"flood_batch_{date.today().isoformat()}.csv"
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/history/export/csv")
