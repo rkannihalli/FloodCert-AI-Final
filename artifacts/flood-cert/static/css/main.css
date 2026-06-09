@@ -652,6 +652,26 @@ input[type="text"]::placeholder {
 .pdf-btn { background: var(--gray-100); color: var(--gray-600); font-size: 1rem; padding: 4px 7px; }
 .del-btn { background: #fde8e6; color: var(--red); font-size: 1rem; padding: 4px 7px; }
 
+.btn-export {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--white);
+  color: var(--green);
+  border: 1.5px solid var(--green);
+  padding: 9px 18px;
+  border-radius: 6px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.btn-export:hover {
+  background: var(--green);
+  color: var(--white);
+}
+
 .history-count {
   font-size: 0.8rem;
   color: var(--gray-600);

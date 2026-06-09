@@ -26,7 +26,13 @@
       <h2>Determination History</h2>
       <p>All saved flood hazard determinations — search by loan ID, borrower, or address.</p>
     </div>
-    <a href="/" class="btn-primary" style="text-decoration:none;">+ New Determination</a>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <a href="/history/export/csv{% if query %}?q={{ query | urlencode }}{% endif %}"
+         class="btn-export" title="Download as spreadsheet">
+        ⬇ Export{% if query %} Results{% else %} All{% endif %} (.csv)
+      </a>
+      <a href="/" class="btn-primary" style="text-decoration:none;">+ New Determination</a>
+    </div>
   </div>
 
   <!-- Search -->

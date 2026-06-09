@@ -1,6 +1,8 @@
 import os
+import csv
+import io
 from fastapi import FastAPI, Request, Form, HTTPException
-from fastapi.responses import HTMLResponse, Response, RedirectResponse
+from fastapi.responses import HTMLResponse, Response, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from datetime import date
@@ -222,3 +224,35 @@ async def history_download_notice(record_id: int):
 async def history_delete(record_id: int):
     delete_determination(record_id)
     return RedirectResponse(url="/history", status_code=303)
+
+
+@app.get("/history/export/csv")
+async def export_csv(q: str = ""):
+    if q.strip():
+        records = search_determinations(q.strip())
+        filename = f"flood_determinations_search.csv"
+    else:
+        records = list_determinations(limit=10000)
+        filename = f"flood_determinations_all.csv"
+
+    columns = [
+        "id", "determination_date", "loan_id", "borrower_name", "lender_name",
+        "property_address", "matched_address", "lat", "lon",
+        "flood_zone", "flood_zone_description", "sfha_status", "insurance_required",
+        "panel_number", "panel_effective_date", "community_number", "community_name",
+        "created_at",
+    ]
+
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    for r in records:
+        writer.writerow(r)
+
+    csv_bytes = output.getvalue().encode("utf-8-sig")
+
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
