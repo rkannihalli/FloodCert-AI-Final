@@ -1,19 +1,23 @@
 import os
-import json
-import httpx
 from fastapi import FastAPI, Request, Form, HTTPException
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from datetime import date
 from pdf_generator import generate_flood_certificate_pdf, generate_borrower_notice_pdf
 from fema_lookup import geocode_address, query_fema_nfhl, determine_flood_info
+from db import init_db, save_determination, get_determination, search_determinations, list_determinations, delete_determination
 
 app = FastAPI(title="FEMA Flood Certificate Generator")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+
+
+@app.on_event("startup")
+async def startup():
+    init_db()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -30,7 +34,6 @@ async def generate(
     lender_name: str = Form(...),
 ):
     errors = []
-
     if not property_address.strip():
         errors.append("Property address is required.")
     if not loan_id.strip():
@@ -88,10 +91,17 @@ async def generate(
         "determination_date_iso": date.today().isoformat(),
     }
 
+    record_id = save_determination(certificate_data)
+
     return templates.TemplateResponse("result.html", {
         "request": request,
         "data": certificate_data,
+        "record_id": record_id,
     })
+
+
+def _build_data_from_form(**kwargs) -> dict:
+    return {k: v for k, v in kwargs.items()}
 
 
 @app.post("/download/certificate")
@@ -114,25 +124,7 @@ async def download_certificate(
     determination_date: str = Form(...),
     determination_date_iso: str = Form(...),
 ):
-    data = {
-        "property_address": property_address,
-        "matched_address": matched_address,
-        "loan_id": loan_id,
-        "borrower_name": borrower_name,
-        "lender_name": lender_name,
-        "lat": lat,
-        "lon": lon,
-        "flood_zone": flood_zone,
-        "flood_zone_description": flood_zone_description,
-        "sfha_status": sfha_status,
-        "insurance_required": insurance_required,
-        "panel_number": panel_number,
-        "panel_effective_date": panel_effective_date,
-        "community_number": community_number,
-        "community_name": community_name,
-        "determination_date": determination_date,
-        "determination_date_iso": determination_date_iso,
-    }
+    data = dict(locals())
     pdf_bytes = generate_flood_certificate_pdf(data)
     filename = f"flood_certificate_{loan_id}.pdf".replace(" ", "_")
     return Response(
@@ -162,25 +154,7 @@ async def download_notice(
     determination_date: str = Form(...),
     determination_date_iso: str = Form(...),
 ):
-    data = {
-        "property_address": property_address,
-        "matched_address": matched_address,
-        "loan_id": loan_id,
-        "borrower_name": borrower_name,
-        "lender_name": lender_name,
-        "lat": lat,
-        "lon": lon,
-        "flood_zone": flood_zone,
-        "flood_zone_description": flood_zone_description,
-        "sfha_status": sfha_status,
-        "insurance_required": insurance_required,
-        "panel_number": panel_number,
-        "panel_effective_date": panel_effective_date,
-        "community_number": community_number,
-        "community_name": community_name,
-        "determination_date": determination_date,
-        "determination_date_iso": determination_date_iso,
-    }
+    data = dict(locals())
     pdf_bytes = generate_borrower_notice_pdf(data)
     filename = f"borrower_notice_{loan_id}.pdf".replace(" ", "_")
     return Response(
@@ -188,3 +162,63 @@ async def download_notice(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@app.get("/history", response_class=HTMLResponse)
+async def history(request: Request, q: str = ""):
+    if q.strip():
+        records = search_determinations(q.strip())
+    else:
+        records = list_determinations(50)
+    return templates.TemplateResponse("history.html", {
+        "request": request,
+        "records": records,
+        "query": q,
+    })
+
+
+@app.get("/history/{record_id}", response_class=HTMLResponse)
+async def history_detail(request: Request, record_id: int):
+    record = get_determination(record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    return templates.TemplateResponse("result.html", {
+        "request": request,
+        "data": record,
+        "record_id": record_id,
+        "from_history": True,
+    })
+
+
+@app.post("/history/{record_id}/download/certificate")
+async def history_download_certificate(record_id: int):
+    record = get_determination(record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    pdf_bytes = generate_flood_certificate_pdf(record)
+    filename = f"flood_certificate_{record['loan_id']}.pdf".replace(" ", "_")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/history/{record_id}/download/notice")
+async def history_download_notice(record_id: int):
+    record = get_determination(record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    pdf_bytes = generate_borrower_notice_pdf(record)
+    filename = f"borrower_notice_{record['loan_id']}.pdf".replace(" ", "_")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/history/{record_id}/delete")
+async def history_delete(record_id: int):
+    delete_determination(record_id)
+    return RedirectResponse(url="/history", status_code=303)

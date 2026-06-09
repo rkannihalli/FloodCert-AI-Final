@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Determination History — FEMA Flood Certificate Generator</title>
+  <link rel="stylesheet" href="/static/css/main.css" />
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <div class="header-seal">🌊</div>
+    <div class="header-text">
+      <h1>FEMA Flood Certificate Generator</h1>
+      <p>Standard Flood Hazard Determination — National Flood Hazard Layer</p>
+    </div>
+    <span class="header-badge">Official Use Only</span>
+  </div>
+</header>
+
+<main class="main">
+
+  <div class="history-header">
+    <div>
+      <h2>Determination History</h2>
+      <p>All saved flood hazard determinations — search by loan ID, borrower, or address.</p>
+    </div>
+    <a href="/" class="btn-primary" style="text-decoration:none;">+ New Determination</a>
+  </div>
+
+  <!-- Search -->
+  <form method="GET" action="/history" class="search-bar">
+    <input
+      type="text"
+      name="q"
+      value="{{ query }}"
+      placeholder="Search by loan ID, borrower name, or address…"
+      class="search-input"
+    />
+    <button type="submit" class="btn-primary">Search</button>
+    {% if query %}
+    <a href="/history" class="btn-secondary">Clear</a>
+    {% endif %}
+  </form>
+
+  {% if records %}
+  <div class="history-table-wrap">
+    <table class="history-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Date</th>
+          <th>Loan ID</th>
+          <th>Borrower</th>
+          <th>Property Address</th>
+          <th>Zone</th>
+          <th>SFHA</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in records %}
+        {% set sfha = r.sfha_status == 'Yes' %}
+        {% set undetermined = r.flood_zone == 'UNDETERMINED' %}
+        <tr>
+          <td class="hist-id">{{ r.id }}</td>
+          <td class="hist-date">{{ r.determination_date }}</td>
+          <td class="hist-loan">
+            <a href="/history/{{ r.id }}" class="loan-link">{{ r.loan_id }}</a>
+          </td>
+          <td>{{ r.borrower_name }}</td>
+          <td class="hist-addr">{{ r.matched_address or r.property_address }}</td>
+          <td>
+            <span class="zone-chip {{ 'chip-sfha' if sfha else ('chip-undetermined' if undetermined else 'chip-ok') }}">
+              {{ r.flood_zone }}
+            </span>
+          </td>
+          <td>
+            <span class="sfha-tag {{ 'sfha-yes' if sfha else 'sfha-no' }}">
+              {{ r.sfha_status }}
+            </span>
+          </td>
+          <td class="hist-actions">
+            <a href="/history/{{ r.id }}" class="action-btn view-btn" title="View details">👁 View</a>
+            <form method="POST" action="/history/{{ r.id }}/download/certificate" target="_blank" style="display:inline">
+              <button type="submit" class="action-btn pdf-btn" title="Download certificate PDF">📄</button>
+            </form>
+            <form method="POST" action="/history/{{ r.id }}/download/notice" target="_blank" style="display:inline">
+              <button type="submit" class="action-btn pdf-btn" title="Download borrower notice PDF">📋</button>
+            </form>
+            <form method="POST" action="/history/{{ r.id }}/delete"
+                  onsubmit="return confirm('Delete this determination record?')" style="display:inline">
+              <button type="submit" class="action-btn del-btn" title="Delete record">🗑</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <p class="history-count">
+    {% if query %}
+      {{ records|length }} result(s) for "{{ query }}"
+    {% else %}
+      Showing {{ records|length }} most recent determination(s)
+    {% endif %}
+  </p>
+
+  {% else %}
+  <div class="history-empty">
+    <div class="empty-icon">📂</div>
+    {% if query %}
+      <p>No determinations found matching <strong>"{{ query }}"</strong>.</p>
+      <a href="/history" class="btn-secondary">Clear search</a>
+    {% else %}
+      <p>No determinations have been saved yet.</p>
+      <a href="/" class="btn-primary" style="text-decoration:none;">Run your first determination</a>
+    {% endif %}
+  </div>
+  {% endif %}
+
+</main>
+
+</body>
+</html>

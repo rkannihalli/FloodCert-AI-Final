@@ -15,14 +15,19 @@
       <h1>FEMA Flood Certificate Generator</h1>
       <p>Standard Flood Hazard Determination — National Flood Hazard Layer</p>
     </div>
-    <span class="header-badge">Official Use Only</span>
+    <a href="/history" class="header-history-link">📂 History</a>
   </div>
 </header>
 
 <main class="main">
 
   <div class="result-header">
-    <h2>Flood Hazard Determination Result</h2>
+    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;">
+      <h2>Flood Hazard Determination Result</h2>
+      {% if record_id %}
+      <a href="/history/{{ record_id }}" class="saved-badge">✅ Saved — Record #{{ record_id }}</a>
+      {% endif %}
+    </div>
     <p>Determined on {{ data.determination_date }} &nbsp;|&nbsp; Loan ID: <strong>{{ data.loan_id }}</strong></p>
   </div>
 
@@ -172,8 +177,9 @@
     <strong>Disclaimer:</strong> This determination is based on publicly available FEMA National Flood Hazard Layer (NFHL) data and the US Census Geocoder. Results are for informational purposes and should be verified against the official FEMA Flood Insurance Rate Map (FIRM) for the subject property. This tool is not affiliated with FEMA. Lenders and loan officers should confirm determinations using a certified flood determination service for regulatory compliance.
   </div>
 
-  <div style="margin-top:18px;">
+  <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;">
     <a href="/" class="btn-secondary">← New Determination</a>
+    <a href="/history" class="btn-secondary">📂 View History</a>
   </div>
 
 </main>
