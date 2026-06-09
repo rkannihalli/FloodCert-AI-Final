@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Flood Determination Result — {{ data.loan_id }}</title>
   <link rel="stylesheet" href="/static/css/main.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
 
@@ -122,6 +124,19 @@
 
   </div>
 
+  <!-- Map -->
+  <div class="map-card">
+    <div class="map-card-header">
+      <span>📍 Property Location</span>
+      <span class="map-coords">{{ "%.5f"|format(data.lat|float) }}, {{ "%.5f"|format(data.lon|float) }}</span>
+    </div>
+    <div id="propertyMap" class="map-container"></div>
+    <div class="map-footer">
+      Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors &nbsp;|&nbsp;
+      Flood zone layer: FEMA National Flood Hazard Layer via ArcGIS Online
+    </div>
+  </div>
+
   <!-- Download section — uses two separate forms with all fields as hidden inputs -->
   <div class="downloads-section">
     <h3>Download Documents</h3>
@@ -185,5 +200,59 @@
 
 </main>
 
+<script>
+(function () {
+  var lat  = {{ data.lat | float }};
+  var lon  = {{ data.lon | float }};
+  var zone = {{ data.flood_zone | tojson }};
+  var sfha = {{ (data.sfha_status == 'Yes') | tojson }};
+  var addr = {{ data.matched_address | tojson }};
+  var desc = {{ data.flood_zone_description | tojson }};
+  var ins  = {{ data.insurance_required | tojson }};
+
+  var map = L.map('propertyMap', { zoomControl: true, scrollWheelZoom: false })
+              .setView([lat, lon], 15);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
+
+  // Color-coded circle marker
+  var color = sfha ? '#c0392b' : (zone === 'UNDETERMINED' ? '#e67e22' : '#1a7a4a');
+  var marker = L.circleMarker([lat, lon], {
+    radius: 10,
+    fillColor: color,
+    color: '#fff',
+    weight: 2,
+    opacity: 1,
+    fillOpacity: 0.9
+  }).addTo(map);
+
+  marker.bindPopup(
+    '<div style="font-family:sans-serif;min-width:200px;">' +
+    '<strong style="color:#003366;font-size:0.95rem;">' + addr + '</strong><br/>' +
+    '<div style="margin-top:6px;">' +
+    '<span style="background:' + color + ';color:#fff;padding:2px 8px;border-radius:10px;font-size:0.8rem;font-weight:700;">' +
+      'Zone ' + zone +
+    '</span>' +
+    '</div>' +
+    '<div style="margin-top:6px;font-size:0.8rem;color:#5a6470;">' + desc + '</div>' +
+    '<div style="margin-top:5px;font-size:0.78rem;font-weight:600;color:' + color + ';">' + ins + '</div>' +
+    '</div>',
+    { maxWidth: 280 }
+  ).openPopup();
+
+  // FEMA NFHL WMS overlay
+  L.tileLayer.wms('https://hazards.fema.gov/arcgis/services/public/NFHL/MapServer/WMSServer', {
+    layers: '28',
+    format: 'image/png',
+    transparent: true,
+    opacity: 0.45,
+    attribution: 'FEMA NFHL',
+    errorTileUrl: ''
+  }).addTo(map);
+})();
+</script>
 </body>
 </html>
