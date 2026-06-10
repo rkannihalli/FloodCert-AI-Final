@@ -66,6 +66,65 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
         return {}
 
 
+# State FIPS → (full name, abbreviation) — used to derive state from DFIRM_ID prefix
+STATE_FIPS: dict[str, tuple[str, str]] = {
+    "01": ("Alabama", "AL"), "02": ("Alaska", "AK"), "04": ("Arizona", "AZ"),
+    "05": ("Arkansas", "AR"), "06": ("California", "CA"), "08": ("Colorado", "CO"),
+    "09": ("Connecticut", "CT"), "10": ("Delaware", "DE"), "11": ("District of Columbia", "DC"),
+    "12": ("Florida", "FL"), "13": ("Georgia", "GA"), "15": ("Hawaii", "HI"),
+    "16": ("Idaho", "ID"), "17": ("Illinois", "IL"), "18": ("Indiana", "IN"),
+    "19": ("Iowa", "IA"), "20": ("Kansas", "KS"), "21": ("Kentucky", "KY"),
+    "22": ("Louisiana", "LA"), "23": ("Maine", "ME"), "24": ("Maryland", "MD"),
+    "25": ("Massachusetts", "MA"), "26": ("Michigan", "MI"), "27": ("Minnesota", "MN"),
+    "28": ("Mississippi", "MS"), "29": ("Missouri", "MO"), "30": ("Montana", "MT"),
+    "31": ("Nebraska", "NE"), "32": ("Nevada", "NV"), "33": ("New Hampshire", "NH"),
+    "34": ("New Jersey", "NJ"), "35": ("New Mexico", "NM"), "36": ("New York", "NY"),
+    "37": ("North Carolina", "NC"), "38": ("North Dakota", "ND"), "39": ("Ohio", "OH"),
+    "40": ("Oklahoma", "OK"), "41": ("Oregon", "OR"), "42": ("Pennsylvania", "PA"),
+    "44": ("Rhode Island", "RI"), "45": ("South Carolina", "SC"), "46": ("South Dakota", "SD"),
+    "47": ("Tennessee", "TN"), "48": ("Texas", "TX"), "49": ("Utah", "UT"),
+    "50": ("Vermont", "VT"), "51": ("Virginia", "VA"), "53": ("Washington", "WA"),
+    "54": ("West Virginia", "WV"), "55": ("Wisconsin", "WI"), "56": ("Wyoming", "WY"),
+    "60": ("American Samoa", "AS"), "66": ("Guam", "GU"), "69": ("Northern Mariana Islands", "MP"),
+    "72": ("Puerto Rico", "PR"), "78": ("U.S. Virgin Islands", "VI"),
+}
+
+
+def nfip_community_info(community_number: str, lat: float = 0.0, lon: float = 0.0) -> dict:
+    """Derive NFIP community context from the stored DFIRM community number.
+
+    FEMA does not expose a public NFIP community-status API; the authoritative
+    source is the Community Status Book (CSB) published per state.  This function
+    extracts the state from the DFIRM_ID prefix, builds direct links to the
+    relevant FEMA pages, and returns all the structured data the template needs.
+    """
+    raw = (community_number or "").strip()
+    valid = raw not in ("", "0", "N/A", "Not Available")
+
+    state_fips = raw[:2] if valid else ""
+    state_name, state_abbr = STATE_FIPS.get(state_fips, ("", ""))
+
+    csb_url = (
+        f"https://www.fema.gov/cis/{state_abbr}.html"
+        if state_abbr else
+        "https://www.fema.gov/flood-insurance/work-with-nfip/community-status"
+    )
+    msc_url = (
+        f"https://msc.fema.gov/portal/search#lonlat={lon},{lat}"
+        if lat and lon else
+        "https://msc.fema.gov/portal/home"
+    )
+
+    return {
+        "community_number": raw if valid else "Not Available",
+        "state_name": state_name,
+        "state_abbr": state_abbr,
+        "csb_url": csb_url,
+        "msc_url": msc_url,
+        "has_state": bool(state_abbr),
+    }
+
+
 FLOOD_ZONE_DESCRIPTIONS = {
     "A": "Special Flood Hazard Area — Zone A (1% annual chance flood, no BFE determined)",
     "AE": "Special Flood Hazard Area — Zone AE (1% annual chance flood, BFE determined)",

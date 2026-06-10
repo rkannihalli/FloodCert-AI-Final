@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from datetime import date
 from pdf_generator import generate_flood_certificate_pdf, generate_borrower_notice_pdf, generate_batch_report_pdf
-from fema_lookup import geocode_address, query_fema_nfhl, determine_flood_info
+from fema_lookup import geocode_address, query_fema_nfhl, determine_flood_info, nfip_community_info
 from db import (
     init_db, save_determination, get_determination,
     search_determinations, list_determinations, delete_determination,
@@ -113,10 +113,17 @@ async def generate(
 
     record_id = save_determination(certificate_data)
 
+    comm_info = nfip_community_info(
+        certificate_data["community_number"],
+        lat=certificate_data["lat"],
+        lon=certificate_data["lon"],
+    )
+
     return templates.TemplateResponse("result.html", {
         "request": request,
         "data": certificate_data,
         "record_id": record_id,
+        "comm": comm_info,
     })
 
 
@@ -199,6 +206,16 @@ async def history(request: Request, q: str = ""):
         "flagged_count": count_flagged(),
         "monitored_count": len(list_monitored()),
     })
+
+
+@app.get("/api/community/{community_number}")
+async def community_status_api(
+    community_number: str,
+    lat: float = 0.0,
+    lon: float = 0.0,
+):
+    from fastapi.responses import JSONResponse
+    return JSONResponse(nfip_community_info(community_number, lat=lat, lon=lon))
 
 
 @app.post("/history/check-all")
@@ -285,11 +302,17 @@ async def history_detail(request: Request, record_id: int):
     record = get_determination(record_id)
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
+    comm_info = nfip_community_info(
+        record.get("community_number", ""),
+        lat=record.get("lat", 0.0),
+        lon=record.get("lon", 0.0),
+    )
     return templates.TemplateResponse("result.html", {
         "request": request,
         "data": record,
         "record_id": record_id,
         "from_history": True,
+        "comm": comm_info,
     })
 
 

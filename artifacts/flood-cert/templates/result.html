@@ -144,6 +144,60 @@
 
   </div>
 
+  <!-- NFIP Community Participation Status -->
+  <div class="comm-card">
+    <div class="comm-card-header">
+      🏛 NFIP Community Participation Status
+    </div>
+    <div class="comm-card-body">
+      <div class="comm-row">
+        <span class="comm-badge comm-regular">✓ FIRM Coverage Area</span>
+        {% if comm.has_state %}
+        <strong class="comm-name">{{ comm.state_name }}</strong>
+        {% endif %}
+      </div>
+
+      <div class="comm-details">
+        <div class="comm-detail-row">
+          <span class="comm-detail-label">DFIRM Community ID</span>
+          <span>{{ comm.community_number }}</span>
+        </div>
+        {% if comm.has_state %}
+        <div class="comm-detail-row">
+          <span class="comm-detail-label">State Jurisdiction</span>
+          <span>{{ comm.state_name }} ({{ comm.state_abbr }})</span>
+        </div>
+        {% endif %}
+        <div class="comm-detail-row">
+          <span class="comm-detail-label">FIRM Panel Reference</span>
+          <span>{{ data.panel_number }}</span>
+        </div>
+        <div class="comm-detail-row">
+          <span class="comm-detail-label">Study Type</span>
+          <span>{{ data.flood_zone_description[:40] }}…</span>
+        </div>
+      </div>
+
+      <div class="comm-alert-bar comm-alert-good" style="margin-top:12px;">
+        For official NFIP participation status, flood insurance availability, and suspension history,
+        consult the <strong>FEMA Community Status Book</strong> — the authoritative FEMA reference used
+        by lenders and servicers for mandatory purchase compliance.
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;">
+        <a href="{{ comm.csb_url }}" target="_blank" rel="noopener" class="comm-ext-btn">
+          📋 Community Status Book{% if comm.has_state %} — {{ comm.state_abbr }}{% endif %}
+        </a>
+        <a href="{{ comm.msc_url }}" target="_blank" rel="noopener" class="comm-ext-btn">
+          🗺 FEMA Map Service Center
+        </a>
+        <a href="https://www.fema.gov/flood-insurance/work-with-nfip/community-status" target="_blank" rel="noopener" class="comm-ext-btn">
+          🏛 NFIP Program Info
+        </a>
+      </div>
+    </div>
+  </div>
+
   <!-- Map -->
   <div class="map-card">
     <div class="map-card-header">

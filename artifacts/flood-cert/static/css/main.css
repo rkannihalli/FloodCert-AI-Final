@@ -715,6 +715,122 @@ input[type="text"]::placeholder {
 }
 .saved-badge:hover { background: #c8ecd9; }
 
+/* ── NFIP Community Status Card ── */
+.comm-card {
+  background: var(--white);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+.comm-card-header {
+  background: var(--blue-light);
+  border-bottom: 2px solid var(--blue);
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--navy);
+}
+.comm-loading {
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--gray-400);
+  font-style: italic;
+}
+.comm-card-body {
+  padding: 14px 18px;
+}
+.comm-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.comm-name {
+  font-size: 0.92rem;
+  color: var(--navy);
+}
+.comm-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.comm-regular      { background: var(--green-light); color: var(--green); border: 1.5px solid var(--green); }
+.comm-emergency    { background: #fff8ed; color: #b35a00; border: 1.5px solid #f0a960; }
+.comm-suspended    { background: #fde8e6; color: var(--red); border: 1.5px solid var(--red); }
+.comm-unknown      { background: var(--gray-100); color: var(--gray-600); border: 1.5px solid var(--gray-200); }
+
+.comm-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px 20px;
+  margin-top: 6px;
+}
+.comm-detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.comm-detail-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--gray-400);
+}
+.comm-detail-row span:last-child {
+  font-size: 0.85rem;
+  color: var(--navy);
+  font-weight: 500;
+}
+.comm-alert-bar {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 0.83rem;
+  line-height: 1.5;
+  border-left: 4px solid;
+}
+.comm-alert-suspended {
+  background: #fdf0ef;
+  color: #6a1a14;
+  border-color: var(--red);
+}
+.comm-alert-emergency {
+  background: #fff8ed;
+  color: #6b3a00;
+  border-color: #e67e22;
+}
+.comm-alert-good {
+  background: var(--green-light);
+  color: #1a4030;
+  border-color: var(--green);
+}
+.comm-ext-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 14px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: var(--blue-light);
+  color: var(--blue);
+  border: 1.5px solid var(--blue);
+  text-decoration: none;
+  transition: background 0.15s;
+}
+.comm-ext-btn:hover { background: #d8eafc; }
+
 /* ── Life-of-Loan Monitoring ── */
 .monitor-btn {
   background: var(--gray-100);
