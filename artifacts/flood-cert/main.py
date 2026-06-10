@@ -65,6 +65,19 @@ async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
+@app.post("/geocode")
+async def geocode_endpoint(request: Request):
+    from fastapi.responses import JSONResponse
+    body = await request.json()
+    address = (body.get("address") or "").strip()
+    if not address:
+        return JSONResponse({"error": "address required"}, status_code=400)
+    result = await geocode_address(address)
+    if not result:
+        return JSONResponse({"error": "Could not geocode address"}, status_code=422)
+    return JSONResponse(result)
+
+
 @app.post("/generate", response_class=HTMLResponse)
 async def generate(
     request: Request,
@@ -73,6 +86,17 @@ async def generate(
     borrower_name: str = Form(...),
     lender_name: str = Form(...),
     lender_email: str = Form(default=""),
+    matched_address: str = Form(default=""),
+    lat: str = Form(default=""),
+    lon: str = Form(default=""),
+    flood_zone: str = Form(default=""),
+    flood_zone_description: str = Form(default=""),
+    sfha_status: str = Form(default=""),
+    insurance_required: str = Form(default=""),
+    panel_number: str = Form(default=""),
+    panel_effective_date: str = Form(default=""),
+    community_number: str = Form(default=""),
+    community_name: str = Form(default=""),
 ):
     errors = []
     if not property_address.strip():
@@ -106,36 +130,55 @@ async def generate(
             }
         })
 
-    geo_result = await geocode_address(property_address)
-    if not geo_result:
-        return templates.TemplateResponse("index.html", {
-            "request": request,
-            "errors": ["Could not geocode the provided address. Please check the address and try again."],
-            "form": {
-                "property_address": property_address,
-                "loan_id": loan_id,
-                "borrower_name": borrower_name,
-                "lender_name": lender_name,
-                "lender_email": lender_email,
-            }
-        })
+    precomputed = lat.strip() and lon.strip() and flood_zone.strip()
 
-    zone_data, community_data, firm_data = await asyncio.gather(
-        query_fema_nfhl(geo_result["lat"], geo_result["lon"]),
-        query_nfip_community(geo_result["lat"], geo_result["lon"]),
-        query_firm_panel(geo_result["lat"], geo_result["lon"]),
-    )
-    flood_info = determine_flood_info({**zone_data, **community_data, **firm_data})
+    if precomputed:
+        flood_info = {
+            "flood_zone": flood_zone,
+            "flood_zone_description": flood_zone_description,
+            "sfha_status": sfha_status,
+            "insurance_required": insurance_required,
+            "panel_number": panel_number,
+            "panel_effective_date": panel_effective_date,
+            "community_number": community_number,
+            "community_name": community_name,
+        }
+        geo_lat = float(lat)
+        geo_lon = float(lon)
+        geo_matched = matched_address or property_address
+    else:
+        geo_result = await geocode_address(property_address)
+        if not geo_result:
+            return templates.TemplateResponse("index.html", {
+                "request": request,
+                "errors": ["Could not geocode the provided address. Please check the address and try again."],
+                "form": {
+                    "property_address": property_address,
+                    "loan_id": loan_id,
+                    "borrower_name": borrower_name,
+                    "lender_name": lender_name,
+                    "lender_email": lender_email,
+                }
+            })
+        zone_data, community_data, firm_data = await asyncio.gather(
+            query_fema_nfhl(geo_result["lat"], geo_result["lon"]),
+            query_nfip_community(geo_result["lat"], geo_result["lon"]),
+            query_firm_panel(geo_result["lat"], geo_result["lon"]),
+        )
+        flood_info = determine_flood_info({**zone_data, **community_data, **firm_data})
+        geo_lat = geo_result["lat"]
+        geo_lon = geo_result["lon"]
+        geo_matched = geo_result.get("matched_address", property_address)
 
     certificate_data = {
         "property_address": property_address,
-        "matched_address": geo_result.get("matched_address", property_address),
+        "matched_address": geo_matched,
         "loan_id": loan_id,
         "borrower_name": borrower_name,
         "lender_name": lender_name,
         "lender_email": lender_email.strip(),
-        "lat": geo_result["lat"],
-        "lon": geo_result["lon"],
+        "lat": geo_lat,
+        "lon": geo_lon,
         "flood_zone": flood_info["flood_zone"],
         "flood_zone_description": flood_info["flood_zone_description"],
         "sfha_status": flood_info["sfha_status"],
