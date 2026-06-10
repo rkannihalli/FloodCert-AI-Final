@@ -434,6 +434,97 @@ body {
   padding-bottom: 4pt;
 }
 
+/* ── SFHDF Sections C / D / E ── */
+.sfhdf-section-hdr {
+  font-size: 8.5pt;
+  font-weight: bold;
+  background: #e8e8e8;
+  border: 1.5pt solid #333;
+  padding: 4pt 7pt;
+}
+
+.sfhdf-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1.5pt solid #333;
+  border-top: none;
+}
+
+.sfhdf-table td {
+  padding: 4pt 6pt;
+  border-bottom: 0.5pt solid #ccc;
+  font-size: 8.5pt;
+  vertical-align: top;
+}
+
+.sfhdf-table tr:last-child td {
+  border-bottom: none;
+}
+
+.sfhdf-num {
+  width: 14pt;
+  font-weight: bold;
+  text-align: right;
+  padding-right: 4pt;
+  white-space: nowrap;
+}
+
+.sfhdf-chk-cell {
+  width: 16pt;
+  text-align: center;
+  padding-top: 5pt;
+}
+
+.sfhdf-chk {
+  display: inline-block;
+  width: 9pt;
+  height: 9pt;
+  border: 1pt solid #333;
+  text-align: center;
+  line-height: 9pt;
+  font-size: 8pt;
+  font-weight: bold;
+  vertical-align: middle;
+}
+
+.sfhdf-text {
+  flex: 1;
+  font-size: 8.5pt;
+  line-height: 1.45;
+}
+
+.sfhdf-det-q {
+  font-size: 8.5pt;
+  font-weight: bold;
+  padding: 5pt 7pt;
+  width: 70%;
+}
+
+.sfhdf-det-ans {
+  font-size: 8.5pt;
+  padding: 5pt 7pt;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.sfhdf-det-note {
+  font-size: 8.5pt;
+  padding: 4pt 7pt;
+  line-height: 1.45;
+  color: #333;
+}
+
+.sfhdf-comments {
+  border: 1.5pt solid #333;
+  border-top: none;
+  padding: 10pt 8pt;
+  min-height: 50pt;
+  font-size: 8.5pt;
+  font-family: "Courier New", Courier, monospace;
+  line-height: 1.7;
+  letter-spacing: 0.01em;
+}
+
 /* ── Map Page ── */
 .map-page {
   page-break-before: always;

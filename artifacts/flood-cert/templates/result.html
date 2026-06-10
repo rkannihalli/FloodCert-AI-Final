@@ -83,6 +83,12 @@
           <span class="detail-label">Lender</span>
           <span class="detail-value">{{ data.lender_name }}</span>
         </div>
+        {% if data.lender_address %}
+        <div class="detail-row">
+          <span class="detail-label">Lender Address</span>
+          <span class="detail-value">{{ data.lender_address }}</span>
+        </div>
+        {% endif %}
         {% if data.lender_email %}
         <div class="detail-row">
           <span class="detail-label">Lender Email</span>
@@ -234,6 +240,7 @@
         <input type="hidden" name="loan_id"               value="{{ data.loan_id }}" />
         <input type="hidden" name="borrower_name"         value="{{ data.borrower_name }}" />
         <input type="hidden" name="lender_name"           value="{{ data.lender_name }}" />
+        <input type="hidden" name="lender_address"        value="{{ data.lender_address or '' }}" />
         <input type="hidden" name="lender_email"          value="{{ data.lender_email or '' }}" />
         <input type="hidden" name="lat"                   value="{{ data.lat }}" />
         <input type="hidden" name="lon"                   value="{{ data.lon }}" />
@@ -257,6 +264,7 @@
         <input type="hidden" name="loan_id"               value="{{ data.loan_id }}" />
         <input type="hidden" name="borrower_name"         value="{{ data.borrower_name }}" />
         <input type="hidden" name="lender_name"           value="{{ data.lender_name }}" />
+        <input type="hidden" name="lender_address"        value="{{ data.lender_address or '' }}" />
         <input type="hidden" name="lender_email"          value="{{ data.lender_email or '' }}" />
         <input type="hidden" name="lat"                   value="{{ data.lat }}" />
         <input type="hidden" name="lon"                   value="{{ data.lon }}" />

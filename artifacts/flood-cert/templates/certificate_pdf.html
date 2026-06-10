@@ -56,9 +56,15 @@
       <td class="value highlight">{{ loan_id }}</td>
     </tr>
     <tr>
-      <td class="label">Lender / Institution</td>
+      <td class="label">Lender / Servicer Name</td>
       <td class="value" colspan="3">{{ lender_name }}</td>
     </tr>
+    {% if lender_address %}
+    <tr>
+      <td class="label">Lender / Servicer Address</td>
+      <td class="value" colspan="3">{{ lender_address }}</td>
+    </tr>
+    {% endif %}
     <tr>
       <td class="label">Property Address</td>
       <td class="value" colspan="3">{{ property_address }}</td>
@@ -122,14 +128,76 @@
   </table>
 </div>
 
-<!-- Section C: Certification -->
-<div class="cert-box">
-  <p>
-    <strong>Certification:</strong> This determination has been made using the current effective FEMA National Flood Hazard Layer (NFHL) and the US Census Bureau Geocoder. The NFHL is the digital version of the official Flood Insurance Rate Maps (FIRMs) published by the Federal Emergency Management Agency (FEMA). This form meets the requirements of the National Flood Insurance Program as set forth in the Flood Disaster Protection Act of 1973, as amended by the National Flood Insurance Reform Act of 1994 (42 U.S.C. 4104b).
-  </p>
-  <p>
-    If the subject property is located in a Special Flood Hazard Area (SFHA), the lender is required to notify the borrower that federal flood insurance may be available and, in certain cases, required as a condition of the loan. The mandatory purchase requirement applies to loans made by federally regulated lenders for properties located in an SFHA that participates in the National Flood Insurance Program (NFIP).
-  </p>
+{% set nfip_ok = panel_number and panel_number != 'Not Available' %}
+{% set is_sfha = sfha_status == 'Yes' %}
+
+<!-- Section C: Federal Flood Insurance Availability -->
+<div class="section sfhdf-section-c">
+  <div class="sfhdf-section-hdr">C. FEDERAL FLOOD INSURANCE AVAILABILITY <span style="font-weight:normal;">(Check all that apply.)</span></div>
+  <table class="sfhdf-table">
+    <tr>
+      <td class="sfhdf-num">1.</td>
+      <td class="sfhdf-chk-cell"><span class="sfhdf-chk">{% if nfip_ok %}&#10005;{% endif %}</span></td>
+      <td class="sfhdf-text">
+        Federal Flood Insurance is available (community participates in the NFIP).
+        &nbsp;&nbsp;
+        <span class="sfhdf-chk">{% if nfip_ok %}&#10005;{% endif %}</span>
+        <strong>Regular Program</strong>
+        &nbsp;&nbsp;&nbsp;
+        <span class="sfhdf-chk"></span>
+        Emergency Program of NFIP
+      </td>
+    </tr>
+    <tr>
+      <td class="sfhdf-num">2.</td>
+      <td class="sfhdf-chk-cell"><span class="sfhdf-chk">{% if not nfip_ok %}&#10005;{% endif %}</span></td>
+      <td class="sfhdf-text">Federal Flood Insurance is not available (community does not participate in the NFIP).</td>
+    </tr>
+    <tr>
+      <td class="sfhdf-num">3.</td>
+      <td class="sfhdf-chk-cell"><span class="sfhdf-chk"></span></td>
+      <td class="sfhdf-text">
+        Building/Mobile Home is in a Coastal Barrier Resources Area (CBRA) or Otherwise Protected Area (OPA). Federal Flood Insurance may not be available.<br />
+        <span style="padding-left:4pt;">CBRA/OPA Designation Date: ___________</span>
+      </td>
+    </tr>
+  </table>
+</div>
+
+<!-- Section D: Determination -->
+<div class="section sfhdf-section-d">
+  <div class="sfhdf-section-hdr">D. DETERMINATION</div>
+  <table class="sfhdf-table">
+    <tr>
+      <td class="sfhdf-det-q">
+        <strong>IS BUILDING/MOBILE HOME IN SPECIAL FLOOD HAZARD AREA (ZONES CONTAINING THE LETTERS "A" OR "V") ?</strong>
+      </td>
+      <td class="sfhdf-det-ans">
+        <span class="sfhdf-chk">{% if is_sfha %}&#10005;{% endif %}</span> <strong>YES</strong>
+        &nbsp;&nbsp;
+        <span class="sfhdf-chk">{% if not is_sfha %}&#10005;{% endif %}</span> <strong>NO</strong>
+      </td>
+    </tr>
+    <tr>
+      <td colspan="2" class="sfhdf-det-note">
+        If yes, flood insurance is required by the Flood Disaster Protection Act of 1973.<br />
+        If no, flood insurance is not required by the Flood Disaster Protection Act of 1973. Please note, the risk of flooding in this area is only reduced, not removed.
+      </td>
+    </tr>
+    <tr>
+      <td colspan="2" class="sfhdf-det-note" style="border-top:0.5pt solid #b0b8c4;">
+        This determination is based on examining the NFIP map, any Federal Emergency Management Agency revisions to it, and any other information needed to locate the building/mobile home on the NFIP map.
+      </td>
+    </tr>
+  </table>
+</div>
+
+<!-- Section E: Comments -->
+<div class="section sfhdf-section-e">
+  <div class="sfhdf-section-hdr">E. COMMENTS <span style="font-weight:normal;">(Optional)</span></div>
+  <div class="sfhdf-comments">
+    THIS FLOOD DETERMINATION IS PROVIDED TO THE LENDER PURSUANT TO THE FLOOD DISASTER PROTECTION ACT.&nbsp; IT SHOULD NOT BE USED FOR ANY OTHER PURPOSE.
+  </div>
 </div>
 
 <!-- Signature area -->

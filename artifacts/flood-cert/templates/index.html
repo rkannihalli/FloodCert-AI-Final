@@ -90,6 +90,17 @@
             />
           </div>
 
+          <div class="form-group full-width">
+            <label for="lender_address">Lender / Servicer Address <span style="font-weight:400;color:var(--gray-400);text-transform:none;">(optional)</span></label>
+            <input
+              type="text"
+              id="lender_address"
+              name="lender_address"
+              placeholder="e.g. 123 Main St, Suite 400, Chicago, IL 60601"
+              value="{{ form.lender_address if form else '' }}"
+            />
+          </div>
+
           <div class="form-group">
             <label for="lender_email">Lender Email <span style="font-weight:400;color:var(--gray-400);text-transform:none;">(optional — for sending the certificate)</span></label>
             <input
