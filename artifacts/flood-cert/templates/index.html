@@ -165,19 +165,34 @@ function hideLoading() {
   document.getElementById("loadingOverlay").classList.remove("active");
 }
 
-async function queryNFHL(layer, lat, lon, outFields) {
-  const params = new URLSearchParams({
-    geometry: `${lon},${lat}`,
-    geometryType: "esriGeometryPoint",
-    inSR: "4326",
-    spatialRel: "esriSpatialRelIntersects",
-    outFields,
-    returnGeometry: "false",
-    f: "json",
+function queryNFHL(layer, lat, lon, outFields) {
+  return new Promise((resolve, reject) => {
+    const cbName = `__fema_${layer}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+    const timeoutId = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timeout on NFHL layer ${layer}`));
+    }, 20000);
+    function cleanup() {
+      clearTimeout(timeoutId);
+      delete window[cbName];
+      if (script.parentNode) script.parentNode.removeChild(script);
+    }
+    window[cbName] = function(data) { cleanup(); resolve(data); };
+    const params = new URLSearchParams({
+      geometry: `${lon},${lat}`,
+      geometryType: "esriGeometryPoint",
+      inSR: "4326",
+      spatialRel: "esriSpatialRelIntersects",
+      outFields,
+      returnGeometry: "false",
+      f: "json",
+      callback: cbName,
+    });
+    const script = document.createElement("script");
+    script.src = `${NFHL_BASE}/${layer}/query?${params}`;
+    script.onerror = function() { cleanup(); reject(new Error(`Script load error layer ${layer}`)); };
+    document.head.appendChild(script);
   });
-  const resp = await fetch(`${NFHL_BASE}/${layer}/query?${params}`);
-  if (!resp.ok) throw new Error(`NFHL layer ${layer} HTTP ${resp.status}`);
-  return resp.json();
 }
 
 function formatEpochDate(ms) {
