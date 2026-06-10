@@ -17,12 +17,15 @@ def is_public(path: str) -> bool:
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    # bcrypt max is 72 bytes; truncate to avoid ValueError from passlib/bcrypt>=4
+    secret = password.encode("utf-8")[:72].decode("utf-8", errors="ignore")
+    return pwd_context.hash(secret)
 
 
 def verify_password(plain: str, hashed: str) -> bool:
     try:
-        return pwd_context.verify(plain, hashed)
+        secret = plain.encode("utf-8")[:72].decode("utf-8", errors="ignore")
+        return pwd_context.verify(secret, hashed)
     except Exception:
         return False
 
