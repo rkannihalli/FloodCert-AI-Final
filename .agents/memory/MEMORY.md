@@ -1,0 +1,1 @@
+- [FEMA NFHL server access](fema-nfhl-access.md) — hazards.fema.gov is TLS-blocked on Replit; use Esri Living Atlas instead for server-side flood zone queries.

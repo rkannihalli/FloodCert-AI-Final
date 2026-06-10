@@ -38,7 +38,7 @@
     </div>
 
     <div class="form-body">
-      <form method="POST" action="/generate" id="mainForm">
+      <form method="POST" action="/generate" id="mainForm" onsubmit="showLoading()">
 
         <div class="form-grid">
           <div class="form-group full-width">
@@ -103,19 +103,6 @@
           </div>
         </div>
 
-        <!-- Hidden fields populated by client-side FEMA lookup -->
-        <input type="hidden" name="matched_address" id="h_matched_address" />
-        <input type="hidden" name="lat" id="h_lat" />
-        <input type="hidden" name="lon" id="h_lon" />
-        <input type="hidden" name="flood_zone" id="h_flood_zone" />
-        <input type="hidden" name="flood_zone_description" id="h_flood_zone_description" />
-        <input type="hidden" name="sfha_status" id="h_sfha_status" />
-        <input type="hidden" name="insurance_required" id="h_insurance_required" />
-        <input type="hidden" name="panel_number" id="h_panel_number" />
-        <input type="hidden" name="panel_effective_date" id="h_panel_effective_date" />
-        <input type="hidden" name="community_number" id="h_community_number" />
-        <input type="hidden" name="community_name" id="h_community_name" />
-
         <div class="form-actions">
           <button type="submit" class="btn-primary" id="submitBtn">🔍 Generate Flood Determination</button>
           <button type="reset" class="btn-secondary">Clear Form</button>
@@ -124,7 +111,7 @@
       </form>
 
       <div class="info-notice">
-        <strong>Data Sources:</strong> This tool queries the US Census Bureau Geocoder for address validation and the FEMA National Flood Hazard Layer (NFHL) ArcGIS REST API for flood zone data. Results reflect the most current published FIRM panels. This tool uses only free, publicly available government APIs.
+        <strong>Data Sources:</strong> This tool queries the US Census Bureau Geocoder for address validation and the FEMA National Flood Hazard Layer (NFHL) via Esri Living Atlas for flood zone data. Results reflect the most current published FIRM panels. This tool uses only free, publicly available government APIs.
       </div>
     </div>
   </div>
@@ -133,233 +120,14 @@
 
 <div class="loading-overlay" id="loadingOverlay">
   <div class="spinner"></div>
-  <div class="loading-text" id="loadingText">Geocoding address…</div>
+  <div class="loading-text" id="loadingText">Geocoding address and querying FEMA flood data…</div>
 </div>
 
-<div id="debugBox" style="display:none;margin:1rem auto;max-width:860px;background:#f8f9fa;border:1px solid #ccc;border-radius:6px;padding:1rem;font-family:monospace;font-size:12px;white-space:pre-wrap;word-break:break-all;"></div>
-
 <script>
-const FLOOD_ZONE_DESCRIPTIONS = {
-  "A":    "Special Flood Hazard Area — Zone A (1% annual chance flood, no BFE determined)",
-  "AE":   "Special Flood Hazard Area — Zone AE (1% annual chance flood, BFE determined)",
-  "AH":   "Special Flood Hazard Area — Zone AH (1% annual chance shallow flooding, ponding)",
-  "AO":   "Special Flood Hazard Area — Zone AO (1% annual chance shallow flooding, sheet flow)",
-  "AR":   "Special Flood Hazard Area — Zone AR (being restored to BFE via flood control system)",
-  "A99":  "Special Flood Hazard Area — Zone A99 (protected by federal flood control system under construction)",
-  "V":    "Special Flood Hazard Area — Zone V (coastal flood with velocity/wave action hazard)",
-  "VE":   "Special Flood Hazard Area — Zone VE (coastal flood with velocity hazard, BFE determined)",
-  "B":    "Moderate Flood Hazard Area — Zone B (0.2% annual chance flood, between 100 and 500 year flood)",
-  "C":    "Minimal Flood Hazard Area — Zone C (outside 500-year floodplain)",
-  "D":    "Undetermined Flood Hazard — Zone D (possible but undetermined flood hazard)",
-  "X":    "Minimal Flood Hazard — Zone X (outside 500-year floodplain or protected by levee from 100-year flood)",
-  "X500": "Moderate Flood Hazard — Zone X (0.2% annual chance / 500-year floodplain)",
-};
-const SFHA_ZONES = new Set(["A","AE","AH","AO","AR","A99","V","VE"]);
-
-const NFHL_BASE = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer";
-
-function setLoading(msg) {
+function showLoading() {
   document.getElementById("loadingOverlay").classList.add("active");
-  document.getElementById("loadingText").textContent = msg;
+  document.getElementById("submitBtn").disabled = true;
 }
-
-function hideLoading() {
-  document.getElementById("loadingOverlay").classList.remove("active");
-}
-
-function queryNFHL(layer, lat, lon, outFields) {
-  return new Promise((resolve, reject) => {
-    const cbName = `__fema_${layer}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-    const timeoutId = setTimeout(() => {
-      cleanup();
-      reject(new Error(`Timeout on NFHL layer ${layer}`));
-    }, 20000);
-    function cleanup() {
-      clearTimeout(timeoutId);
-      delete window[cbName];
-      if (script.parentNode) script.parentNode.removeChild(script);
-    }
-    window[cbName] = function(data) { cleanup(); resolve(data); };
-    const params = new URLSearchParams({
-      geometry: `${lon},${lat}`,
-      geometryType: "esriGeometryPoint",
-      inSR: "4326",
-      spatialRel: "esriSpatialRelIntersects",
-      outFields,
-      returnGeometry: "false",
-      f: "json",
-      callback: cbName,
-    });
-    const script = document.createElement("script");
-    script.src = `${NFHL_BASE}/${layer}/query?${params}`;
-    script.onerror = function() { cleanup(); reject(new Error(`Script load error layer ${layer}`)); };
-    document.head.appendChild(script);
-  });
-}
-
-function formatEpochDate(ms) {
-  if (!ms || ms <= 0) return "";
-  const d = new Date(ms);
-  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(d.getUTCDate()).padStart(2, "0");
-  const yy = String(d.getUTCFullYear()).slice(-2);
-  return `${mm}/${dd}/${yy}`;
-}
-
-function computeFloodInfo(zone28, layer6, layer24) {
-  const floodZone  = (zone28.flood_zone  || "UNDETERMINED").toUpperCase();
-  const zoneSubty  = zone28.zone_subtype || "";
-  const inSfha     = zone28.in_sfha      || false;
-  const firmPanel  = layer24.firm_panel  || zone28.firm_panel || "";
-  const effDateRaw = layer24.eff_date    || zone28.eff_date;
-
-  const zoneKey   = (zoneSubty && zoneSubty.includes("0.2")) ? "X500" : floodZone;
-  const desc      = FLOOD_ZONE_DESCRIPTIONS[zoneKey] || `Flood Zone ${floodZone} — See FIRM panel for details`;
-  const sfhaBool  = typeof inSfha === "boolean" ? inSfha : SFHA_ZONES.has(floodZone);
-  const sfhaStat  = sfhaBool ? "Yes" : "No";
-  const insReq    = sfhaBool
-    ? "Yes — Federal mandatory purchase requirement applies"
-    : "No — Flood insurance is not federally required";
-
-  const commNum   = layer6.community_id  || (firmPanel.length >= 6 ? firmPanel.slice(0, 6) : "Not Available");
-  const commName  = layer6.community_name || (firmPanel ? "See Community FIRM" : "Not Available");
-  const panelNum  = firmPanel || "Not Available";
-
-  let panelDate = "See FIRM Panel";
-  if (typeof effDateRaw === "string" && effDateRaw) {
-    panelDate = effDateRaw;
-  } else if (typeof effDateRaw === "number" && effDateRaw > 0) {
-    panelDate = formatEpochDate(effDateRaw);
-  }
-
-  return { floodZone, desc, sfhaStat, insReq, commNum, commName, panelNum, panelDate };
-}
-
-const debugLog = [];
-function dbg(msg) {
-  debugLog.push(msg);
-  console.log("[FEMA]", msg);
-}
-function showDebug() {
-  const box = document.getElementById("debugBox");
-  box.style.display = "block";
-  box.textContent = debugLog.join("\n");
-}
-
-document.getElementById("mainForm").addEventListener("submit", async function(e) {
-  e.preventDefault();
-  debugLog.length = 0;
-
-  const address = document.getElementById("property_address").value.trim();
-  if (!address) { this.submit(); return; }
-
-  setLoading("Geocoding address…");
-  dbg("Step 1: Geocoding — " + address);
-
-  let lat, lon, matchedAddress;
-  try {
-    const geoResp = await fetch("/geocode", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ address }),
-    });
-    if (!geoResp.ok) {
-      const err = await geoResp.json().catch(() => ({}));
-      hideLoading();
-      dbg("Geocode FAILED: " + JSON.stringify(err));
-      showDebug();
-      alert("Could not geocode address: " + (err.error || "Please check address and try again."));
-      return;
-    }
-    const geo = await geoResp.json();
-    lat = geo.lat;
-    lon = geo.lon;
-    matchedAddress = geo.matched_address || address;
-    dbg("Geocode OK → lat=" + lat + " lon=" + lon + " matched=" + matchedAddress);
-  } catch (err) {
-    hideLoading();
-    dbg("Geocode EXCEPTION: " + err.message);
-    showDebug();
-    alert("Geocoding failed. Please check your address and try again.");
-    return;
-  }
-
-  setLoading("Querying FEMA National Flood Hazard Layer…");
-  dbg("Step 2: FEMA NFHL queries (JSONP) for lat=" + lat + " lon=" + lon);
-
-  let zone28 = { flood_zone: "UNDETERMINED", in_sfha: false };
-  let layer6  = {};
-  let layer24 = {};
-
-  const femaResults = await Promise.allSettled([
-    queryNFHL(28, lat, lon, "FLD_ZONE,ZONE_SUBTY,DFIRM_ID,EFF_DATE,SFHA_TF"),
-    queryNFHL(6,  lat, lon, "COMMUNITY_ID,COMMUNITYNAME,COUNTY,STATE_FIPS"),
-    queryNFHL(24, lat, lon, "FIRM_PAN,EFF_DATE,PANEL_TYP"),
-  ]);
-
-  const [res28, res6, res24] = femaResults;
-  dbg("Layer 28: " + res28.status + (res28.reason ? " — " + res28.reason : "") + (res28.value ? " features=" + (res28.value.features||[]).length + " raw=" + JSON.stringify(res28.value).slice(0,200) : ""));
-  dbg("Layer 6:  " + res6.status  + (res6.reason  ? " — " + res6.reason  : "") + (res6.value  ? " features=" + (res6.value.features||[]).length  : ""));
-  dbg("Layer 24: " + res24.status + (res24.reason ? " — " + res24.reason : "") + (res24.value ? " features=" + (res24.value.features||[]).length : ""));
-
-  if (res28.status === "fulfilled" && res28.value.features && res28.value.features.length > 0) {
-    const a = res28.value.features[0].attributes;
-    zone28 = {
-      flood_zone:   a.FLD_ZONE   || "UNDETERMINED",
-      zone_subtype: a.ZONE_SUBTY || "",
-      firm_panel:   a.DFIRM_ID  || "",
-      eff_date:     a.EFF_DATE,
-      in_sfha:      a.SFHA_TF === "T",
-    };
-    dbg("Layer 28 parsed → zone=" + zone28.flood_zone + " sfha=" + zone28.in_sfha);
-  } else {
-    dbg("Layer 28: no features or failed — using UNDETERMINED fallback");
-  }
-
-  if (res6.status === "fulfilled" && res6.value.features && res6.value.features.length > 0) {
-    const a = res6.value.features[0].attributes;
-    layer6 = { community_id: a.COMMUNITY_ID || "", community_name: a.COMMUNITYNAME || "" };
-    dbg("Layer 6 parsed → community=" + layer6.community_id);
-  }
-
-  if (res24.status === "fulfilled" && res24.value.features && res24.value.features.length > 0) {
-    const a = res24.value.features[0].attributes;
-    layer24 = { firm_panel: a.FIRM_PAN || "", eff_date: a.EFF_DATE };
-    dbg("Layer 24 parsed → panel=" + layer24.firm_panel);
-  }
-
-  const info = computeFloodInfo(zone28, layer6, layer24);
-  dbg("Computed → zone=" + info.floodZone + " panel=" + info.panelNum + " community=" + info.commNum);
-
-  document.getElementById("h_matched_address").value        = matchedAddress;
-  document.getElementById("h_lat").value                    = lat;
-  document.getElementById("h_lon").value                    = lon;
-  document.getElementById("h_flood_zone").value             = info.floodZone;
-  document.getElementById("h_flood_zone_description").value = info.desc;
-  document.getElementById("h_sfha_status").value            = info.sfhaStat;
-  document.getElementById("h_insurance_required").value     = info.insReq;
-  document.getElementById("h_panel_number").value           = info.panelNum;
-  document.getElementById("h_panel_effective_date").value   = info.panelDate;
-  document.getElementById("h_community_number").value       = info.commNum;
-  document.getElementById("h_community_name").value         = info.commName;
-
-  showDebug();
-
-  if (info.floodZone === "UNDETERMINED") {
-    const go = confirm(
-      "⚠ FEMA flood zone lookup returned no data for this location.\n\n" +
-      "This may mean:\n" +
-      "• The address is outside mapped NFHL coverage\n" +
-      "• The FEMA API is temporarily unreachable\n\n" +
-      "Check the debug log on the page for details.\n\n" +
-      "Continue generating the certificate with UNDETERMINED zone?"
-    );
-    if (!go) { hideLoading(); return; }
-  }
-
-  setLoading("Generating certificate…");
-  this.submit();
-});
 </script>
 
 </body>

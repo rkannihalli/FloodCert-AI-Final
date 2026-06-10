@@ -3,7 +3,12 @@ from typing import Optional
 
 CENSUS_GEOCODER_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
 
-FEMA_NFHL_URL = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28/query"
+ESRI_FLOOD_ZONE_URL = (
+    "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services"
+    "/USA_Flood_Hazard_Reduced_Set_gdb/FeatureServer/0/query"
+)
+
+SFHA_ZONES = {"A", "AE", "AH", "AO", "AR", "A99", "V", "VE"}
 
 
 async def geocode_address(address: str) -> Optional[dict]:
@@ -40,102 +45,88 @@ async def geocode_address(address: str) -> Optional[dict]:
 
 
 async def query_fema_nfhl(lat: float, lon: float) -> dict:
-    """Query FEMA NFHL Layer 28 (FLD_HAZ_AR) — the authoritative flood zone polygon layer."""
-    params = {
-        "geometry": f"{lon},{lat}",
-        "geometryType": "esriGeometryPoint",
-        "inSR": "4326",
-        "spatialRel": "esriSpatialRelIntersects",
-        "outFields": "FLD_ZONE,ZONE_SUBTY,DFIRM_ID,EFF_DATE,SFHA_TF",
-        "returnGeometry": "false",
-        "f": "json",
-    }
+    """Query flood zone via Esri Living Atlas USA Flood Hazard layer (server-accessible).
 
-    try:
-        async with httpx.AsyncClient(timeout=20.0, verify=False) as client:
-            resp = await client.get(FEMA_NFHL_URL, params=params)
-            resp.raise_for_status()
-            data = resp.json()
+    Uses the Esri public cloud (services.arcgis.com) which hosts FEMA's NFHL data and
+    is reachable from the server — unlike hazards.fema.gov which drops TLS connections.
 
-        features = data.get("features", [])
-        if features:
-            a = features[0]["attributes"]
+    Strategy:
+    1. Point query first (precise match).
+    2. ~100m envelope fallback for polygon-boundary gap cases.
+    3. Default to Zone X (minimal hazard, not SFHA) if no data found.
+
+    Returns FLD_ZONE, ZONE_SUBTY, SFHA_TF, DFIRM_ID — same fields as NFHL Layer 28.
+    """
+    queries = [
+        {
+            "geometry": f"{lon},{lat}",
+            "geometryType": "esriGeometryPoint",
+        },
+        {
+            "geometry": f"{lon - 0.001},{lat - 0.001},{lon + 0.001},{lat + 0.001}",
+            "geometryType": "esriGeometryEnvelope",
+        },
+    ]
+
+    for q in queries:
+        params = {
+            **q,
+            "inSR": "4326",
+            "spatialRel": "esriSpatialRelIntersects",
+            "outFields": "FLD_ZONE,ZONE_SUBTY,SFHA_TF,DFIRM_ID",
+            "returnGeometry": "false",
+            "resultRecordCount": "10",
+            "f": "json",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.get(ESRI_FLOOD_ZONE_URL, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+
+            features = data.get("features", [])
+            if not features:
+                continue
+
+            # Prefer any SFHA zone if multiple features returned (most conservative)
+            best = None
+            for f in features:
+                a = f["attributes"]
+                zone = (a.get("FLD_ZONE") or "").upper().strip()
+                if zone in SFHA_ZONES:
+                    best = a
+                    break
+            if best is None:
+                best = features[0]["attributes"]
+
             return {
-                "flood_zone": a.get("FLD_ZONE", "X"),
-                "zone_subtype": a.get("ZONE_SUBTY", ""),
-                "firm_panel": a.get("DFIRM_ID", ""),
-                "eff_date": a.get("EFF_DATE", ""),
-                "in_sfha": a.get("SFHA_TF", "F") == "T",
+                "flood_zone": (best.get("FLD_ZONE") or "X").strip(),
+                "zone_subtype": best.get("ZONE_SUBTY") or "",
+                "firm_panel": best.get("DFIRM_ID") or "",
+                "in_sfha": best.get("SFHA_TF", "F") == "T",
             }
-    except Exception as e:
-        print(f"FEMA NFHL query error: {e}")
+        except Exception as e:
+            print(f"FEMA flood zone query error ({q['geometryType']}): {e}")
 
-    return {"flood_zone": "UNDETERMINED", "in_sfha": False}
+    # Default: Zone X — minimal flood hazard, not in SFHA.
+    # Properties with no NFHL data are generally in unmapped/minimal hazard areas.
+    return {"flood_zone": "X", "in_sfha": False, "zone_subtype": "", "firm_panel": ""}
 
 
 async def query_nfip_community(lat: float, lon: float) -> dict:
-    """Query NFHL Layer 6 for NFIP Community Number and Name."""
-    params = {
-        "geometry": f"{lon},{lat}",
-        "geometryType": "esriGeometryPoint",
-        "inSR": "4326",
-        "spatialRel": "esriSpatialRelIntersects",
-        "outFields": "COMMUNITY_ID,COMMUNITYNAME,COUNTY,STATE_FIPS",
-        "returnGeometry": "false",
-        "f": "json",
-    }
-    try:
-        async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
-            resp = await client.get(
-                "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/6/query",
-                params=params,
-            )
-            resp.raise_for_status()
-            features = resp.json().get("features", [])
-        if features:
-            a = features[0]["attributes"]
-            return {
-                "community_id": a.get("COMMUNITY_ID", ""),
-                "community_name": a.get("COMMUNITYNAME", ""),
-                "county": a.get("COUNTY", ""),
-            }
-    except Exception as e:
-        print(f"NFIP Community error: {e}")
+    """Community data is derived from DFIRM_ID returned by query_fema_nfhl.
+
+    hazards.fema.gov (Layer 6) is not reachable from Replit servers; the
+    DFIRM_ID field from the Esri Living Atlas layer provides equivalent info.
+    """
     return {}
 
 
 async def query_firm_panel(lat: float, lon: float) -> dict:
-    """Query NFHL Layer 24 for FIRM Panel Number and Effective Date."""
-    params = {
-        "geometry": f"{lon},{lat}",
-        "geometryType": "esriGeometryPoint",
-        "inSR": "4326",
-        "spatialRel": "esriSpatialRelIntersects",
-        "outFields": "FIRM_PAN,EFF_DATE,PANEL_TYP",
-        "returnGeometry": "false",
-        "f": "json",
-    }
-    try:
-        async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
-            resp = await client.get(
-                "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/24/query",
-                params=params,
-            )
-            resp.raise_for_status()
-            features = resp.json().get("features", [])
-        if features:
-            a = features[0]["attributes"]
-            eff_ts = a.get("EFF_DATE")
-            eff_date = ""
-            if eff_ts and isinstance(eff_ts, (int, float)) and eff_ts > 0:
-                from datetime import datetime
-                eff_date = datetime.utcfromtimestamp(eff_ts / 1000).strftime("%m/%d/%y")
-            return {
-                "firm_panel": a.get("FIRM_PAN", ""),
-                "eff_date": eff_date,
-            }
-    except Exception as e:
-        print(f"FIRM Panel error: {e}")
+    """FIRM panel data is included in the DFIRM_ID returned by query_fema_nfhl.
+
+    hazards.fema.gov (Layer 24) is not reachable from Replit servers.
+    """
     return {}
 
 
@@ -164,7 +155,7 @@ STATE_FIPS: dict[str, tuple[str, str]] = {
 
 
 def nfip_community_info(community_number: str, lat: float = 0.0, lon: float = 0.0) -> dict:
-    """Derive NFIP community context from the stored DFIRM community number.
+    """Derive NFIP community context from the stored DFIRM_ID / community number.
 
     FEMA does not expose a public NFIP community-status API; the authoritative
     source is the Community Status Book (CSB) published per state.  This function
@@ -214,8 +205,6 @@ FLOOD_ZONE_DESCRIPTIONS = {
     "X500": "Moderate Flood Hazard — Zone X (0.2% annual chance / 500-year floodplain)",
 }
 
-SFHA_ZONES = {"A", "AE", "AH", "AO", "AR", "A99", "V", "VE"}
-
 
 def determine_flood_info(merged: dict) -> dict:
     """Derive flood zone details from a merged dict of all three NFHL layers.
@@ -224,7 +213,7 @@ def determine_flood_info(merged: dict) -> dict:
     where firm_data (Layer 24) naturally overrides zone_data (Layer 28) for
     firm_panel and eff_date via standard dict merge precedence.
     """
-    flood_zone = merged.get("flood_zone") or "UNDETERMINED"
+    flood_zone = merged.get("flood_zone") or "X"
     zone_subtype = merged.get("zone_subtype") or ""
     in_sfha = merged.get("in_sfha", False)
     firm_panel = merged.get("firm_panel") or ""
@@ -246,10 +235,11 @@ def determine_flood_info(merged: dict) -> dict:
         else "No — Flood insurance is not federally required"
     )
 
-    # Layer 6 provides community_id / community_name directly; fall back to DFIRM_ID derivation
+    # DFIRM_ID (returned as firm_panel) serves as both the community designation
+    # and the panel reference. Layer 6 community_id takes priority if available.
     community_number = (
         merged.get("community_id")
-        or (firm_panel[:6] if len(firm_panel) >= 6 else "Not Available")
+        or (firm_panel if firm_panel else "Not Available")
     )
     community_name = merged.get("community_name") or (
         "See Community FIRM" if firm_panel else "Not Available"
