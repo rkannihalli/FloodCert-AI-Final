@@ -155,5 +155,183 @@
   Generated: {{ determination_date }} | Loan ID: {{ loan_id }}
 </div>
 
+<!-- ═══════════════════════════════════════════
+     PAGE 2 — Map Exhibit + FEMA FIRM Legend
+     ═══════════════════════════════════════════ -->
+<div class="map-page">
+
+  <!-- Map image -->
+  <div class="section map-section">
+    <div class="section-title">Section D — Flood Map Exhibit</div>
+    {% if map_image_b64 %}
+    <div class="map-image-wrap">
+      <img src="data:image/jpeg;base64,{{ map_image_b64 }}" class="map-img" alt="Flood Zone Map" />
+      <div class="map-attribution">
+        Imagery: USDA, USGS The National Map: Orthoimagery. Flood zones: FEMA National Flood Hazard Layer (NFHL). Powered by Esri. |
+        Coordinates: {{ "%.5f"|format(lat|float) }}, {{ "%.5f"|format(lon|float) }}
+      </div>
+    </div>
+    {% else %}
+    <div class="map-unavailable">Map image unavailable. View flood zones at msc.fema.gov for coordinates {{ "%.5f"|format(lat|float) }}, {{ "%.5f"|format(lon|float) }}.</div>
+    {% endif %}
+  </div>
+
+  <!-- FEMA FIRM Standard Legend -->
+  <div class="section">
+    <div class="section-title">FEMA FIRM Standard Legend</div>
+    <div class="firm-legend">
+
+      <!-- LEFT COLUMN: PIN + MAP PANELS -->
+      <div class="legend-col">
+
+        <div class="legend-group-title">PIN</div>
+        <div class="legend-pin-row">
+          <span class="pin-icon">&#9679;</span>
+          <span class="legend-item-text">Approximate location based on user input and does not represent an authoritative property location</span>
+        </div>
+
+        <div class="legend-group-title" style="margin-top:8pt;">MAP PANELS</div>
+        <div class="legend-item-row">
+          <span class="swatch" style="background:#00C8D4;border:1.5pt solid #009FAA;"></span>
+          <span class="legend-item-text">Selected FloodMap Boundary</span>
+        </div>
+        <div class="legend-item-row">
+          <span class="swatch" style="background:#2E7D32;border:1.5pt solid #1B5E20;"></span>
+          <span class="legend-item-text">Digital Data Available</span>
+        </div>
+        <div class="legend-item-row">
+          <span class="swatch" style="background:#fff;border:1.5pt dashed #2E7D32;"></span>
+          <span class="legend-item-text">No Digital Data Available</span>
+        </div>
+        <div class="legend-item-row">
+          <span class="swatch swatch-hatch" style="background:#fff;border:1.5pt solid #888;"></span>
+          <span class="legend-item-text">Unmapped</span>
+        </div>
+
+        <div class="legend-group-title" style="margin-top:8pt;">OTHER AREAS</div>
+        <div class="legend-item-row">
+          <span class="swatch" style="background:#fff;border:1.5pt solid #555;"></span>
+          <span class="legend-item-text">Area of Minimal Flood Hazard <em>Zone X</em></span>
+        </div>
+        <div class="legend-item-row">
+          <span class="swatch swatch-blue-lines"></span>
+          <span class="legend-item-text">Effective LOMRs</span>
+        </div>
+        <div class="legend-item-row">
+          <span class="swatch swatch-diag-light"></span>
+          <span class="legend-item-text">Area of Undetermined Flood Hazard <em>Zone D</em></span>
+        </div>
+        <div class="legend-item-row">
+          <span class="swatch swatch-vlines"></span>
+          <span class="legend-item-text">Otherwise Protected Area</span>
+        </div>
+        <div class="legend-item-row">
+          <span class="swatch swatch-diag-dense"></span>
+          <span class="legend-item-text">Coastal Barrier Resource System Area</span>
+        </div>
+
+      </div><!-- /legend-col -->
+
+      <!-- MIDDLE COLUMN: SFHA + OTHER FLOOD HAZARD -->
+      <div class="legend-col">
+
+        <div class="legend-group-title">SPECIAL FLOOD HAZARD AREAS</div>
+        <div class="legend-item-row">
+          <span class="swatch" style="background:#9FC9E8;border:1pt solid #5A96C0;"></span>
+          <span class="legend-item-text">Without Base Flood Elevation (BFE) <em>Zone A, V</em></span>
+        </div>
+        <div class="legend-item-row">
+          <span class="swatch" style="background:#4D9EC7;border:1pt solid #2B6E96;"></span>
+          <span class="legend-item-text">With BFE or Depth</span>
+        </div>
+        <div class="legend-item-row">
+          <span class="swatch swatch-floodway"></span>
+          <span class="legend-item-text">Regulatory Floodway <em>Zone AE, AO, AH, VE, AR</em></span>
+        </div>
+
+        <div class="legend-group-title" style="margin-top:8pt;">OTHER AREAS OF FLOOD HAZARD</div>
+        <div class="legend-item-row">
+          <span class="swatch" style="background:#F5C68F;border:1pt solid #C8933C;"></span>
+          <span class="legend-item-text">0.2% Annual Chance Flood Hazard; Areas of 1% annual chance flood with average depth less than one foot or with drainage areas of less than one square mile <em>Zone X</em></span>
+        </div>
+        <div class="legend-item-row">
+          <span class="swatch" style="background:#CCCCCC;border:1pt solid #999;"></span>
+          <span class="legend-item-text">Future Conditions 1% Annual Chance Flood Hazard <em>Zone X</em></span>
+        </div>
+        <div class="legend-item-row">
+          <span class="swatch" style="background:#A9C7D8;border:1pt solid #6F9AB0;"></span>
+          <span class="legend-item-text">Area with Reduced Flood Risk due to Levee <em>Zone X</em></span>
+        </div>
+        <div class="legend-item-row">
+          <span class="swatch swatch-levee-hatch"></span>
+          <span class="legend-item-text">Area with Flood Risk due to Levee <em>Zone D</em></span>
+        </div>
+
+      </div><!-- /legend-col -->
+
+      <!-- RIGHT COLUMN: OTHER FEATURES + STRUCTURES -->
+      <div class="legend-col">
+
+        <div class="legend-group-title">OTHER FEATURES</div>
+
+        <div class="legend-item-row">
+          <span class="line-swatch">
+            <span class="line-num">20.2</span><br/>
+            <span class="line-num">17.5</span>
+          </span>
+          <span class="legend-item-text">Cross Sections with 1% Annual Chance Water Surface Elevation</span>
+        </div>
+        <div class="legend-item-row">
+          <span class="line-swatch"><span class="line-sample" style="border-top:1.5pt dashed #333;"></span></span>
+          <span class="legend-item-text">Coastal Transect</span>
+        </div>
+        <div class="legend-item-row">
+          <span class="line-swatch"><span class="line-sample" style="border-top:1.5pt dashed #003366;"></span></span>
+          <span class="legend-item-text">Base Flood Elevation Line (BFE)</span>
+        </div>
+        <div class="legend-item-row">
+          <span class="line-swatch"><span class="line-sample" style="border-top:2pt solid #CC0000;"></span></span>
+          <span class="legend-item-text">Limit of Study</span>
+        </div>
+        <div class="legend-item-row">
+          <span class="line-swatch"><span class="line-sample" style="border-top:2pt solid #CCAA00;"></span></span>
+          <span class="legend-item-text">Jurisdiction Boundary</span>
+        </div>
+        <div class="legend-item-row">
+          <span class="line-swatch"><span class="line-sample" style="border-top:1.5pt dashed #888;"></span></span>
+          <span class="legend-item-text">Coastal Transect Baseline</span>
+        </div>
+        <div class="legend-item-row">
+          <span class="line-swatch"><span class="line-sample" style="border-top:1.5pt solid #003366;"></span></span>
+          <span class="legend-item-text">Profile Baseline</span>
+        </div>
+        <div class="legend-item-row">
+          <span class="line-swatch"><span class="line-sample" style="border-top:1.5pt solid #0066AA;"></span></span>
+          <span class="legend-item-text">Hydrographic Feature</span>
+        </div>
+
+        <div class="legend-group-title" style="margin-top:8pt;">GENERAL STRUCTURES</div>
+        <div class="legend-item-row">
+          <span class="line-swatch"><span class="line-sample" style="border-top:2pt dashed #444;"></span></span>
+          <span class="legend-item-text">Channel, Culvert, or Storm Sewer</span>
+        </div>
+        <div class="legend-item-row">
+          <span class="line-swatch swatch-levee-line"></span>
+          <span class="legend-item-text">Levee, Dike, or Floodwall</span>
+        </div>
+
+      </div><!-- /legend-col -->
+
+    </div><!-- /firm-legend -->
+  </div>
+
+  <!-- Map page footer -->
+  <div class="pdf-footer">
+    <strong>Map Source:</strong> ESRI World Imagery (USDA, USGS The National Map: Orthoimagery) + FEMA NFHL — hazards.fema.gov/arcgis<br />
+    <strong>Note:</strong> Panel numbers and flood zone designations shown are from the current effective FIRM. For official determinations visit msc.fema.gov.
+  </div>
+
+</div><!-- /map-page -->
+
 </body>
 </html>

@@ -14,6 +14,7 @@ from fema_lookup import (
     geocode_address, query_fema_nfhl, query_nfip_community, query_firm_panel,
     query_county_name, determine_flood_info, nfip_community_info,
 )
+from map_utils import generate_map_image
 from db import (
     init_db, save_determination, get_determination,
     search_determinations, list_determinations, delete_determination,
@@ -239,6 +240,7 @@ async def download_certificate(
     determination_date_iso: str = Form(...),
 ):
     data = dict(locals())
+    data["map_image_b64"] = await generate_map_image(float(lat), float(lon))
     pdf_bytes = generate_flood_certificate_pdf(data)
     filename = f"flood_certificate_{loan_id}.pdf".replace(" ", "_")
     return Response(
@@ -271,6 +273,7 @@ async def download_notice(
     determination_date_iso: str = Form(...),
 ):
     data = dict(locals())
+    data["map_image_b64"] = await generate_map_image(float(lat), float(lon))
     pdf_bytes = generate_borrower_notice_pdf(data)
     filename = f"borrower_notice_{loan_id}.pdf".replace(" ", "_")
     return Response(

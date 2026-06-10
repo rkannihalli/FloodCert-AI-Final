@@ -1,0 +1,108 @@
+"""
+map_utils.py — Generate composite static map images for flood certificates.
+
+Fetches ESRI World Imagery (base) + FEMA NFHL flood zone overlay, composites
+with Pillow, draws a location pin, and returns a base64 JPEG string.
+"""
+
+import asyncio
+import base64
+import io
+import logging
+from typing import Optional
+
+import httpx
+from PIL import Image, ImageDraw
+
+logger = logging.getLogger(__name__)
+
+ESRI_IMAGERY_URL = (
+    "https://services.arcgisonline.com/ArcGIS/rest/services/"
+    "World_Imagery/MapServer/export"
+)
+NFHL_EXPORT_URL = (
+    "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/export"
+)
+
+MAP_WIDTH = 800
+MAP_HEIGHT = 480
+BBOX_PAD = 0.012   # ~1.3 km half-width at mid-latitudes
+
+
+def _bbox(lat: float, lon: float) -> str:
+    return f"{lon - BBOX_PAD},{lat - BBOX_PAD},{lon + BBOX_PAD},{lat + BBOX_PAD}"
+
+
+async def generate_map_image(lat: float, lon: float) -> Optional[str]:
+    """
+    Return base64-encoded JPEG of composited imagery + NFHL + pin, or None on failure.
+    """
+    bbox = _bbox(lat, lon)
+    size_str = f"{MAP_WIDTH},{MAP_HEIGHT}"
+    common = {"bbox": bbox, "bboxSR": "4326", "size": size_str, "imageSR": "4326", "f": "image"}
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            img_resp, nfhl_resp = await asyncio.gather(
+                client.get(ESRI_IMAGERY_URL, params={**common, "format": "png"}),
+                client.get(NFHL_EXPORT_URL,  params={**common, "format": "png32", "transparent": "true"}),
+            )
+
+        base_img = Image.open(io.BytesIO(img_resp.content)).convert("RGBA")
+        base_img = base_img.resize((MAP_WIDTH, MAP_HEIGHT), Image.LANCZOS)
+
+        try:
+            nfhl_img = Image.open(io.BytesIO(nfhl_resp.content)).convert("RGBA")
+            nfhl_img = nfhl_img.resize((MAP_WIDTH, MAP_HEIGHT), Image.LANCZOS)
+            composite = Image.alpha_composite(base_img, nfhl_img)
+        except Exception:
+            composite = base_img
+
+        _draw_pin(composite, MAP_WIDTH // 2, MAP_HEIGHT // 2)
+        _draw_coord_label(composite, lat, lon)
+
+        out = io.BytesIO()
+        composite.convert("RGB").save(out, format="JPEG", quality=88)
+        return base64.b64encode(out.getvalue()).decode()
+
+    except Exception as exc:
+        logger.warning("Map image generation failed: %s", exc)
+        return None
+
+
+def _draw_pin(img: Image.Image, cx: int, cy: int) -> None:
+    draw = ImageDraw.Draw(img)
+    r = 11
+    # White halo
+    draw.ellipse([cx - r - 3, cy - r - 3, cx + r + 3, cy + r + 3], fill=(255, 255, 255, 210))
+    # Red circle body
+    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(210, 35, 35, 255))
+    # White inner dot
+    draw.ellipse([cx - 4, cy - 4, cx + 4, cy + 4], fill=(255, 255, 255, 255))
+    # Stem
+    stem_top_y = cy + r - 3
+    stem_tip_y = cy + r + 16
+    draw.polygon(
+        [(cx - 5, stem_top_y), (cx + 5, stem_top_y), (cx, stem_tip_y)],
+        fill=(210, 35, 35, 255),
+    )
+    # Stem white side lines
+    draw.line([(cx - 5, stem_top_y), (cx, stem_tip_y)], fill=(255, 255, 255, 160), width=1)
+    draw.line([(cx + 5, stem_top_y), (cx, stem_tip_y)], fill=(255, 255, 255, 160), width=1)
+
+
+def _draw_coord_label(img: Image.Image, lat: float, lon: float) -> None:
+    draw = ImageDraw.Draw(img)
+    text = f"{lat:.5f}, {lon:.5f}"
+    cx = MAP_WIDTH // 2
+    cy = MAP_HEIGHT // 2 + 40   # below the pin tip
+
+    # Estimate text size (default font ~6×11 px per char)
+    ch_w, ch_h = 6, 11
+    tw = len(text) * ch_w
+    pad = 5
+    x0, y0 = cx - tw // 2 - pad, cy - pad
+    x1, y1 = cx + tw // 2 + pad, cy + ch_h + pad
+
+    draw.rectangle([x0, y0, x1, y1], fill=(0, 0, 0, 165))
+    draw.text((cx - tw // 2, cy), text, fill=(255, 255, 255, 255))
