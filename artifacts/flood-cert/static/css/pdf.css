@@ -434,27 +434,35 @@ body {
   padding-bottom: 4pt;
 }
 
-/* ── SFHDF Sections C / D / E ── */
+/* ── SFHDF Sections C / D / E  (matches A/B style) ── */
 .sfhdf-section-hdr {
+  font-family: Arial, Helvetica, sans-serif;
   font-size: 8.5pt;
   font-weight: bold;
-  background: #e8e8e8;
-  border: 1.5pt solid #333;
-  padding: 4pt 7pt;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #003366;
+  background: #e8f0fb;
+  padding: 5pt 8pt;
+  border-top: 1.5pt solid #003366;
+  border-left: 1.5pt solid #003366;
+  border-right: 1.5pt solid #003366;
 }
 
 .sfhdf-table {
   width: 100%;
   border-collapse: collapse;
-  border: 1.5pt solid #333;
-  border-top: none;
+  border: 1.5pt solid #003366;
 }
 
 .sfhdf-table td {
-  padding: 4pt 6pt;
-  border-bottom: 0.5pt solid #ccc;
-  font-size: 8.5pt;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 9pt;
+  color: #1e2530;
+  padding: 5pt 8pt;
+  border-bottom: 0.5pt solid #d0d8e0;
   vertical-align: top;
+  line-height: 1.4;
 }
 
 .sfhdf-table tr:last-child td {
@@ -467,60 +475,67 @@ body {
   text-align: right;
   padding-right: 4pt;
   white-space: nowrap;
+  color: #5a6470;
+  background: #f5f7fa;
 }
 
 .sfhdf-chk-cell {
   width: 16pt;
   text-align: center;
-  padding-top: 5pt;
+  padding-top: 6pt;
+  background: #f5f7fa;
 }
 
 .sfhdf-chk {
   display: inline-block;
   width: 9pt;
   height: 9pt;
-  border: 1pt solid #333;
+  border: 1pt solid #1e2530;
   text-align: center;
   line-height: 9pt;
   font-size: 8pt;
   font-weight: bold;
+  color: #003366;
   vertical-align: middle;
 }
 
 .sfhdf-text {
-  flex: 1;
-  font-size: 8.5pt;
-  line-height: 1.45;
+  font-size: 9pt;
+  color: #1e2530;
+  line-height: 1.4;
 }
 
 .sfhdf-det-q {
-  font-size: 8.5pt;
+  font-size: 9pt;
   font-weight: bold;
-  padding: 5pt 7pt;
+  color: #1e2530;
+  padding: 5pt 8pt;
   width: 70%;
 }
 
 .sfhdf-det-ans {
-  font-size: 8.5pt;
-  padding: 5pt 7pt;
+  font-size: 9pt;
+  color: #1e2530;
+  padding: 5pt 8pt;
   white-space: nowrap;
   vertical-align: middle;
 }
 
 .sfhdf-det-note {
   font-size: 8.5pt;
-  padding: 4pt 7pt;
-  line-height: 1.45;
-  color: #333;
+  color: #3a4450;
+  padding: 4pt 8pt;
+  line-height: 1.5;
+  background: #f5f7fa;
 }
 
 .sfhdf-comments {
-  border: 1.5pt solid #333;
-  border-top: none;
+  border: 1.5pt solid #003366;
   padding: 10pt 8pt;
   min-height: 50pt;
-  font-size: 8.5pt;
   font-family: "Courier New", Courier, monospace;
+  font-size: 8.5pt;
+  color: #1e2530;
   line-height: 1.7;
   letter-spacing: 0.01em;
 }
