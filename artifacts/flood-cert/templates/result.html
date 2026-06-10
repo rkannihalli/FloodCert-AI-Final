@@ -222,6 +222,41 @@
     </div>
   </div>
 
+  {% if record_id %}
+  <div class="lol-card">
+    <div class="lol-card-header">
+      🔔 Life-of-Loan Monitoring
+    </div>
+    <div class="lol-card-body">
+      <div class="lol-status {{ 'lol-changed' if data.get('needs_redetermination') else ('lol-current' if data.get('last_checked_date') else 'lol-off') }}"
+           id="lolStatus">
+        {% if data.get('needs_redetermination') %}
+          ⚠ <strong>FIRM data may have changed</strong> — a re-determination is recommended.
+          {% if data.get('last_checked_date') %}Last checked: {{ data.last_checked_date }}.{% endif %}
+        {% elif data.get('last_checked_date') %}
+          ✓ No FIRM changes detected as of {{ data.last_checked_date }}.
+          {% if not data.get('life_of_loan') %}Monitoring is currently off.{% endif %}
+        {% elif data.get('life_of_loan') %}
+          Monitoring is active — no checks run yet. Click "Check Now" to query FEMA.
+        {% else %}
+          Enable monitoring to be alerted when FIRM panel data changes for this property.
+        {% endif %}
+      </div>
+      <div class="lol-actions">
+        <button class="btn-lol-toggle {{ 'lol-active' if data.get('life_of_loan') else '' }}"
+                id="lolToggleBtn"
+                data-on="{{ '1' if data.get('life_of_loan') else '0' }}"
+                onclick="lolToggle({{ record_id }}, this)">
+          {% if data.get('life_of_loan') %}🔔 Monitoring On{% else %}🔕 Enable Monitoring{% endif %}
+        </button>
+        <button class="btn-lol-check" id="lolCheckBtn" onclick="lolCheck({{ record_id }}, this)">
+          🔍 Check Now
+        </button>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <div class="disclaimer">
     <strong>Disclaimer:</strong> This determination is based on publicly available FEMA National Flood Hazard Layer (NFHL) data and the US Census Geocoder. Results are for informational purposes and should be verified against the official FEMA Flood Insurance Rate Map (FIRM) for the subject property. This tool is not affiliated with FEMA. Lenders and loan officers should confirm determinations using a certified flood determination service for regulatory compliance.
   </div>
@@ -232,6 +267,66 @@
   </div>
 
 </main>
+
+<script>
+async function lolToggle(id, btn) {
+  const isOn = btn.dataset.on === '1';
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/history/' + id + '/monitor', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enable: !isOn})
+    });
+    const data = await resp.json();
+    const nowOn = data.life_of_loan === 1;
+    btn.dataset.on = nowOn ? '1' : '0';
+    btn.textContent = nowOn ? '🔔 Monitoring On' : '🔕 Enable Monitoring';
+    btn.classList.toggle('lol-active', nowOn);
+    const st = document.getElementById('lolStatus');
+    if (nowOn) {
+      st.className = 'lol-status';
+      st.textContent = 'Monitoring is active — click "Check Now" to query FEMA for FIRM changes.';
+    } else {
+      st.className = 'lol-status lol-off';
+      st.textContent = 'Monitoring disabled. Enable monitoring to track FIRM panel changes.';
+    }
+  } catch(e) { }
+  btn.disabled = false;
+}
+
+async function lolCheck(id, btn) {
+  btn.textContent = '⏳ Checking…';
+  btn.disabled = true;
+  const st = document.getElementById('lolStatus');
+  st.className = 'lol-status';
+  st.textContent = 'Querying FEMA National Flood Hazard Layer…';
+  try {
+    const resp = await fetch('/history/' + id + '/check', {method: 'POST'});
+    const data = await resp.json();
+    btn.textContent = '🔍 Check Now';
+    btn.disabled = false;
+    if (data.error) {
+      st.className = 'lol-status lol-changed';
+      st.textContent = '⚠ Check failed: ' + data.error;
+    } else if (data.changed) {
+      st.className = 'lol-status lol-changed';
+      st.innerHTML = '⚠ <strong>FIRM data has changed since the original determination.</strong><br>' +
+        'Zone: <strong>' + data.old_zone + '</strong> → <strong>' + data.new_zone + '</strong> | ' +
+        'Panel effective date: ' + (data.old_panel || '—') + ' → ' + (data.new_panel || '—') + '<br>' +
+        'A new flood determination is recommended. Run a new determination for this property.';
+    } else {
+      st.className = 'lol-status lol-current';
+      st.textContent = '✓ No FIRM changes detected — determination is current as of ' + data.checked_date + '.';
+    }
+  } catch(e) {
+    btn.textContent = '🔍 Check Now';
+    btn.disabled = false;
+    st.className = 'lol-status lol-changed';
+    st.textContent = '⚠ Network error. Please try again.';
+  }
+}
+</script>
 
 <script>
 (function () {

@@ -22,12 +22,32 @@
 
 <main class="main">
 
+  <!-- Check-all result banner -->
+  <div id="checkAllBanner" style="display:none;" class="email-banner"></div>
+
+  {% if flagged_count > 0 %}
+  <div class="redet-alert-bar" id="redetAlert">
+    <span>⚠ <strong>{{ flagged_count }} determination{{ 's' if flagged_count != 1 else '' }}</strong>
+    flagged for re-determination — FIRM data may have changed since the original check.</span>
+    <a href="/history" class="btn-secondary" style="font-size:0.82rem;padding:6px 12px;">Refresh</a>
+  </div>
+  {% endif %}
+
   <div class="history-header">
     <div>
       <h2>Determination History</h2>
-      <p>All saved flood hazard determinations — search by loan ID, borrower, or address.</p>
+      <p>All saved flood hazard determinations — search by loan ID, borrower, or address.
+        {% if monitored_count > 0 %}
+        &nbsp;|&nbsp; <span style="color:#e67e22;font-weight:600;">🔔 {{ monitored_count }} monitored</span>
+        {% endif %}
+      </p>
     </div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      {% if monitored_count > 0 %}
+      <button class="btn-check-all" id="checkAllBtn" onclick="checkAll()">
+        🔔 Check All Monitored ({{ monitored_count }})
+      </button>
+      {% endif %}
       <a href="/history/export/csv{% if query %}?q={{ query | urlencode }}{% endif %}"
          class="btn-export" title="Download as spreadsheet">
         ⬇ Export{% if query %} Results{% else %} All{% endif %} (.csv)
@@ -70,9 +90,18 @@
         {% for r in records %}
         {% set sfha = r.sfha_status == 'Yes' %}
         {% set undetermined = r.flood_zone == 'UNDETERMINED' %}
-        <tr>
+        {% set monitored = r.get('life_of_loan', 0) %}
+        {% set redet = r.get('needs_redetermination', 0) %}
+        <tr id="hist-row-{{ r.id }}" class="{{ 'row-redet' if redet else '' }}">
           <td class="hist-id">{{ r.id }}</td>
-          <td class="hist-date">{{ r.determination_date }}</td>
+          <td class="hist-date">
+            {{ r.determination_date }}
+            {% if r.get('last_checked_date') %}
+            <div style="font-size:0.68rem;color:var(--gray-400);margin-top:2px;">
+              checked {{ r.last_checked_date }}
+            </div>
+            {% endif %}
+          </td>
           <td class="hist-loan">
             <a href="/history/{{ r.id }}" class="loan-link">{{ r.loan_id }}</a>
           </td>
@@ -82,6 +111,11 @@
             <span class="zone-chip {{ 'chip-sfha' if sfha else ('chip-undetermined' if undetermined else 'chip-ok') }}">
               {{ r.flood_zone }}
             </span>
+            {% if redet %}
+            <div class="redet-badge" id="redet-badge-{{ r.id }}">⚠ Re-det needed</div>
+            {% else %}
+            <div class="redet-badge" id="redet-badge-{{ r.id }}" style="display:none;">⚠ Re-det needed</div>
+            {% endif %}
           </td>
           <td>
             <span class="sfha-tag {{ 'sfha-yes' if sfha else 'sfha-no' }}">
@@ -89,13 +123,22 @@
             </span>
           </td>
           <td class="hist-actions">
-            <a href="/history/{{ r.id }}" class="action-btn view-btn" title="View details">👁 View</a>
+            <a href="/history/{{ r.id }}" class="action-btn view-btn" title="View details">👁</a>
             <form method="POST" action="/history/{{ r.id }}/download/certificate" target="_blank" style="display:inline">
-              <button type="submit" class="action-btn pdf-btn" title="Download certificate PDF">📄</button>
+              <button type="submit" class="action-btn pdf-btn" title="Certificate PDF">📄</button>
             </form>
             <form method="POST" action="/history/{{ r.id }}/download/notice" target="_blank" style="display:inline">
-              <button type="submit" class="action-btn pdf-btn" title="Download borrower notice PDF">📋</button>
+              <button type="submit" class="action-btn pdf-btn" title="Borrower Notice PDF">📋</button>
             </form>
+            <button class="action-btn monitor-btn {{ 'monitor-on' if monitored else '' }}"
+                    id="mon-btn-{{ r.id }}"
+                    data-on="{{ '1' if monitored else '0' }}"
+                    onclick="toggleMonitor({{ r.id }}, this)"
+                    title="{{ 'Life-of-loan monitoring ON — click to disable' if monitored else 'Enable life-of-loan monitoring' }}">🔔</button>
+            <button class="action-btn check-btn"
+                    id="chk-btn-{{ r.id }}"
+                    onclick="checkRecord({{ r.id }}, this)"
+                    title="Re-check FEMA NFHL for zone changes">🔍</button>
             <form method="POST" action="/history/{{ r.id }}/delete"
                   onsubmit="return confirm('Delete this determination record?')" style="display:inline">
               <button type="submit" class="action-btn del-btn" title="Delete record">🗑</button>
@@ -130,5 +173,79 @@
 
 </main>
 
+<script>
+async function toggleMonitor(id, btn) {
+  const isOn = btn.dataset.on === '1';
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/history/' + id + '/monitor', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enable: !isOn})
+    });
+    const data = await resp.json();
+    const nowOn = data.life_of_loan === 1;
+    btn.dataset.on = nowOn ? '1' : '0';
+    btn.title = nowOn ? 'Life-of-loan monitoring ON — click to disable' : 'Enable life-of-loan monitoring';
+    btn.classList.toggle('monitor-on', nowOn);
+  } catch(e) { }
+  btn.disabled = false;
+}
+
+async function checkRecord(id, btn) {
+  btn.textContent = '⏳';
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/history/' + id + '/check', {method: 'POST'});
+    const data = await resp.json();
+    btn.textContent = '🔍';
+    btn.disabled = false;
+    if (data.error) { showBanner('checkAllBanner', '⚠ Check failed: ' + data.error, 'err'); return; }
+    const badge = document.getElementById('redet-badge-' + id);
+    if (data.changed) {
+      badge.style.display = 'inline-flex';
+      badge.title = 'Zone: ' + data.old_zone + ' → ' + data.new_zone + ' | Panel: ' + data.old_panel + ' → ' + data.new_panel;
+      showBanner('checkAllBanner', '⚠ FIRM data changed for record #' + id + ': Zone ' + data.old_zone + ' → ' + data.new_zone, 'err');
+    } else {
+      badge.style.display = 'none';
+      showBanner('checkAllBanner', '✓ Record #' + id + ' is current — no FIRM changes detected (' + data.checked_date + ')', 'ok');
+    }
+  } catch(e) {
+    btn.textContent = '🔍';
+    btn.disabled = false;
+    showBanner('checkAllBanner', '⚠ Network error during check', 'err');
+  }
+}
+
+async function checkAll() {
+  const btn = document.getElementById('checkAllBtn');
+  btn.textContent = '⏳ Checking…';
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/history/check-all', {method: 'POST'});
+    const data = await resp.json();
+    btn.disabled = false;
+    btn.textContent = '🔔 Check All Monitored';
+    const msg = data.checked + ' checked — ' +
+      (data.flagged > 0 ? data.flagged + ' flagged for re-determination, ' : '') +
+      data.unchanged + ' unchanged' +
+      (data.errors > 0 ? ', ' + data.errors + ' error(s)' : '');
+    showBanner('checkAllBanner', (data.flagged > 0 ? '⚠ ' : '✓ ') + msg, data.flagged > 0 ? 'err' : 'ok');
+    if (data.flagged > 0 || data.unchanged > 0) setTimeout(() => location.reload(), 2000);
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = '🔔 Check All Monitored';
+    showBanner('checkAllBanner', '⚠ Network error', 'err');
+  }
+}
+
+function showBanner(id, msg, type) {
+  const b = document.getElementById(id);
+  b.textContent = msg;
+  b.className = 'email-banner ' + (type === 'ok' ? 'email-banner-ok' : 'email-banner-err');
+  b.style.display = 'block';
+  setTimeout(() => { b.style.display = 'none'; }, 7000);
+}
+</script>
 </body>
 </html>

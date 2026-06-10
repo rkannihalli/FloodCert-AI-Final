@@ -35,15 +35,24 @@ def init_db():
             community_name TEXT NOT NULL,
             determination_date TEXT NOT NULL,
             determination_date_iso TEXT NOT NULL,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            life_of_loan INTEGER NOT NULL DEFAULT 0,
+            needs_redetermination INTEGER NOT NULL DEFAULT 0,
+            last_checked_date TEXT NOT NULL DEFAULT ''
         )
     """)
-    # Migrate existing databases that pre-date the lender_email column
-    try:
-        conn.execute("ALTER TABLE determinations ADD COLUMN lender_email TEXT NOT NULL DEFAULT ''")
-        conn.commit()
-    except Exception:
-        pass  # Column already exists
+    # Migrations for databases created before these columns existed
+    for migration in [
+        "ALTER TABLE determinations ADD COLUMN lender_email TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE determinations ADD COLUMN life_of_loan INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE determinations ADD COLUMN needs_redetermination INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE determinations ADD COLUMN last_checked_date TEXT NOT NULL DEFAULT ''",
+    ]:
+        try:
+            conn.execute(migration)
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
     conn.commit()
     conn.close()
 
@@ -109,3 +118,41 @@ def delete_determination(record_id: int) -> bool:
     affected = cur.rowcount
     conn.close()
     return affected > 0
+
+
+def set_life_of_loan(record_id: int, enabled: bool) -> None:
+    conn = get_conn()
+    conn.execute(
+        "UPDATE determinations SET life_of_loan = ? WHERE id = ?",
+        (1 if enabled else 0, record_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def flag_redetermination(record_id: int, needs: bool, checked_date: str) -> None:
+    conn = get_conn()
+    conn.execute(
+        "UPDATE determinations SET needs_redetermination = ?, last_checked_date = ? WHERE id = ?",
+        (1 if needs else 0, checked_date, record_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_monitored() -> list:
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM determinations WHERE life_of_loan = 1 ORDER BY created_at DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def count_flagged() -> int:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT COUNT(*) FROM determinations WHERE needs_redetermination = 1"
+    ).fetchone()
+    conn.close()
+    return row[0] if row else 0

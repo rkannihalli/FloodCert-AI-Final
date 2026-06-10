@@ -10,7 +10,11 @@ from fastapi.templating import Jinja2Templates
 from datetime import date
 from pdf_generator import generate_flood_certificate_pdf, generate_borrower_notice_pdf, generate_batch_report_pdf
 from fema_lookup import geocode_address, query_fema_nfhl, determine_flood_info
-from db import init_db, save_determination, get_determination, search_determinations, list_determinations, delete_determination
+from db import (
+    init_db, save_determination, get_determination,
+    search_determinations, list_determinations, delete_determination,
+    set_life_of_loan, flag_redetermination, list_monitored, count_flagged,
+)
 from email_sender import send_certificate_email
 
 # In-memory store for batch CSV results (keyed by batch_id)
@@ -192,6 +196,87 @@ async def history(request: Request, q: str = ""):
         "request": request,
         "records": records,
         "query": q,
+        "flagged_count": count_flagged(),
+        "monitored_count": len(list_monitored()),
+    })
+
+
+@app.post("/history/check-all")
+async def check_all_monitored():
+    from fastapi.responses import JSONResponse
+    records = list_monitored()
+    if not records:
+        return JSONResponse({"checked": 0, "flagged": 0, "unchanged": 0, "errors": 0})
+    checked, flagged, unchanged, errors = 0, 0, 0, 0
+    sem = asyncio.Semaphore(3)
+
+    async def _check_one(r):
+        nonlocal checked, flagged, unchanged, errors
+        lat, lon = r.get("lat"), r.get("lon")
+        if not lat or not lon:
+            errors += 1
+            return
+        try:
+            fema_data = await query_fema_nfhl(float(lat), float(lon))
+            new_info = determine_flood_info(fema_data)
+            changed = (
+                r.get("flood_zone", "") != new_info.get("flood_zone", "") or
+                r.get("panel_effective_date", "") != new_info.get("panel_effective_date", "")
+            )
+            flag_redetermination(r["id"], changed, date.today().strftime("%B %d, %Y"))
+            checked += 1
+            flagged += int(changed)
+            unchanged += int(not changed)
+        except Exception:
+            errors += 1
+
+    async def bounded(r):
+        async with sem:
+            await _check_one(r)
+
+    await asyncio.gather(*[bounded(r) for r in records])
+    return JSONResponse({"checked": checked, "flagged": flagged, "unchanged": unchanged, "errors": errors})
+
+
+@app.post("/history/{record_id}/monitor")
+async def toggle_monitor(record_id: int, request: Request):
+    from fastapi.responses import JSONResponse
+    record = get_determination(record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    body = await request.json()
+    enable = bool(body.get("enable", not record.get("life_of_loan", 0)))
+    set_life_of_loan(record_id, enable)
+    return JSONResponse({"record_id": record_id, "life_of_loan": int(enable)})
+
+
+@app.post("/history/{record_id}/check")
+async def check_fema_update(record_id: int):
+    from fastapi.responses import JSONResponse
+    record = get_determination(record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    lat, lon = record.get("lat"), record.get("lon")
+    if not lat or not lon:
+        return JSONResponse({"error": "No coordinates stored for this record"}, status_code=400)
+    try:
+        fema_data = await query_fema_nfhl(float(lat), float(lon))
+        new_info = determine_flood_info(fema_data)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)[:300]}, status_code=502)
+    old_zone  = record.get("flood_zone", "")
+    old_panel = record.get("panel_effective_date", "")
+    new_zone  = new_info.get("flood_zone", "")
+    new_panel = new_info.get("panel_effective_date", "")
+    changed = (old_zone != new_zone) or (old_panel != new_panel)
+    checked_date = date.today().strftime("%B %d, %Y")
+    flag_redetermination(record_id, changed, checked_date)
+    return JSONResponse({
+        "changed": changed,
+        "old_zone": old_zone, "new_zone": new_zone,
+        "old_panel": old_panel, "new_panel": new_panel,
+        "needs_redetermination": changed,
+        "checked_date": checked_date,
     })
 
 

@@ -715,6 +715,156 @@ input[type="text"]::placeholder {
 }
 .saved-badge:hover { background: #c8ecd9; }
 
+/* ── Life-of-Loan Monitoring ── */
+.monitor-btn {
+  background: var(--gray-100);
+  color: var(--gray-400);
+  font-size: 0.95rem;
+  padding: 4px 7px;
+  border: 1px solid var(--gray-200);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.monitor-btn.monitor-on {
+  background: #fff8ed;
+  color: #e67e22;
+  border-color: #f0a960;
+}
+.monitor-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.check-btn {
+  background: var(--blue-light);
+  color: var(--blue);
+  font-size: 0.8rem;
+  padding: 4px 7px;
+}
+
+.redet-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: #fde8e6;
+  color: var(--red);
+  border: 1px solid #f5c0bb;
+  border-radius: 10px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  margin-top: 3px;
+  white-space: nowrap;
+}
+
+.redet-alert-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #fdf0ef;
+  border: 1.5px solid var(--red);
+  border-radius: var(--radius);
+  padding: 12px 18px;
+  margin-bottom: 18px;
+  font-size: 0.88rem;
+  color: #6a1a14;
+}
+.redet-alert-bar strong { color: var(--red); }
+
+.btn-check-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #fff8ed;
+  color: #b35a00;
+  border: 1.5px solid #f0a960;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+.btn-check-all:hover { background: #fdebd0; }
+.btn-check-all:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Life-of-loan card on result/detail page */
+.lol-card {
+  background: var(--white);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  border-left: 4px solid #e67e22;
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+.lol-card-header {
+  background: #fff8ed;
+  padding: 12px 18px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #b35a00;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #f5e0c0;
+}
+.lol-card-body {
+  padding: 14px 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+.lol-status {
+  font-size: 0.85rem;
+  color: var(--gray-600);
+  flex: 1;
+  min-width: 200px;
+}
+.lol-status.lol-current { color: var(--green); font-weight: 600; }
+.lol-status.lol-changed { color: var(--red); font-weight: 700; }
+.lol-status.lol-off { color: var(--gray-400); font-style: italic; }
+
+.lol-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+.btn-lol-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1.5px solid #f0a960;
+  background: #fff8ed;
+  color: #b35a00;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-lol-toggle:hover { background: #fdebd0; }
+.btn-lol-toggle.lol-active {
+  background: #e67e22;
+  color: #fff;
+  border-color: #e67e22;
+}
+.btn-lol-toggle.lol-active:hover { background: #d0690f; }
+
+.btn-lol-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1.5px solid var(--blue);
+  background: var(--blue-light);
+  color: var(--blue);
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-lol-check:hover { background: #d4e4f7; }
+.btn-lol-check:disabled { opacity: 0.5; cursor: not-allowed; }
+
 /* ── Map card ── */
 .map-card {
   background: var(--white);
