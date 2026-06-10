@@ -105,6 +105,12 @@
           <span class="detail-label">Coordinates</span>
           <span class="detail-value">{{ "%.5f" | format(data.lat | float) }}, {{ "%.5f" | format(data.lon | float) }}</span>
         </div>
+        {% if data.county %}
+        <div class="detail-row">
+          <span class="detail-label">County</span>
+          <span class="detail-value">{{ data.county }}</span>
+        </div>
+        {% endif %}
       </div>
     </div>
 
@@ -239,6 +245,7 @@
         <input type="hidden" name="panel_effective_date"  value="{{ data.panel_effective_date }}" />
         <input type="hidden" name="community_number"      value="{{ data.community_number }}" />
         <input type="hidden" name="community_name"        value="{{ data.community_name }}" />
+        <input type="hidden" name="county"                value="{{ data.county or '' }}" />
         <input type="hidden" name="determination_date"    value="{{ data.determination_date }}" />
         <input type="hidden" name="determination_date_iso" value="{{ data.determination_date_iso }}" />
         <button type="submit" class="btn-download">📄 Download Flood Certificate (PDF)</button>
@@ -261,6 +268,7 @@
         <input type="hidden" name="panel_effective_date"  value="{{ data.panel_effective_date }}" />
         <input type="hidden" name="community_number"      value="{{ data.community_number }}" />
         <input type="hidden" name="community_name"        value="{{ data.community_name }}" />
+        <input type="hidden" name="county"                value="{{ data.county or '' }}" />
         <input type="hidden" name="determination_date"    value="{{ data.determination_date }}" />
         <input type="hidden" name="determination_date_iso" value="{{ data.determination_date_iso }}" />
         <button type="submit" class="btn-download secondary">📋 Download Borrower Notice (PDF)</button>

@@ -12,7 +12,7 @@ from datetime import date
 from pdf_generator import generate_flood_certificate_pdf, generate_borrower_notice_pdf, generate_batch_report_pdf
 from fema_lookup import (
     geocode_address, query_fema_nfhl, query_nfip_community, query_firm_panel,
-    determine_flood_info, nfip_community_info,
+    query_county_name, determine_flood_info, nfip_community_info,
 )
 from db import (
     init_db, save_determination, get_determination,
@@ -160,13 +160,14 @@ async def generate(
                     "lender_email": lender_email,
                 }
             })
-        zone_data, community_data, firm_data = await asyncio.gather(
+        zone_data, community_data, firm_data, county_data = await asyncio.gather(
             query_fema_nfhl(geo_result["lat"], geo_result["lon"]),
             query_nfip_community(geo_result["lat"], geo_result["lon"]),
             query_firm_panel(geo_result["lat"], geo_result["lon"]),
+            query_county_name(geo_result["lat"], geo_result["lon"]),
         )
         flood_info = determine_flood_info({
-            **zone_data, **community_data, **firm_data,
+            **zone_data, **community_data, **firm_data, **county_data,
             "geocoded_city": geo_result.get("city", ""),
         })
         geo_lat = geo_result["lat"]
@@ -190,6 +191,7 @@ async def generate(
         "panel_effective_date": flood_info["panel_effective_date"],
         "community_number": flood_info["community_number"],
         "community_name": flood_info["community_name"],
+        "county": flood_info.get("county", ""),
         "determination_date": date.today().strftime("%B %d, %Y"),
         "determination_date_iso": date.today().isoformat(),
     }
@@ -232,6 +234,7 @@ async def download_certificate(
     panel_effective_date: str = Form(...),
     community_number: str = Form(...),
     community_name: str = Form(...),
+    county: str = Form(default=""),
     determination_date: str = Form(...),
     determination_date_iso: str = Form(...),
 ):
@@ -263,6 +266,7 @@ async def download_notice(
     panel_effective_date: str = Form(...),
     community_number: str = Form(...),
     community_name: str = Form(...),
+    county: str = Form(default=""),
     determination_date: str = Form(...),
     determination_date_iso: str = Form(...),
 ):
@@ -528,13 +532,14 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str) -> dict:
             "error": "Address could not be geocoded",
         }
 
-    zone_data, community_data, firm_data = await asyncio.gather(
+    zone_data, community_data, firm_data, county_data = await asyncio.gather(
         query_fema_nfhl(geo["lat"], geo["lon"]),
         query_nfip_community(geo["lat"], geo["lon"]),
         query_firm_panel(geo["lat"], geo["lon"]),
+        query_county_name(geo["lat"], geo["lon"]),
     )
     flood_info = determine_flood_info({
-        **zone_data, **community_data, **firm_data,
+        **zone_data, **community_data, **firm_data, **county_data,
         "geocoded_city": geo.get("city", ""),
     })
 
@@ -555,6 +560,7 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str) -> dict:
         "panel_effective_date": flood_info["panel_effective_date"],
         "community_number": flood_info["community_number"],
         "community_name": flood_info["community_name"],
+        "county": flood_info.get("county", ""),
         "determination_date": det_date,
         "determination_date_iso": det_date_iso,
     }

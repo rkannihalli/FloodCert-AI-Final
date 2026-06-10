@@ -67,6 +67,12 @@
       <td class="label">Geocoded / Matched Address</td>
       <td class="value" colspan="3">{{ matched_address }}</td>
     </tr>
+    {% if county %}
+    <tr>
+      <td class="label">County</td>
+      <td class="value" colspan="3">{{ county }}</td>
+    </tr>
+    {% endif %}
     <tr>
       <td class="label">Latitude / Longitude</td>
       <td class="value" colspan="3">

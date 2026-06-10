@@ -10,6 +10,12 @@ ESRI_FLOOD_ZONE_URL = (
 
 SFHA_ZONES = {"A", "AE", "AH", "AO", "AR", "A99", "V", "VE"}
 
+NFHL_BASE = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer"
+TIGERWEB_COUNTY_URL = (
+    "https://tigerweb.geo.census.gov/arcgis/rest/services"
+    "/TIGERweb/State_County/MapServer/1/query"
+)
+
 
 async def geocode_address(address: str) -> Optional[dict]:
     """Geocode an address using the US Census Bureau Geocoder."""
@@ -120,20 +126,95 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
 
 
 async def query_nfip_community(lat: float, lon: float) -> dict:
-    """Community data is derived from DFIRM_ID returned by query_fema_nfhl.
-
-    hazards.fema.gov (Layer 6) is not reachable from Replit servers; the
-    DFIRM_ID field from the Esri Living Atlas layer provides equivalent info.
-    """
-    return {}
+    """Query NFHL Layer 22 (Political Jurisdictions) for NFIP community name and number."""
+    params = {
+        "geometry": f"{lon},{lat}",
+        "geometryType": "esriGeometryPoint",
+        "inSR": "4326",
+        "spatialRel": "esriSpatialRelIntersects",
+        "outFields": "POL_NAME1,CID",
+        "returnGeometry": "false",
+        "f": "json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(f"{NFHL_BASE}/22/query", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+        features = data.get("features", [])
+        if not features:
+            return {}
+        attrs = features[0]["attributes"]
+        return {
+            "community_id": (attrs.get("CID") or "").strip(),
+            "community_name": (attrs.get("POL_NAME1") or "").strip(),
+        }
+    except Exception as e:
+        print(f"NFIP community query error (Layer 22): {e}")
+        return {}
 
 
 async def query_firm_panel(lat: float, lon: float) -> dict:
-    """FIRM panel data is included in the DFIRM_ID returned by query_fema_nfhl.
+    """Query NFHL Layer 3 (FIRM Panels) for panel number and effective date."""
+    params = {
+        "geometry": f"{lon},{lat}",
+        "geometryType": "esriGeometryPoint",
+        "inSR": "4326",
+        "spatialRel": "esriSpatialRelIntersects",
+        "outFields": "FIRM_PAN,EFF_DATE,DFIRM_ID,PANEL_TYP",
+        "returnGeometry": "false",
+        "f": "json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(f"{NFHL_BASE}/3/query", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+        features = data.get("features", [])
+        if not features:
+            return {}
+        attrs = None
+        for f in features:
+            if "Panel Printed" in (f["attributes"].get("PANEL_TYP") or ""):
+                attrs = f["attributes"]
+                break
+        if attrs is None:
+            attrs = features[0]["attributes"]
+        raw = (attrs.get("FIRM_PAN") or "").strip()
+        firm_pan = f"{raw[:6]} {raw[6:]}" if len(raw) >= 11 else raw
+        return {
+            "firm_panel": firm_pan or (attrs.get("DFIRM_ID") or ""),
+            "eff_date": attrs.get("EFF_DATE"),
+        }
+    except Exception as e:
+        print(f"FIRM panel query error (Layer 3): {e}")
+        return {}
 
-    hazards.fema.gov (Layer 24) is not reachable from Replit servers.
-    """
-    return {}
+
+async def query_county_name(lat: float, lon: float) -> dict:
+    """Query TIGERweb Census county layer for county name from coordinates."""
+    params = {
+        "geometry": f"{lon},{lat}",
+        "geometryType": "esriGeometryPoint",
+        "inSR": "4326",
+        "spatialRel": "esriSpatialRelIntersects",
+        "outFields": "NAME",
+        "returnGeometry": "false",
+        "f": "json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(TIGERWEB_COUNTY_URL, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+        features = data.get("features", [])
+        if not features:
+            return {}
+        raw = (features[0]["attributes"].get("NAME") or "").strip()
+        return {"county_name": raw.title() if raw else ""}
+    except Exception as e:
+        print(f"County name query error (TIGERweb): {e}")
+        return {}
 
 
 # State FIPS → (full name, abbreviation) — used to derive state from DFIRM_ID prefix
@@ -241,32 +322,37 @@ def determine_flood_info(merged: dict) -> dict:
         else "No — Flood insurance is not federally required"
     )
 
-    # DFIRM_ID (returned as firm_panel) serves as both the community designation
-    # and the panel reference. Layer 6 community_id takes priority if available.
-    # NFIP Map Number (Community-Panel Number): DFIRM_ID is the community-panel designator
-    community_number = (
-        merged.get("community_id")
-        or (firm_panel if firm_panel else "Not Available")
-    )
-    # NFIP Community Number: same DFIRM_ID prefix (best available without hazards.fema.gov Layer 6)
-    panel_number = firm_panel or "Not Available"
+    # NFIP Map Number (Community-Panel Number): Layer 3 FIRM_PAN formatted as "240087 0018G"
+    # Falls back to DFIRM_ID from Esri (community prefix only) when Layer 3 is unavailable.
+    community_number = firm_panel if firm_panel else "Not Available"
 
-    # NFIP Community Name: prefer geocoded city, then any name in merged, then Not Available
+    # NFIP Community Number: CID from Layer 22 (e.g. "240087")
+    # Falls back to the community prefix derived from firm_panel.
+    community_id_raw = (merged.get("community_id") or "").strip()
+    if not community_id_raw and firm_panel:
+        community_id_raw = firm_panel.split()[0] if " " in firm_panel else firm_panel[:6]
+    panel_number = community_id_raw or "Not Available"
+
+    # NFIP Community Name: Layer 22 POL_NAME1 → geocoded city → Not Available
     geocoded_city = (merged.get("geocoded_city") or "").strip()
     community_name = (
-        merged.get("community_name")
-        or (geocoded_city if geocoded_city else "Not Available")
+        (merged.get("community_name") or "").strip()
+        or geocoded_city
+        or "Not Available"
     )
 
-    # NFIP Map Panel Effective/Revised Date: Layer 24 passes a formatted string or Unix ms timestamp.
-    # The Esri reduced-set layer does not expose effective date; if unavailable, indicate source.
+    # County: TIGERweb census county layer
+    county = (merged.get("county_name") or "").strip()
+
+    # NFIP Map Panel Effective/Revised Date: EFF_DATE from Layer 3 (Unix ms timestamp).
+    # Formatted as MM/DD/YYYY per FEMA SFHDF standard.
     if isinstance(eff_date_raw, str) and eff_date_raw:
         panel_effective_date = eff_date_raw
     elif isinstance(eff_date_raw, (int, float)) and eff_date_raw > 0:
         from datetime import datetime, timezone
         panel_effective_date = datetime.fromtimestamp(
             eff_date_raw / 1000, tz=timezone.utc
-        ).strftime("%B %d, %Y")
+        ).strftime("%m/%d/%Y")
     else:
         panel_effective_date = "See FEMA Map Service Center"
 
@@ -279,4 +365,5 @@ def determine_flood_info(merged: dict) -> dict:
         "panel_effective_date": panel_effective_date,
         "community_number": community_number,
         "community_name": community_name,
+        "county": county,
     }
