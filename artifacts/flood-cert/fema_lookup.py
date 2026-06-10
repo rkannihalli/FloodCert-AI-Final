@@ -46,7 +46,7 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
         "geometryType": "esriGeometryPoint",
         "inSR": "4326",
         "spatialRel": "esriSpatialRelIntersects",
-        "outFields": "FLD_ZONE,ZONE_SUBTY,SFHA_TF,DFIRM_ID,STUDY_TYP,EFF_DATE",
+        "outFields": "FLD_ZONE,ZONE_SUBTY,DFIRM_ID,EFF_DATE,SFHA_TF",
         "returnGeometry": "false",
         "f": "json",
     }
@@ -59,11 +59,18 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
 
         features = data.get("features", [])
         if features:
-            return features[0].get("attributes", {})
-        return {"FLD_ZONE": "UNDETERMINED", "SFHA_TF": "F"}
+            a = features[0]["attributes"]
+            return {
+                "flood_zone": a.get("FLD_ZONE", "X"),
+                "zone_subtype": a.get("ZONE_SUBTY", ""),
+                "firm_panel": a.get("DFIRM_ID", ""),
+                "eff_date": a.get("EFF_DATE", ""),
+                "in_sfha": a.get("SFHA_TF", "F") == "T",
+            }
     except Exception as e:
         print(f"FEMA NFHL query error: {e}")
-        return {"FLD_ZONE": "UNDETERMINED", "SFHA_TF": "F"}
+
+    return {"flood_zone": "UNDETERMINED", "in_sfha": False}
 
 
 # State FIPS → (full name, abbreviation) — used to derive state from DFIRM_ID prefix
@@ -145,16 +152,16 @@ SFHA_ZONES = {"A", "AE", "AH", "AO", "AR", "A99", "V", "VE"}
 
 
 def determine_flood_info(fema_data: dict) -> dict:
-    """Derive flood zone details, SFHA status, and insurance requirement from FEMA NFHL attributes."""
-    flood_zone = fema_data.get("FLD_ZONE") or "UNDETERMINED"
-    zone_subty = fema_data.get("ZONE_SUBTY") or ""
-    sfha_tf_raw = fema_data.get("SFHA_TF")
-    dfirm_id = fema_data.get("DFIRM_ID") or ""
-    eff_date_raw = fema_data.get("EFF_DATE")
+    """Derive flood zone details, SFHA status, and insurance requirement from normalized FEMA data."""
+    flood_zone = fema_data.get("flood_zone") or "UNDETERMINED"
+    zone_subtype = fema_data.get("zone_subtype") or ""
+    in_sfha = fema_data.get("in_sfha", False)
+    firm_panel = fema_data.get("firm_panel") or ""
+    eff_date_raw = fema_data.get("eff_date")
 
     flood_zone_upper = flood_zone.upper()
 
-    if zone_subty and "0.2" in zone_subty:
+    if zone_subtype and "0.2" in zone_subtype:
         zone_key = "X500"
     else:
         zone_key = flood_zone_upper
@@ -164,10 +171,8 @@ def determine_flood_info(fema_data: dict) -> dict:
         f"Flood Zone {flood_zone} — See FIRM panel for details"
     )
 
-    if sfha_tf_raw is not None:
-        sfha_bool = str(sfha_tf_raw).upper() in ("T", "TRUE", "YES", "1", "Y")
-    else:
-        sfha_bool = flood_zone_upper in SFHA_ZONES
+    # in_sfha is already a bool from query_fema_nfhl; fall back to zone-based check if missing
+    sfha_bool = in_sfha if isinstance(in_sfha, bool) else flood_zone_upper in SFHA_ZONES
 
     sfha_status = "Yes" if sfha_bool else "No"
     insurance_required = (
@@ -176,17 +181,17 @@ def determine_flood_info(fema_data: dict) -> dict:
         else "No — Flood insurance is not federally required"
     )
 
-    # Derive FIRM panel and community from DFIRM_ID
-    if dfirm_id and len(dfirm_id) >= 6:
-        community_number = dfirm_id[:6]
-        panel_number = dfirm_id
+    # Derive community number from the first 6 chars of DFIRM_ID (stored as firm_panel)
+    if firm_panel and len(firm_panel) >= 6:
+        community_number = firm_panel[:6]
+        panel_number = firm_panel
     else:
         community_number = "Not Available"
         panel_number = "Not Available"
 
-    community_name = "See Community FIRM" if dfirm_id else "Not Available"
+    community_name = "See Community FIRM" if firm_panel else "Not Available"
 
-    # EFF_DATE from Layer 28 is a Unix timestamp in milliseconds
+    # eff_date from Layer 28 is a Unix timestamp in milliseconds
     if eff_date_raw and isinstance(eff_date_raw, (int, float)) and eff_date_raw > 0:
         from datetime import datetime, timezone
         panel_effective_date = datetime.fromtimestamp(
