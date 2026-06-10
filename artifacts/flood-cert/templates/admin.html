@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Panel — FEMA Flood Certificate Generator</title>
+  <link rel="stylesheet" href="/static/css/main.css" />
+  <style>
+    .admin-wrap { max-width: 1000px; margin: 32px auto; padding: 0 24px 60px; }
+    .admin-section {
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      overflow: hidden;
+      margin-bottom: 28px;
+    }
+    .admin-section-hdr {
+      background: var(--navy);
+      color: #fff;
+      padding: 12px 20px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .admin-section-hdr .badge {
+      background: rgba(255,255,255,0.2);
+      border-radius: 20px;
+      padding: 2px 10px;
+      font-size: 0.75rem;
+    }
+    .admin-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .admin-table th {
+      background: #f5f7fa;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #5a6470;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 10px 16px;
+      text-align: left;
+      border-bottom: 1px solid #e8ecf0;
+    }
+    .admin-table td {
+      padding: 12px 16px;
+      font-size: 0.88rem;
+      color: #1e2530;
+      border-bottom: 1px solid #f0f2f5;
+      vertical-align: middle;
+    }
+    .admin-table tr:last-child td { border-bottom: none; }
+    .admin-table tr:hover td { background: #fafbfc; }
+    .status-badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .status-active   { background: #e6f4ed; color: #1a7a4a; }
+    .status-pending  { background: #fdf3e3; color: #d35400; }
+    .status-rejected { background: #fdf0ef; color: #c0392b; }
+    .status-admin    { background: #e8f0fb; color: #003366; }
+    .btn-sm {
+      padding: 5px 12px;
+      border-radius: 5px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: opacity 0.15s;
+    }
+    .btn-sm:hover { opacity: 0.85; }
+    .btn-approve { background: #1a7a4a; color: #fff; }
+    .btn-reject  { background: #e8ecf0; color: #5a6470; }
+    .btn-reset   { background: #0050a0; color: #fff; }
+    .btn-delete  { background: #fdf0ef; color: #c0392b; border: 1px solid #f5c6c3; }
+    .btn-activate { background: #e6f4ed; color: #1a7a4a; border: 1px solid #b8dfc9; }
+    .action-group { display: flex; gap: 6px; flex-wrap: wrap; }
+    .empty-row td { text-align: center; color: #9aa3ad; font-style: italic; padding: 24px; }
+    .flash-box {
+      background: #e6f4ed;
+      border: 2px solid #1a7a4a;
+      border-radius: 8px;
+      padding: 18px 22px;
+      margin-bottom: 24px;
+    }
+    .flash-box h3 { color: #1a7a4a; margin: 0 0 8px; font-size: 0.95rem; }
+    .flash-box .cred-block {
+      background: #fff;
+      border: 1px solid #b8dfc9;
+      border-radius: 6px;
+      padding: 12px 16px;
+      font-family: monospace;
+      font-size: 0.95rem;
+      margin-top: 8px;
+    }
+    .flash-box .cred-label { font-size: 0.75rem; color: #5a6470; font-family: inherit; }
+    .flash-warn { font-size: 0.78rem; color: #d35400; margin-top: 8px; }
+    .admin-add-form {
+      padding: 20px 24px;
+      border-top: 1px solid #e8ecf0;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr auto;
+      gap: 12px;
+      align-items: end;
+    }
+    .admin-add-form label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #003366;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      display: block;
+      margin-bottom: 4px;
+    }
+    .admin-add-form input {
+      width: 100%;
+      padding: 9px 12px;
+      border: 1.5px solid #e8ecf0;
+      border-radius: 6px;
+      font-size: 0.88rem;
+      outline: none;
+      box-sizing: border-box;
+    }
+    .admin-add-form input:focus {
+      border-color: #0050a0;
+      box-shadow: 0 0 0 3px rgba(0,80,160,0.1);
+    }
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+    .stat-card {
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      padding: 16px 20px;
+      text-align: center;
+    }
+    .stat-num { font-size: 2rem; font-weight: 800; color: var(--navy); line-height: 1; }
+    .stat-label { font-size: 0.75rem; color: #5a6470; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+    @media (max-width: 640px) {
+      .stats-row { grid-template-columns: 1fr 1fr; }
+      .admin-add-form { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <div class="header-seal">🌊</div>
+    <div class="header-text">
+      <h1>FEMA Flood Certificate Generator</h1>
+      <p>Admin Panel</p>
+    </div>
+    <a href="/" class="header-history-link">🏠 App</a>
+    <a href="/history" class="header-history-link">📂 History</a>
+    <form method="POST" action="/logout" style="margin:0;">
+      <button type="submit" class="header-history-link" style="background:none;border:none;cursor:pointer;color:#fff;font-size:inherit;padding:6px 14px;">⎋ Sign Out</button>
+    </form>
+  </div>
+</header>
+
+<div class="admin-wrap">
+
+  {% if flash %}
+  <div class="flash-box">
+    <h3>✅ User Approved — Share these credentials with the user</h3>
+    <div class="cred-block">
+      <div class="cred-label">NAME</div>
+      <div>{{ flash.name }}</div>
+      <div class="cred-label" style="margin-top:10px;">EMAIL</div>
+      <div>{{ flash.email }}</div>
+      <div class="cred-label" style="margin-top:10px;">TEMPORARY PASSWORD</div>
+      <div><strong>{{ flash.password }}</strong></div>
+    </div>
+    <div class="flash-warn">⚠ This password is shown only once. Copy it now and share it with the user securely.</div>
+  </div>
+  {% endif %}
+
+  <!-- Stats -->
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-num">{{ stats.total }}</div>
+      <div class="stat-label">Total Users</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num" style="color:var(--amber);">{{ stats.pending }}</div>
+      <div class="stat-label">Pending Requests</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num" style="color:var(--green);">{{ stats.active }}</div>
+      <div class="stat-label">Active Users</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num" style="color:var(--gray-600);">{{ stats.rejected }}</div>
+      <div class="stat-label">Rejected</div>
+    </div>
+  </div>
+
+  <!-- Pending access requests -->
+  <div class="admin-section">
+    <div class="admin-section-hdr">
+      🔔 Pending Access Requests
+      {% if pending %}<span class="badge">{{ pending | length }}</span>{% endif %}
+    </div>
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Reason</th>
+          <th>Requested</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if pending %}
+          {% for u in pending %}
+          <tr>
+            <td><strong>{{ u.name }}</strong></td>
+            <td>{{ u.email }}</td>
+            <td style="max-width:220px;color:#5a6470;">{{ u.request_reason or '—' }}</td>
+            <td style="white-space:nowrap;color:#9aa3ad;font-size:0.78rem;">{{ u.created_at[:10] }}</td>
+            <td>
+              <div class="action-group">
+                <form method="POST" action="/admin/users/{{ u.id }}/approve">
+                  <button class="btn-sm btn-approve">✓ Approve</button>
+                </form>
+                <form method="POST" action="/admin/users/{{ u.id }}/reject">
+                  <button class="btn-sm btn-reject">✕ Reject</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr class="empty-row"><td colspan="5">No pending access requests</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Active users -->
+  <div class="admin-section">
+    <div class="admin-section-hdr">👥 Active Users</div>
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Role</th>
+          <th>Approved</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if active %}
+          {% for u in active %}
+          <tr>
+            <td><strong>{{ u.name }}</strong></td>
+            <td>{{ u.email }}</td>
+            <td>
+              {% if u.is_admin %}
+                <span class="status-badge status-admin">Super Admin</span>
+              {% else %}
+                <span class="status-badge status-active">User</span>
+              {% endif %}
+            </td>
+            <td style="white-space:nowrap;color:#9aa3ad;font-size:0.78rem;">
+              {{ u.approved_at[:10] if u.approved_at else '—' }}
+            </td>
+            <td>
+              {% if not u.is_admin %}
+              <div class="action-group">
+                <form method="POST" action="/admin/users/{{ u.id }}/reset-password">
+                  <button class="btn-sm btn-reset">↺ Reset PW</button>
+                </form>
+                <form method="POST" action="/admin/users/{{ u.id }}/deactivate">
+                  <button class="btn-sm btn-reject">Deactivate</button>
+                </form>
+                <form method="POST" action="/admin/users/{{ u.id }}/delete"
+                      onsubmit="return confirm('Permanently delete {{ u.name }}?')">
+                  <button class="btn-sm btn-delete">Delete</button>
+                </form>
+              </div>
+              {% else %}
+                <span style="font-size:0.75rem;color:#9aa3ad;">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr class="empty-row"><td colspan="5">No active users</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Deactivated / Rejected users -->
+  {% if inactive %}
+  <div class="admin-section">
+    <div class="admin-section-hdr">🔒 Deactivated / Rejected Users</div>
+    <table class="admin-table">
+      <thead>
+        <tr><th>Name</th><th>Email</th><th>Status</th><th>Actions</th></tr>
+      </thead>
+      <tbody>
+        {% for u in inactive %}
+        <tr>
+          <td><strong>{{ u.name }}</strong></td>
+          <td>{{ u.email }}</td>
+          <td><span class="status-badge status-{{ u.status }}">{{ u.status | title }}</span></td>
+          <td>
+            <div class="action-group">
+              <form method="POST" action="/admin/users/{{ u.id }}/approve">
+                <button class="btn-sm btn-activate">✓ Re-activate</button>
+              </form>
+              <form method="POST" action="/admin/users/{{ u.id }}/delete"
+                    onsubmit="return confirm('Permanently delete {{ u.name }}?')">
+                <button class="btn-sm btn-delete">Delete</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- Add user directly -->
+  <div class="admin-section">
+    <div class="admin-section-hdr">➕ Add User Directly</div>
+    <form method="POST" action="/admin/users/create" class="admin-add-form">
+      <div>
+        <label for="new_name">Full Name</label>
+        <input type="text" id="new_name" name="name" placeholder="Jane Smith" required />
+      </div>
+      <div>
+        <label for="new_email">Email</label>
+        <input type="email" id="new_email" name="email" placeholder="jane@company.com" required />
+      </div>
+      <div>
+        <label for="new_password">Password</label>
+        <input type="text" id="new_password" name="password" placeholder="Leave blank to auto-generate" />
+      </div>
+      <div>
+        <button type="submit" class="btn-sm btn-approve" style="padding:9px 18px;font-size:0.85rem;">Add User</button>
+      </div>
+    </form>
+  </div>
+
+</div>
+</body>
+</html>

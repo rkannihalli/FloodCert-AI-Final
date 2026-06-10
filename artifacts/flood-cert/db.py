@@ -156,3 +156,132 @@ def count_flagged() -> int:
     ).fetchone()
     conn.close()
     return row[0] if row else 0
+
+
+# ── User / Auth tables ──────────────────────────────────────────────────────
+
+def init_auth_tables():
+    conn = get_conn()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            password_hash TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            is_admin INTEGER NOT NULL DEFAULT 0,
+            request_reason TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            approved_at TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def create_user(
+    email: str,
+    name: str,
+    reason: str = "",
+    password_hash: str = None,
+    status: str = "pending",
+    is_admin: int = 0,
+) -> int:
+    conn = get_conn()
+    cur = conn.execute(
+        """INSERT OR IGNORE INTO users
+           (email, name, request_reason, password_hash, status, is_admin, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (
+            email.lower().strip(),
+            name.strip(),
+            reason,
+            password_hash,
+            status,
+            is_admin,
+            datetime.utcnow().isoformat(),
+        ),
+    )
+    conn.commit()
+    uid = cur.lastrowid
+    conn.close()
+    return uid
+
+
+def get_user_by_email(email: str) -> Optional[dict]:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM users WHERE email = ?", (email.lower().strip(),)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_user_by_id(user_id: int) -> Optional[dict]:
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def list_users_by_status(status: str = None) -> list:
+    conn = get_conn()
+    if status:
+        rows = conn.execute(
+            "SELECT * FROM users WHERE status = ? ORDER BY created_at DESC", (status,)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM users ORDER BY created_at DESC"
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def approve_user(user_id: int, password_hash: str) -> None:
+    conn = get_conn()
+    conn.execute(
+        "UPDATE users SET status='active', password_hash=?, approved_at=? WHERE id=?",
+        (password_hash, datetime.utcnow().isoformat(), user_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def reject_user(user_id: int) -> None:
+    conn = get_conn()
+    conn.execute("UPDATE users SET status='rejected' WHERE id=?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def update_user_password(user_id: int, password_hash: str) -> None:
+    conn = get_conn()
+    conn.execute(
+        "UPDATE users SET password_hash=? WHERE id=?", (password_hash, user_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def set_user_status(user_id: int, status: str) -> None:
+    conn = get_conn()
+    conn.execute("UPDATE users SET status=? WHERE id=?", (status, user_id))
+    conn.commit()
+    conn.close()
+
+
+def delete_user(user_id: int) -> None:
+    conn = get_conn()
+    conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def count_pending_users() -> int:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT COUNT(*) FROM users WHERE status='pending'"
+    ).fetchone()
+    conn.close()
+    return row[0] if row else 0

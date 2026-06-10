@@ -8,6 +8,8 @@ from fastapi import FastAPI, Request, Form, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, Response, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from datetime import date
 from pdf_generator import generate_flood_certificate_pdf, generate_borrower_notice_pdf, generate_batch_report_pdf
 from fema_lookup import (
@@ -19,8 +21,15 @@ from db import (
     init_db, save_determination, get_determination,
     search_determinations, list_determinations, delete_determination,
     set_life_of_loan, flag_redetermination, list_monitored, count_flagged,
+    init_auth_tables, create_user, get_user_by_email, get_user_by_id,
+    list_users_by_status, approve_user, reject_user, update_user_password,
+    set_user_status, delete_user, count_pending_users,
 )
 from email_sender import send_certificate_email
+from auth import (
+    SUPER_ADMIN_EMAIL, SECRET_KEY, is_public,
+    hash_password, verify_password, generate_temp_password, get_session_user,
+)
 
 US_STATES = {
     "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA",
@@ -56,14 +65,270 @@ templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
 
+# ── Auth middleware stack ────────────────────────────────────────────────────
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if is_public(request.url.path):
+            return await call_next(request)
+        user = request.session.get("user")
+        if not user:
+            return RedirectResponse("/login", status_code=303)
+        return await call_next(request)
+
+
+# Order matters: SessionMiddleware is outermost (added last), so it populates
+# request.session before AuthMiddleware checks it.
+app.add_middleware(AuthMiddleware)
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=60 * 60 * 8)
+
+
+# ── Startup ──────────────────────────────────────────────────────────────────
+
 @app.on_event("startup")
 async def startup():
     init_db()
+    init_auth_tables()
+    # Seed or update Rishu's admin account from ADMIN_PASSWORD env var
+    admin_pw = os.getenv("ADMIN_PASSWORD", "")
+    if admin_pw:
+        existing = get_user_by_email(SUPER_ADMIN_EMAIL)
+        if not existing:
+            create_user(
+                email=SUPER_ADMIN_EMAIL,
+                name="Rishu Kannihalli",
+                status="active",
+                is_admin=1,
+                password_hash=hash_password(admin_pw),
+            )
+            print(f"[AUTH] Super admin account created for {SUPER_ADMIN_EMAIL}")
+        else:
+            # Always keep admin hash in sync with env var so pw changes take effect
+            update_user_password(existing["id"], hash_password(admin_pw))
+    else:
+        existing = get_user_by_email(SUPER_ADMIN_EMAIL)
+        if not existing:
+            tmp = generate_temp_password()
+            create_user(
+                email=SUPER_ADMIN_EMAIL,
+                name="Rishu Kannihalli",
+                status="active",
+                is_admin=1,
+                password_hash=hash_password(tmp),
+            )
+            print(f"[AUTH] ⚠ ADMIN_PASSWORD not set. Super admin created with password: {tmp}")
+            print(f"[AUTH] Set ADMIN_PASSWORD env var to persist the admin password across restarts.")
 
+
+# ── Auth routes ──────────────────────────────────────────────────────────────
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_get(request: Request):
+    if get_session_user(request):
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse("login.html", {"request": request})
+
+
+@app.post("/login", response_class=HTMLResponse)
+async def login_post(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+):
+    user = get_user_by_email(email)
+    if not user:
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "Invalid email or password.", "email": email},
+        )
+    if user["status"] == "pending":
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "Your access request is pending approval.", "email": email},
+        )
+    if user["status"] in ("rejected", "inactive"):
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "Your account has been deactivated. Contact the administrator.", "email": email},
+        )
+    if not user.get("password_hash") or not verify_password(password, user["password_hash"]):
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "Invalid email or password.", "email": email},
+        )
+    request.session["user"] = {
+        "id": user["id"],
+        "email": user["email"],
+        "name": user["name"],
+        "is_admin": bool(user["is_admin"]),
+    }
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/logout")
+async def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse("/login", status_code=303)
+
+
+@app.get("/request-access", response_class=HTMLResponse)
+async def request_access_get(request: Request):
+    return templates.TemplateResponse("request_access.html", {"request": request})
+
+
+@app.post("/request-access", response_class=HTMLResponse)
+async def request_access_post(
+    request: Request,
+    name: str = Form(...),
+    email: str = Form(...),
+    reason: str = Form(...),
+):
+    name = name.strip()
+    email = email.strip().lower()
+    reason = reason.strip()
+    if not name or not email or not reason:
+        return templates.TemplateResponse(
+            "request_access.html",
+            {"request": request, "error": "All fields are required.", "form": {"name": name, "email": email, "reason": reason}},
+        )
+    existing = get_user_by_email(email)
+    if existing:
+        if existing["status"] == "active":
+            return templates.TemplateResponse(
+                "request_access.html",
+                {"request": request, "error": "An account with this email already exists. Please sign in.", "form": {"name": name, "email": email, "reason": reason}},
+            )
+        return templates.TemplateResponse(
+            "request_access.html",
+            {"request": request, "submitted": True},
+        )
+    create_user(email=email, name=name, reason=reason, status="pending")
+    return templates.TemplateResponse("request_access.html", {"request": request, "submitted": True})
+
+
+# ── Admin routes ──────────────────────────────────────────────────────────────
+
+def _require_admin(request: Request):
+    user = get_session_user(request)
+    if not user or not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_panel(request: Request):
+    _require_admin(request)
+    flash = request.session.pop("flash_approval", None)
+    all_users = list_users_by_status()
+    pending  = [u for u in all_users if u["status"] == "pending"]
+    active   = [u for u in all_users if u["status"] == "active"]
+    inactive = [u for u in all_users if u["status"] in ("inactive", "rejected")]
+    stats = {
+        "total": len(all_users),
+        "pending": len(pending),
+        "active": len(active),
+        "rejected": len(inactive),
+    }
+    return templates.TemplateResponse("admin.html", {
+        "request": request,
+        "pending": pending,
+        "active": active,
+        "inactive": inactive,
+        "stats": stats,
+        "flash": flash,
+    })
+
+
+@app.post("/admin/users/{user_id}/approve")
+async def admin_approve(request: Request, user_id: int):
+    _require_admin(request)
+    user = get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(404)
+    tmp_pw = generate_temp_password()
+    approve_user(user_id, hash_password(tmp_pw))
+    request.session["flash_approval"] = {
+        "name": user["name"],
+        "email": user["email"],
+        "password": tmp_pw,
+    }
+    return RedirectResponse("/admin", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/reject")
+async def admin_reject(request: Request, user_id: int):
+    _require_admin(request)
+    reject_user(user_id)
+    return RedirectResponse("/admin", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/deactivate")
+async def admin_deactivate(request: Request, user_id: int):
+    _require_admin(request)
+    user = get_user_by_id(user_id)
+    if user and user.get("is_admin"):
+        raise HTTPException(400, detail="Cannot deactivate an admin account")
+    set_user_status(user_id, "inactive")
+    return RedirectResponse("/admin", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/reset-password")
+async def admin_reset_password(request: Request, user_id: int):
+    _require_admin(request)
+    user = get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(404)
+    tmp_pw = generate_temp_password()
+    update_user_password(user_id, hash_password(tmp_pw))
+    request.session["flash_approval"] = {
+        "name": user["name"],
+        "email": user["email"],
+        "password": tmp_pw,
+    }
+    return RedirectResponse("/admin", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/delete")
+async def admin_delete_user(request: Request, user_id: int):
+    _require_admin(request)
+    user = get_user_by_id(user_id)
+    if user and user.get("is_admin"):
+        raise HTTPException(400, detail="Cannot delete the admin account")
+    delete_user(user_id)
+    return RedirectResponse("/admin", status_code=303)
+
+
+@app.post("/admin/users/create")
+async def admin_create_user(
+    request: Request,
+    name: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(default=""),
+):
+    _require_admin(request)
+    name = name.strip()
+    email = email.strip().lower()
+    tmp_pw = password.strip() if password.strip() else generate_temp_password()
+    existing = get_user_by_email(email)
+    if existing:
+        return RedirectResponse("/admin", status_code=303)
+    create_user(
+        email=email,
+        name=name,
+        status="active",
+        password_hash=hash_password(tmp_pw),
+    )
+    request.session["flash_approval"] = {"name": name, "email": email, "password": tmp_pw}
+    return RedirectResponse("/admin", status_code=303)
+
+
+# ── App routes ────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    user = get_session_user(request)
+    pending_count = count_pending_users() if user and user.get("is_admin") else 0
+    return templates.TemplateResponse("index.html", {"request": request, "current_user": user, "pending_count": pending_count})
 
 
 @app.post("/geocode")
@@ -123,6 +388,8 @@ async def generate(
         return templates.TemplateResponse("index.html", {
             "request": request,
             "errors": errors,
+            "current_user": get_session_user(request),
+            "pending_count": 0,
             "form": {
                 "property_address": property_address,
                 "loan_id": loan_id,
@@ -213,6 +480,7 @@ async def generate(
         "data": certificate_data,
         "record_id": record_id,
         "comm": comm_info,
+        "current_user": get_session_user(request),
     })
 
 
@@ -294,12 +562,14 @@ async def history(request: Request, q: str = ""):
         records = search_determinations(q.strip())
     else:
         records = list_determinations(50)
+    user = get_session_user(request)
     return templates.TemplateResponse("history.html", {
         "request": request,
         "records": records,
         "query": q,
         "flagged_count": count_flagged(),
         "monitored_count": len(list_monitored()),
+        "current_user": user,
     })
 
 
@@ -416,6 +686,7 @@ async def history_detail(request: Request, record_id: int):
         "record_id": record_id,
         "from_history": True,
         "comm": comm_info,
+        "current_user": get_session_user(request),
     })
 
 
@@ -481,7 +752,7 @@ async def history_send_email(record_id: int):
 
 @app.get("/batch", response_class=HTMLResponse)
 async def batch_page(request: Request):
-    return templates.TemplateResponse("batch.html", {"request": request})
+    return templates.TemplateResponse("batch.html", {"request": request, "current_user": get_session_user(request)})
 
 
 @app.get("/batch/template")
