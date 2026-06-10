@@ -15,19 +15,31 @@
       <h1>FEMA Flood Certificate Generator</h1>
       <p>Standard Flood Hazard Determination — National Flood Hazard Layer</p>
     </div>
+    <a href="/batch" class="header-history-link">⚡ Batch</a>
     <a href="/history" class="header-history-link">📂 History</a>
   </div>
 </header>
 
 <main class="main">
 
+  {% set email_count = results | selectattr('lender_email') | selectattr('record_id', 'defined') | list | length %}
+
+  <!-- Email-all result banner (populated by JS) -->
+  <div id="emailAllBanner" style="display:none;" class="email-banner"></div>
+
   <div class="batch-header">
     <div>
       <h2>Batch Results</h2>
       <p>{{ results|length }} propert{{ 'y' if results|length == 1 else 'ies' }} processed on {{ determination_date }}.</p>
     </div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;">
-      <a href="/batch/download/{{ batch_id }}" class="btn-download">⬇ Download Results CSV</a>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      {% if email_count > 0 %}
+      <button class="btn-download email" id="emailAllBtn"
+              onclick="emailAll('{{ batch_id }}', {{ email_count }})">
+        ✉ Email All ({{ email_count }})
+      </button>
+      {% endif %}
+      <a href="/batch/download/{{ batch_id }}" class="btn-download">⬇ Download CSV</a>
       <a href="/batch" class="btn-secondary">New Batch</a>
     </div>
   </div>
@@ -124,6 +136,15 @@
             <form method="POST" action="/history/{{ r.record_id }}/download/notice" target="_blank" style="display:inline">
               <button type="submit" class="action-btn pdf-btn" title="Borrower Notice PDF">📋</button>
             </form>
+            {% if r.get('lender_email') %}
+            <button class="action-btn email-row-btn"
+                    title="Email certificate to {{ r.lender_email }}"
+                    data-record-id="{{ r.record_id }}"
+                    data-email="{{ r.lender_email }}"
+                    onclick="emailRow(this)">✉</button>
+            {% else %}
+            <span class="action-btn" style="color:var(--gray-400);cursor:default;" title="No lender email on file">✉</span>
+            {% endif %}
             {% endif %}
           </td>
         </tr>
@@ -139,10 +160,98 @@
   </div>
 
   <div class="disclaimer" style="margin-top:20px;">
-    <strong>Note:</strong> All successfully processed determinations have been saved to History. Individual PDFs (flood certificate and borrower notice) can be downloaded from the History page or using the action buttons above. The results CSV contains all determination data for record-keeping.
+    <strong>Note:</strong> All successfully processed determinations have been saved to History. Use the ✉ buttons to email individual certificates, or <em>Email All</em> to send to every lender that has an email address on file. Individual PDFs can also be downloaded using the 📄 📋 action buttons.
   </div>
 
 </main>
+
+<script>
+async function emailRow(btn) {
+  const recordId = btn.dataset.recordId;
+  const toEmail  = btn.dataset.email;
+  if (!confirm('Send flood certificate to ' + toEmail + '?')) return;
+
+  btn.disabled = true;
+  btn.textContent = '⏳';
+
+  try {
+    const resp = await fetch('/history/' + recordId + '/send-email', { method: 'POST' });
+    // endpoint returns a redirect; if it lands anywhere we check the final URL
+    if (resp.ok || resp.redirected) {
+      btn.textContent = '✅';
+      btn.style.background = 'var(--green-light)';
+      btn.style.color = 'var(--green)';
+      btn.title = 'Sent to ' + toEmail;
+    } else {
+      throw new Error('HTTP ' + resp.status);
+    }
+  } catch (err) {
+    btn.textContent = '❌';
+    btn.style.background = '#fde8e6';
+    btn.style.color = 'var(--red)';
+    btn.title = 'Failed: ' + err.message;
+    btn.disabled = false;
+  }
+}
+
+async function emailAll(batchId, count) {
+  if (!confirm('Email flood certificates to all ' + count + ' lender(s) with an email address?')) return;
+
+  const btn    = document.getElementById('emailAllBtn');
+  const banner = document.getElementById('emailAllBanner');
+  btn.disabled = true;
+  btn.textContent = '⏳ Sending…';
+  banner.style.display = 'none';
+
+  try {
+    const resp = await fetch('/batch/' + batchId + '/email-all', { method: 'POST' });
+    const data = await resp.json();
+
+    if (data.error) {
+      showBanner('error', '⚠ ' + data.error);
+      btn.disabled = false;
+      btn.textContent = '✉ Email All (' + count + ')';
+      return;
+    }
+
+    // Update per-row buttons that were just sent
+    data.details.forEach(function(d) {
+      if (d.status === 'sent') {
+        const rowBtn = document.querySelector('[data-record-id="' + d.record_id + '"]');
+        if (rowBtn) {
+          rowBtn.textContent = '✅';
+          rowBtn.disabled = true;
+          rowBtn.style.background = 'var(--green-light)';
+          rowBtn.style.color = 'var(--green)';
+          rowBtn.title = 'Sent to ' + d.to;
+        }
+      }
+    });
+
+    const parts = [];
+    if (data.sent)    parts.push('<strong>' + data.sent + ' sent</strong>');
+    if (data.skipped) parts.push(data.skipped + ' skipped (no email)');
+    if (data.failed)  parts.push('<span style="color:var(--red)">' + data.failed + ' failed</span>');
+    showBanner(data.failed > 0 ? 'error' : 'ok',
+      '✉ Batch email complete — ' + parts.join(', ') + '.');
+
+    btn.textContent = '✉ Sent (' + data.sent + ')';
+
+  } catch (err) {
+    showBanner('error', '⚠ Request failed: ' + err.message);
+    btn.disabled = false;
+    btn.textContent = '✉ Email All (' + count + ')';
+  }
+}
+
+function showBanner(type, html) {
+  const banner = document.getElementById('emailAllBanner');
+  banner.className = 'email-banner ' + (type === 'ok' ? 'email-banner-ok' : 'email-banner-err');
+  banner.innerHTML = html;
+  banner.style.display = 'block';
+  banner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+</script>
 
 </body>
 </html>

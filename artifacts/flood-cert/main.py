@@ -15,6 +15,8 @@ from email_sender import send_certificate_email
 
 # In-memory store for batch CSV results (keyed by batch_id)
 _batch_results: dict[str, bytes] = {}
+# In-memory store for batch record IDs (for bulk email)
+_batch_record_ids: dict[str, list[int]] = {}
 
 app = FastAPI(title="FEMA Flood Certificate Generator")
 
@@ -271,11 +273,11 @@ async def batch_page(request: Request):
 
 @app.get("/batch/template")
 async def batch_template():
-    header = "property_address,loan_id,borrower_name,lender_name\n"
+    header = "property_address,loan_id,borrower_name,lender_name,lender_email\n"
     rows = (
-        "123 Main St, Houston TX 77002,2024-001,John Doe,First National Bank\n"
-        "456 Oak Ave, Miami FL 33101,2024-002,Jane Smith,Coastal Lenders LLC\n"
-        "789 River Rd, New Orleans LA 70112,2024-003,Bob Johnson,Gulf Coast Mortgage\n"
+        "123 Main St, Houston TX 77002,2024-001,John Doe,First National Bank,jdoe.loan@firstnational.com\n"
+        "456 Oak Ave, Miami FL 33101,2024-002,Jane Smith,Coastal Lenders LLC,jsmith@coastallenders.com\n"
+        "789 River Rd, New Orleans LA 70112,2024-003,Bob Johnson,Gulf Coast Mortgage,\n"
     )
     csv_bytes = (header + rows).encode("utf-8-sig")
     return Response(
@@ -404,6 +406,7 @@ async def batch_process(request: Request, csv_file: UploadFile = File(...)):
 
     batch_id = str(uuid.uuid4())
     _batch_results[batch_id] = buf.getvalue().encode("utf-8-sig")
+    _batch_record_ids[batch_id] = [r["record_id"] for r in results if r.get("record_id")]
 
     return templates.TemplateResponse("batch_results.html", {
         "request": request,
@@ -411,6 +414,46 @@ async def batch_process(request: Request, csv_file: UploadFile = File(...)):
         "batch_id": batch_id,
         "determination_date": det_date,
     })
+
+
+@app.post("/batch/{batch_id}/email-all")
+async def batch_email_all(batch_id: str):
+    from fastapi.responses import JSONResponse
+    record_ids = _batch_record_ids.get(batch_id)
+    if record_ids is None:
+        return JSONResponse({"error": "Batch not found or expired. Re-run the batch to email certificates."}, status_code=404)
+
+    sent, skipped, failed, details = 0, 0, 0, []
+
+    async def _send_one(rid: int):
+        nonlocal sent, skipped, failed
+        record = get_determination(rid)
+        if not record:
+            failed += 1
+            details.append({"record_id": rid, "status": "error", "msg": "Record not found"})
+            return
+        to_email = (record.get("lender_email") or "").strip()
+        if not to_email:
+            skipped += 1
+            details.append({"record_id": rid, "loan_id": record.get("loan_id"), "status": "skipped", "msg": "No lender email"})
+            return
+        try:
+            pdf_bytes = generate_flood_certificate_pdf(record)
+            send_certificate_email(to_email, record, pdf_bytes)
+            sent += 1
+            details.append({"record_id": rid, "loan_id": record.get("loan_id"), "status": "sent", "to": to_email})
+        except Exception as exc:
+            failed += 1
+            details.append({"record_id": rid, "loan_id": record.get("loan_id"), "status": "error", "msg": str(exc)[:200]})
+
+    # Run with a semaphore so we don't flood the SMTP server
+    sem = asyncio.Semaphore(3)
+    async def bounded(rid):
+        async with sem:
+            await _send_one(rid)
+
+    await asyncio.gather(*[bounded(rid) for rid in record_ids])
+    return JSONResponse({"sent": sent, "skipped": skipped, "failed": failed, "details": details})
 
 
 @app.get("/batch/download/{batch_id}")
