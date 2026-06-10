@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, Response, RedirectResponse, Streamin
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from datetime import date
-from pdf_generator import generate_flood_certificate_pdf, generate_borrower_notice_pdf
+from pdf_generator import generate_flood_certificate_pdf, generate_borrower_notice_pdf, generate_batch_report_pdf
 from fema_lookup import geocode_address, query_fema_nfhl, determine_flood_info
 from db import init_db, save_determination, get_determination, search_determinations, list_determinations, delete_determination
 from email_sender import send_certificate_email
@@ -17,6 +17,8 @@ from email_sender import send_certificate_email
 _batch_results: dict[str, bytes] = {}
 # In-memory store for batch record IDs (for bulk email)
 _batch_record_ids: dict[str, list[int]] = {}
+# In-memory store for full batch results (for report PDF)
+_batch_full_results: dict[str, list] = {}
 
 app = FastAPI(title="FEMA Flood Certificate Generator")
 
@@ -407,6 +409,7 @@ async def batch_process(request: Request, csv_file: UploadFile = File(...)):
     batch_id = str(uuid.uuid4())
     _batch_results[batch_id] = buf.getvalue().encode("utf-8-sig")
     _batch_record_ids[batch_id] = [r["record_id"] for r in results if r.get("record_id")]
+    _batch_full_results[batch_id] = list(results)
 
     return templates.TemplateResponse("batch_results.html", {
         "request": request,
@@ -465,6 +468,26 @@ async def batch_download(batch_id: str):
     return Response(
         content=csv_bytes,
         media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/batch/{batch_id}/report")
+async def batch_report_pdf(batch_id: str):
+    results = _batch_full_results.get(batch_id)
+    if results is None:
+        raise HTTPException(status_code=404, detail="Batch report not found or expired. Please re-run the batch.")
+    if not results:
+        raise HTTPException(status_code=404, detail="No results in this batch.")
+    det_date = next(
+        (r.get("determination_date") for r in results if r.get("determination_date")),
+        date.today().strftime("%B %d, %Y"),
+    )
+    pdf_bytes = generate_batch_report_pdf(results, det_date)
+    filename = f"batch_flood_report_{date.today().isoformat()}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Batch Flood Determination Report</title>
+  <style>
+    @page {
+      size: letter landscape;
+      margin: 0.55in 0.65in;
+      @bottom-center {
+        content: "Page " counter(page) " of " counter(pages) "  —  Batch Flood Hazard Determination Report  —  " string(batch-date);
+        font-size: 7.5pt;
+        color: #888;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<div class="pdf-header">
+  <div class="pdf-logo-block">
+    <div class="pdf-logo-circle">🌊</div>
+    <div class="pdf-logo-label">NFHL</div>
+  </div>
+  <div class="pdf-header-text">
+    <h1>Batch Flood Hazard Determination Report</h1>
+    <div class="subtitle">
+      National Flood Hazard Layer (NFHL) — FEMA ArcGIS REST Service &nbsp;|&nbsp;
+      US Census Bureau Geocoder &nbsp;|&nbsp; Standard Flood Hazard Determination
+    </div>
+  </div>
+  <div class="pdf-header-meta">
+    <div class="meta-label">Report Date</div>
+    <div class="meta-value" style="string-set: batch-date content();">{{ batch_date }}</div>
+    <br/>
+    <div class="meta-label">Properties</div>
+    <div class="meta-value">{{ total }}</div>
+  </div>
+</div>
+
+<!-- ── Summary stats ── -->
+<table class="stats-grid">
+  <tr>
+    <td class="stat-cell stat-total">
+      <div class="stat-num">{{ total }}</div>
+      <div class="stat-label">Total Properties</div>
+    </td>
+    <td class="stat-cell stat-sfha">
+      <div class="stat-num">{{ sfha_count }}</div>
+      <div class="stat-label">In SFHA — Insurance Required</div>
+    </td>
+    <td class="stat-cell stat-ok">
+      <div class="stat-num">{{ non_sfha_count }}</div>
+      <div class="stat-label">Non-SFHA</div>
+    </td>
+    <td class="stat-cell stat-undetermined">
+      <div class="stat-num">{{ undetermined_count }}</div>
+      <div class="stat-label">Zone Undetermined</div>
+    </td>
+    <td class="stat-cell stat-error">
+      <div class="stat-num">{{ error_count }}</div>
+      <div class="stat-label">Errors / Not Geocoded</div>
+    </td>
+  </tr>
+</table>
+
+{% if sfha_count > 0 %}
+<div class="sfha-alert">
+  ⚠&nbsp; <strong>{{ sfha_count }} propert{{ 'y is' if sfha_count == 1 else 'ies are' }} located in a Special Flood Hazard Area (SFHA).</strong>
+  Federal flood insurance is required for federally backed loans on properties in SFHA zones.
+</div>
+{% endif %}
+
+<!-- ── Determinations table ── -->
+<div class="section" style="margin-top:10pt;">
+  <div class="section-title">Flood Zone Determination Summary — All Properties</div>
+  <table class="report-table">
+    <thead>
+      <tr>
+        <th style="width:3%">#</th>
+        <th style="width:10%">Loan ID</th>
+        <th style="width:12%">Borrower</th>
+        <th style="width:22%">Matched Address</th>
+        <th style="width:6%">Zone</th>
+        <th style="width:6%">SFHA</th>
+        <th style="width:11%">Insurance</th>
+        <th style="width:12%">FIRM Panel</th>
+        <th style="width:10%">Community No.</th>
+        <th style="width:8%">Determined</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in results %}
+      {% set sfha = r.get('sfha_status') == 'Yes' %}
+      {% set undetermined = r.get('flood_zone') == 'UNDETERMINED' %}
+      {% set has_error = r.get('error') %}
+      <tr class="{{ 'rpt-row-sfha' if sfha else ('rpt-row-error' if has_error else ('rpt-row-even' if loop.index is even else '')) }}">
+        <td class="rpt-num">{{ loop.index }}</td>
+        <td class="rpt-loan">{{ r.get('loan_id', '') }}</td>
+        <td>{{ r.get('borrower_name', '') }}</td>
+        <td class="rpt-addr">{{ r.get('matched_address') or r.get('property_address', '') }}</td>
+        <td class="rpt-zone {{ 'rpt-zone-sfha' if sfha else ('rpt-zone-undetermined' if undetermined else ('rpt-zone-ok' if not has_error else '')) }}">
+          {% if has_error %}—{% else %}{{ r.get('flood_zone', '—') }}{% endif %}
+        </td>
+        <td class="{{ 'rpt-sfha-yes' if sfha else ('rpt-sfha-no' if not has_error else '') }}">
+          {% if has_error %}—{% else %}{{ r.get('sfha_status', '—') }}{% endif %}
+        </td>
+        <td>
+          {% if has_error %}<span class="rpt-error-text">{{ r.error }}</span>
+          {% elif sfha %}<strong class="rpt-sfha-yes">Required</strong>
+          {% elif undetermined %}<span style="color:#e67e22;">Verify</span>
+          {% else %}<span class="rpt-sfha-no">Not Required</span>{% endif %}
+        </td>
+        <td style="font-size:7.5pt;">{{ r.get('panel_number', '—') }}</td>
+        <td style="font-size:7.5pt;">{{ r.get('community_number', '—') }}</td>
+        <td style="font-size:7.5pt;color:#5a6470;">{{ r.get('determination_date', '') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- ── Zone legend ── -->
+<table class="legend-table">
+  <tr>
+    <td class="legend-label">Zone Legend:</td>
+    <td><span class="legend-chip legend-sfha">A / AE / AO / VE</span> Special Flood Hazard Area — insurance required</td>
+    <td><span class="legend-chip legend-ok">B / C / X</span> Moderate / minimal flood hazard</td>
+    <td><span class="legend-chip legend-undetermined">UNDETERMINED</span> Zone not found — verify against FIRM panel</td>
+  </tr>
+</table>
+
+<!-- ── Footer ── -->
+<div class="pdf-footer">
+  <strong>Data Sources:</strong> FEMA National Flood Hazard Layer (NFHL) — ArcGIS Online Hosted Service &nbsp;|&nbsp;
+  US Census Bureau Geocoder — geocoding.geo.census.gov<br/>
+  <strong>Disclaimer:</strong> Determinations are based on publicly available digital flood map data and should be verified against official FEMA Flood Insurance Rate Map (FIRM) panels for regulatory compliance.
+  This report is not issued by or affiliated with FEMA. Lenders and loan officers should confirm determinations using a certified flood determination service for legally binding compliance purposes.
+</div>
+
+</body>
+</html>
