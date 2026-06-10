@@ -3,7 +3,7 @@ from typing import Optional
 
 CENSUS_GEOCODER_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
 
-FEMA_NFHL_URL = "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_Flood_Hazard_Reduced_Set_gdb/FeatureServer/0/query"
+FEMA_NFHL_URL = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28/query"
 
 
 async def geocode_address(address: str) -> Optional[dict]:
@@ -40,13 +40,13 @@ async def geocode_address(address: str) -> Optional[dict]:
 
 
 async def query_fema_nfhl(lat: float, lon: float) -> dict:
-    """Query the FEMA NFHL via ArcGIS Online hosted feature service."""
+    """Query FEMA NFHL Layer 28 (FLD_HAZ_AR) — the authoritative flood zone polygon layer."""
     params = {
         "geometry": f"{lon},{lat}",
         "geometryType": "esriGeometryPoint",
         "inSR": "4326",
         "spatialRel": "esriSpatialRelIntersects",
-        "outFields": "FLD_ZONE,ZONE_SUBTY,SFHA_TF,DFIRM_ID,STUDY_TYP,SOURCE_CIT",
+        "outFields": "FLD_ZONE,ZONE_SUBTY,SFHA_TF,DFIRM_ID,STUDY_TYP,EFF_DATE",
         "returnGeometry": "false",
         "f": "json",
     }
@@ -60,10 +60,10 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
         features = data.get("features", [])
         if features:
             return features[0].get("attributes", {})
-        return {}
+        return {"FLD_ZONE": "UNDETERMINED", "SFHA_TF": "F"}
     except Exception as e:
         print(f"FEMA NFHL query error: {e}")
-        return {}
+        return {"FLD_ZONE": "UNDETERMINED", "SFHA_TF": "F"}
 
 
 # State FIPS → (full name, abbreviation) — used to derive state from DFIRM_ID prefix
@@ -150,7 +150,7 @@ def determine_flood_info(fema_data: dict) -> dict:
     zone_subty = fema_data.get("ZONE_SUBTY") or ""
     sfha_tf_raw = fema_data.get("SFHA_TF")
     dfirm_id = fema_data.get("DFIRM_ID") or ""
-    source_cit = fema_data.get("SOURCE_CIT") or ""
+    eff_date_raw = fema_data.get("EFF_DATE")
 
     flood_zone_upper = flood_zone.upper()
 
@@ -176,16 +176,24 @@ def determine_flood_info(fema_data: dict) -> dict:
         else "No — Flood insurance is not federally required"
     )
 
-    # Derive FIRM panel and community from DFIRM_ID / SOURCE_CIT
+    # Derive FIRM panel and community from DFIRM_ID
     if dfirm_id and len(dfirm_id) >= 6:
         community_number = dfirm_id[:6]
-        panel_number = source_cit if source_cit else dfirm_id
+        panel_number = dfirm_id
     else:
         community_number = "Not Available"
-        panel_number = source_cit if source_cit else "Not Available"
+        panel_number = "Not Available"
 
     community_name = "See Community FIRM" if dfirm_id else "Not Available"
-    panel_effective_date = "See FIRM Panel"
+
+    # EFF_DATE from Layer 28 is a Unix timestamp in milliseconds
+    if eff_date_raw and isinstance(eff_date_raw, (int, float)) and eff_date_raw > 0:
+        from datetime import datetime, timezone
+        panel_effective_date = datetime.fromtimestamp(
+            eff_date_raw / 1000, tz=timezone.utc
+        ).strftime("%B %d, %Y")
+    else:
+        panel_effective_date = "See FIRM Panel"
 
     return {
         "flood_zone": flood_zone,
