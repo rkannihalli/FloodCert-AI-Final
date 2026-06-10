@@ -296,10 +296,46 @@
     </div>
   </div>
 
+  <!-- Compliance summary card -->
+  <div class="compliance-card">
+    <div class="compliance-card-header">Compliance &amp; Documentation Summary</div>
+    <div class="compliance-card-body">
+      <div class="compliance-pillar">
+        <span class="compliance-check">✅</span>
+        <div>
+          <div class="compliance-pillar-title">FEMA-Compliant Determination</div>
+          <div class="compliance-pillar-desc">Flood zone determined from the live FEMA NFHL via ArcGIS REST and mapped to the SFHDF standard — satisfying the Flood Disaster Protection Act of 1973 and the National Flood Insurance Reform Act of 1994.</div>
+        </div>
+      </div>
+      <div class="compliance-pillar">
+        <span class="compliance-check">🔔</span>
+        <div>
+          <div class="compliance-pillar-title">Life-of-Loan Tracking Available</div>
+          <div class="compliance-pillar-desc">Enable the monitoring toggle below to track FIRM panel changes for the life of this loan — satisfying lender and investor requirements for re-determination upon map revision.</div>
+        </div>
+      </div>
+      <div class="compliance-pillar">
+        <span class="compliance-check">🛡</span>
+        <div>
+          <div class="compliance-pillar-title">Source-Cited Accuracy</div>
+          <div class="compliance-pillar-desc">Coordinates, NFIP community number, map panel number, and effective date are recorded verbatim from official government sources: US Census Geocoder + FEMA NFHL Layer 3 &amp; Layer 22.</div>
+        </div>
+      </div>
+      <div class="compliance-pillar">
+        <span class="compliance-check">📁</span>
+        <div>
+          <div class="compliance-pillar-title">Audit &amp; Investor Documentation</div>
+          <div class="compliance-pillar-desc">The SFHDF Certificate PDF and Borrower Notice PDF above are the standard documentation package required for secondary-market delivery (Fannie Mae, Freddie Mac), investor review, and regulatory audit files.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   {% if record_id %}
   <div class="lol-card">
     <div class="lol-card-header">
       🔔 Life-of-Loan Monitoring
+      <span class="lol-header-note">Required when lender or investor mandates re-determination on map revision</span>
     </div>
     <div class="lol-card-body">
       <div class="lol-status {{ 'lol-changed' if data.get('needs_redetermination') else ('lol-current' if data.get('last_checked_date') else 'lol-off') }}"

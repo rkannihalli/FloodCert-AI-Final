@@ -1316,10 +1316,115 @@ input[type="text"]::placeholder {
   cursor: default;
 }
 
+/* ── Compliance pillars strip (index) ── */
+.pillars-strip {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.pillar {
+  background: var(--white);
+  border: 1.5px solid var(--gray-200);
+  border-left: 4px solid var(--blue);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  box-shadow: var(--shadow);
+}
+
+.pillar-icon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+  line-height: 1;
+  margin-top: 2px;
+}
+
+.pillar-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--navy);
+  margin-bottom: 5px;
+}
+
+.pillar-desc {
+  font-size: 0.78rem;
+  color: var(--gray-600);
+  line-height: 1.5;
+}
+
+/* ── Compliance summary card (result) ── */
+.compliance-card {
+  background: var(--white);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  margin-top: 24px;
+}
+
+.compliance-card-header {
+  background: var(--navy);
+  color: var(--white);
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 12px 20px;
+}
+
+.compliance-card-body {
+  padding: 8px 0;
+}
+
+.compliance-pillar {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.compliance-pillar:last-child {
+  border-bottom: none;
+}
+
+.compliance-check {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.compliance-pillar-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--navy);
+  margin-bottom: 4px;
+}
+
+.compliance-pillar-desc {
+  font-size: 0.8rem;
+  color: var(--gray-600);
+  line-height: 1.55;
+}
+
+/* ── Life-of-loan header note ── */
+.lol-header-note {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: rgba(255,255,255,0.7);
+  margin-left: 10px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 /* ── Responsive ── */
 @media (max-width: 640px) {
   .form-grid { grid-template-columns: 1fr; }
   .detail-grid { grid-template-columns: 1fr; }
+  .pillars-strip { grid-template-columns: 1fr; }
   .header-badge { display: none; }
   .zone-banner { flex-wrap: wrap; }
   .insurance-tag { margin-left: 0; }
