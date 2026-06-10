@@ -11,6 +11,7 @@ from datetime import date
 from pdf_generator import generate_flood_certificate_pdf, generate_borrower_notice_pdf
 from fema_lookup import geocode_address, query_fema_nfhl, determine_flood_info
 from db import init_db, save_determination, get_determination, search_determinations, list_determinations, delete_determination
+from email_sender import send_certificate_email
 
 # In-memory store for batch CSV results (keyed by batch_id)
 _batch_results: dict[str, bytes] = {}
@@ -39,6 +40,7 @@ async def generate(
     loan_id: str = Form(...),
     borrower_name: str = Form(...),
     lender_name: str = Form(...),
+    lender_email: str = Form(default=""),
 ):
     errors = []
     if not property_address.strip():
@@ -59,6 +61,7 @@ async def generate(
                 "loan_id": loan_id,
                 "borrower_name": borrower_name,
                 "lender_name": lender_name,
+                "lender_email": lender_email,
             }
         })
 
@@ -72,6 +75,7 @@ async def generate(
                 "loan_id": loan_id,
                 "borrower_name": borrower_name,
                 "lender_name": lender_name,
+                "lender_email": lender_email,
             }
         })
 
@@ -84,6 +88,7 @@ async def generate(
         "loan_id": loan_id,
         "borrower_name": borrower_name,
         "lender_name": lender_name,
+        "lender_email": lender_email.strip(),
         "lat": geo_result["lat"],
         "lon": geo_result["lon"],
         "flood_zone": flood_info["flood_zone"],
@@ -118,6 +123,7 @@ async def download_certificate(
     loan_id: str = Form(...),
     borrower_name: str = Form(...),
     lender_name: str = Form(...),
+    lender_email: str = Form(default=""),
     lat: str = Form(...),
     lon: str = Form(...),
     flood_zone: str = Form(...),
@@ -148,6 +154,7 @@ async def download_notice(
     loan_id: str = Form(...),
     borrower_name: str = Form(...),
     lender_name: str = Form(...),
+    lender_email: str = Form(default=""),
     lat: str = Form(...),
     lon: str = Form(...),
     flood_zone: str = Form(...),
@@ -231,6 +238,32 @@ async def history_delete(record_id: int):
     return RedirectResponse(url="/history", status_code=303)
 
 
+@app.post("/history/{record_id}/send-email")
+async def history_send_email(record_id: int):
+    record = get_determination(record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    to_email = (record.get("lender_email") or "").strip()
+    if not to_email:
+        return RedirectResponse(
+            url=f"/history/{record_id}?email_error=No+lender+email+address+on+file+for+this+record.",
+            status_code=303,
+        )
+    try:
+        pdf_bytes = generate_flood_certificate_pdf(record)
+        send_certificate_email(to_email, record, pdf_bytes)
+        return RedirectResponse(
+            url=f"/history/{record_id}?email_sent=1&email_to={to_email}",
+            status_code=303,
+        )
+    except ValueError as exc:
+        msg = str(exc).replace(" ", "+")
+        return RedirectResponse(url=f"/history/{record_id}?email_error={msg}", status_code=303)
+    except Exception as exc:
+        msg = f"Failed+to+send+email:+{str(exc)[:120].replace(' ', '+')}".replace("&", "%26")
+        return RedirectResponse(url=f"/history/{record_id}?email_error={msg}", status_code=303)
+
+
 @app.get("/batch", response_class=HTMLResponse)
 async def batch_page(request: Request):
     return templates.TemplateResponse("batch.html", {"request": request})
@@ -257,6 +290,7 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str) -> dict:
     loan_id = row.get("loan_id", "").strip()
     borrower_name = row.get("borrower_name", "").strip()
     lender_name = row.get("lender_name", "").strip()
+    lender_email = row.get("lender_email", "").strip()
 
     if not all([property_address, loan_id, borrower_name, lender_name]):
         return {
@@ -286,6 +320,7 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str) -> dict:
         "loan_id": loan_id,
         "borrower_name": borrower_name,
         "lender_name": lender_name,
+        "lender_email": lender_email,
         "lat": geo["lat"],
         "lon": geo["lon"],
         "flood_zone": flood_info["flood_zone"],

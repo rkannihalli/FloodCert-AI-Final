@@ -24,6 +24,20 @@
 
 <main class="main">
 
+  {% set email_sent = request.query_params.get('email_sent') %}
+  {% set email_to   = request.query_params.get('email_to') %}
+  {% set email_err  = request.query_params.get('email_error') %}
+
+  {% if email_sent %}
+  <div class="email-banner email-banner-ok">
+    ✉ Certificate emailed successfully to <strong>{{ email_to }}</strong>.
+  </div>
+  {% elif email_err %}
+  <div class="email-banner email-banner-err">
+    ⚠ Could not send email: {{ email_err | replace('+', ' ') }}
+  </div>
+  {% endif %}
+
   <div class="result-header">
     <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;">
       <h2>Flood Hazard Determination Result</h2>
@@ -69,6 +83,12 @@
           <span class="detail-label">Lender</span>
           <span class="detail-value">{{ data.lender_name }}</span>
         </div>
+        {% if data.lender_email %}
+        <div class="detail-row">
+          <span class="detail-label">Lender Email</span>
+          <span class="detail-value"><a href="mailto:{{ data.lender_email }}" style="color:var(--blue);">{{ data.lender_email }}</a></span>
+        </div>
+        {% endif %}
         <div class="detail-row">
           <span class="detail-label">Loan ID</span>
           <span class="detail-value">{{ data.loan_id }}</span>
@@ -150,6 +170,7 @@
         <input type="hidden" name="loan_id"               value="{{ data.loan_id }}" />
         <input type="hidden" name="borrower_name"         value="{{ data.borrower_name }}" />
         <input type="hidden" name="lender_name"           value="{{ data.lender_name }}" />
+        <input type="hidden" name="lender_email"          value="{{ data.lender_email or '' }}" />
         <input type="hidden" name="lat"                   value="{{ data.lat }}" />
         <input type="hidden" name="lon"                   value="{{ data.lon }}" />
         <input type="hidden" name="flood_zone"            value="{{ data.flood_zone }}" />
@@ -171,6 +192,7 @@
         <input type="hidden" name="loan_id"               value="{{ data.loan_id }}" />
         <input type="hidden" name="borrower_name"         value="{{ data.borrower_name }}" />
         <input type="hidden" name="lender_name"           value="{{ data.lender_name }}" />
+        <input type="hidden" name="lender_email"          value="{{ data.lender_email or '' }}" />
         <input type="hidden" name="lat"                   value="{{ data.lat }}" />
         <input type="hidden" name="lon"                   value="{{ data.lon }}" />
         <input type="hidden" name="flood_zone"            value="{{ data.flood_zone }}" />
@@ -185,6 +207,17 @@
         <input type="hidden" name="determination_date_iso" value="{{ data.determination_date_iso }}" />
         <button type="submit" class="btn-download secondary">📋 Download Borrower Notice (PDF)</button>
       </form>
+
+      {% if record_id and data.lender_email %}
+      <form method="POST" action="/history/{{ record_id }}/send-email">
+        <button type="submit" class="btn-download email"
+                onclick="return confirm('Send flood certificate PDF to {{ data.lender_email }}?')">
+          ✉ Email to Lender
+        </button>
+      </form>
+      {% elif record_id and not data.lender_email %}
+      <span class="email-no-addr" title="Add a lender email address to enable this">✉ No lender email on file</span>
+      {% endif %}
 
     </div>
   </div>

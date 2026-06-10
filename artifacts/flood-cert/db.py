@@ -20,6 +20,7 @@ def init_db():
             loan_id TEXT NOT NULL,
             borrower_name TEXT NOT NULL,
             lender_name TEXT NOT NULL,
+            lender_email TEXT NOT NULL DEFAULT '',
             property_address TEXT NOT NULL,
             matched_address TEXT NOT NULL,
             lat REAL,
@@ -37,6 +38,12 @@ def init_db():
             created_at TEXT NOT NULL
         )
     """)
+    # Migrate existing databases that pre-date the lender_email column
+    try:
+        conn.execute("ALTER TABLE determinations ADD COLUMN lender_email TEXT NOT NULL DEFAULT ''")
+        conn.commit()
+    except Exception:
+        pass  # Column already exists
     conn.commit()
     conn.close()
 
@@ -45,19 +52,19 @@ def save_determination(data: dict) -> int:
     conn = get_conn()
     cur = conn.execute("""
         INSERT INTO determinations (
-            loan_id, borrower_name, lender_name,
+            loan_id, borrower_name, lender_name, lender_email,
             property_address, matched_address, lat, lon,
             flood_zone, flood_zone_description, sfha_status, insurance_required,
             panel_number, panel_effective_date, community_number, community_name,
             determination_date, determination_date_iso, created_at
         ) VALUES (
-            :loan_id, :borrower_name, :lender_name,
+            :loan_id, :borrower_name, :lender_name, :lender_email,
             :property_address, :matched_address, :lat, :lon,
             :flood_zone, :flood_zone_description, :sfha_status, :insurance_required,
             :panel_number, :panel_effective_date, :community_number, :community_name,
             :determination_date, :determination_date_iso, :created_at
         )
-    """, {**data, "created_at": datetime.utcnow().isoformat()})
+    """, {**{"lender_email": ""}, **data, "created_at": datetime.utcnow().isoformat()})
     conn.commit()
     record_id = cur.lastrowid
     conn.close()

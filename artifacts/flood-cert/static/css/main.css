@@ -1015,6 +1015,41 @@ input[type="text"]::placeholder {
   border-bottom: 1px dashed var(--red);
 }
 
+/* ── Email button & banners ── */
+.btn-download.email {
+  background: linear-gradient(135deg, #1a7a4a 0%, #145c38 100%);
+}
+
+.email-banner {
+  border-radius: var(--radius);
+  padding: 12px 18px;
+  margin-bottom: 20px;
+  font-size: 0.88rem;
+  font-weight: 500;
+}
+
+.email-banner-ok {
+  background: var(--green-light);
+  border: 1.5px solid var(--green);
+  color: #0f4f2e;
+}
+
+.email-banner-err {
+  background: #fdf0ef;
+  border: 1.5px solid var(--red);
+  color: var(--red);
+}
+
+.email-no-addr {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--gray-400);
+  font-size: 0.85rem;
+  padding: 11px 0;
+  cursor: default;
+}
+
 /* ── Responsive ── */
 @media (max-width: 640px) {
   .form-grid { grid-template-columns: 1fr; }

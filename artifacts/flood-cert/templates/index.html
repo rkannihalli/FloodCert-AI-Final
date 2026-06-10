@@ -78,7 +78,7 @@
             />
           </div>
 
-          <div class="form-group full-width">
+          <div class="form-group">
             <label for="lender_name">Lender / Institution Name</label>
             <input
               type="text"
@@ -88,6 +88,18 @@
               value="{{ form.lender_name if form else '' }}"
               required
             />
+          </div>
+
+          <div class="form-group">
+            <label for="lender_email">Lender Email <span style="font-weight:400;color:var(--gray-400);text-transform:none;">(optional — for sending the certificate)</span></label>
+            <input
+              type="email"
+              id="lender_email"
+              name="lender_email"
+              placeholder="e.g. loans@firstnationalbank.com"
+              value="{{ form.lender_email if form else '' }}"
+            />
+            <span class="form-hint">If provided, you can email the certificate PDF directly from the result page.</span>
           </div>
         </div>
 
