@@ -34,10 +34,16 @@ async def geocode_address(address: str) -> Optional[dict]:
         coords = match.get("coordinates", {})
         matched_address = match.get("matchedAddress", address)
 
+        components = match.get("addressComponents", {})
+        city = components.get("city", "").title()
+        state_abbr = components.get("state", "")
+
         return {
             "lat": coords.get("y"),
             "lon": coords.get("x"),
             "matched_address": matched_address,
+            "city": city,
+            "state_abbr": state_abbr,
         }
     except Exception as e:
         print(f"Geocoding error: {e}")
@@ -237,17 +243,23 @@ def determine_flood_info(merged: dict) -> dict:
 
     # DFIRM_ID (returned as firm_panel) serves as both the community designation
     # and the panel reference. Layer 6 community_id takes priority if available.
+    # NFIP Map Number (Community-Panel Number): DFIRM_ID is the community-panel designator
     community_number = (
         merged.get("community_id")
         or (firm_panel if firm_panel else "Not Available")
     )
-    community_name = merged.get("community_name") or (
-        "See Community FIRM" if firm_panel else "Not Available"
-    )
+    # NFIP Community Number: same DFIRM_ID prefix (best available without hazards.fema.gov Layer 6)
     panel_number = firm_panel or "Not Available"
 
-    # eff_date: Layer 24 passes an already-formatted string ("06/16/21");
-    # Layer 28 passes a Unix ms timestamp — handle both.
+    # NFIP Community Name: prefer geocoded city, then any name in merged, then Not Available
+    geocoded_city = (merged.get("geocoded_city") or "").strip()
+    community_name = (
+        merged.get("community_name")
+        or (geocoded_city if geocoded_city else "Not Available")
+    )
+
+    # NFIP Map Panel Effective/Revised Date: Layer 24 passes a formatted string or Unix ms timestamp.
+    # The Esri reduced-set layer does not expose effective date; if unavailable, indicate source.
     if isinstance(eff_date_raw, str) and eff_date_raw:
         panel_effective_date = eff_date_raw
     elif isinstance(eff_date_raw, (int, float)) and eff_date_raw > 0:
@@ -256,7 +268,7 @@ def determine_flood_info(merged: dict) -> dict:
             eff_date_raw / 1000, tz=timezone.utc
         ).strftime("%B %d, %Y")
     else:
-        panel_effective_date = "See FIRM Panel"
+        panel_effective_date = "See FEMA Map Service Center"
 
     return {
         "flood_zone": flood_zone,

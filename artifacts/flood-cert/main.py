@@ -165,7 +165,10 @@ async def generate(
             query_nfip_community(geo_result["lat"], geo_result["lon"]),
             query_firm_panel(geo_result["lat"], geo_result["lon"]),
         )
-        flood_info = determine_flood_info({**zone_data, **community_data, **firm_data})
+        flood_info = determine_flood_info({
+            **zone_data, **community_data, **firm_data,
+            "geocoded_city": geo_result.get("city", ""),
+        })
         geo_lat = geo_result["lat"]
         geo_lon = geo_result["lon"]
         geo_matched = geo_result.get("matched_address", property_address)
@@ -530,7 +533,10 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str) -> dict:
         query_nfip_community(geo["lat"], geo["lon"]),
         query_firm_panel(geo["lat"], geo["lon"]),
     )
-    flood_info = determine_flood_info({**zone_data, **community_data, **firm_data})
+    flood_info = determine_flood_info({
+        **zone_data, **community_data, **firm_data,
+        "geocoded_city": geo.get("city", ""),
+    })
 
     data = {
         "property_address": property_address,
