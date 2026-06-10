@@ -155,40 +155,56 @@ async def query_nfip_community(lat: float, lon: float) -> dict:
 
 
 async def query_firm_panel(lat: float, lon: float) -> dict:
-    """Query NFHL Layer 3 (FIRM Panels) for panel number and effective date."""
-    params = {
-        "geometry": f"{lon},{lat}",
-        "geometryType": "esriGeometryPoint",
-        "inSR": "4326",
-        "spatialRel": "esriSpatialRelIntersects",
-        "outFields": "FIRM_PAN,EFF_DATE,DFIRM_ID,PANEL_TYP",
-        "returnGeometry": "false",
-        "f": "json",
-    }
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(f"{NFHL_BASE}/3/query", params=params)
-            resp.raise_for_status()
-            data = resp.json()
-        features = data.get("features", [])
-        if not features:
-            return {}
-        attrs = None
-        for f in features:
-            if "Panel Printed" in (f["attributes"].get("PANEL_TYP") or ""):
-                attrs = f["attributes"]
-                break
-        if attrs is None:
-            attrs = features[0]["attributes"]
-        raw = (attrs.get("FIRM_PAN") or "").strip()
-        firm_pan = f"{raw[:6]} {raw[6:]}" if len(raw) >= 11 else raw
-        return {
-            "firm_panel": firm_pan or (attrs.get("DFIRM_ID") or ""),
-            "eff_date": attrs.get("EFF_DATE"),
+    """Query NFHL Layer 3 (FIRM Panels) for panel number and effective date.
+
+    Tries a precise point query first, then widens to a ~400 m envelope if the
+    point falls on a panel boundary or the server returns no features.
+    """
+    queries = [
+        {"geometry": f"{lon},{lat}", "geometryType": "esriGeometryPoint"},
+        {
+            "geometry": f"{lon - 0.002},{lat - 0.002},{lon + 0.002},{lat + 0.002}",
+            "geometryType": "esriGeometryEnvelope",
+        },
+    ]
+
+    for q in queries:
+        params = {
+            **q,
+            "inSR": "4326",
+            "spatialRel": "esriSpatialRelIntersects",
+            "outFields": "FIRM_PAN,EFF_DATE,DFIRM_ID,PANEL_TYP",
+            "returnGeometry": "false",
+            "resultRecordCount": "10",
+            "f": "json",
         }
-    except Exception as e:
-        print(f"FIRM panel query error (Layer 3): {e}")
-        return {}
+        try:
+            async with httpx.AsyncClient(timeout=20.0, verify=False) as client:
+                resp = await client.get(f"{NFHL_BASE}/3/query", params=params)
+                resp.raise_for_status()
+                data = resp.json()
+            features = data.get("features", [])
+            if not features:
+                continue
+            # Prefer "Panel Printed" type; fall back to first feature
+            attrs = None
+            for f in features:
+                if "Panel Printed" in (f["attributes"].get("PANEL_TYP") or ""):
+                    attrs = f["attributes"]
+                    break
+            if attrs is None:
+                attrs = features[0]["attributes"]
+            raw = (attrs.get("FIRM_PAN") or "").strip()
+            # Format: "12103C0194H" → "12103C 0194H"
+            firm_pan = f"{raw[:6]} {raw[6:]}" if len(raw) >= 7 else raw
+            return {
+                "firm_panel": firm_pan or (attrs.get("DFIRM_ID") or ""),
+                "eff_date": attrs.get("EFF_DATE"),
+            }
+        except Exception as e:
+            print(f"FIRM panel query error (Layer 3, {q['geometryType']}): {e}")
+
+    return {}
 
 
 async def query_county_name(lat: float, lon: float) -> dict:

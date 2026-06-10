@@ -145,11 +145,11 @@
         </div>
         <div class="detail-row">
           <span class="detail-label">NFIP Map Number (Community-Panel Number)</span>
-          <span class="detail-value">{{ data.community_number }}</span>
+          <span class="detail-value" id="firmPanelDisplay">{{ data.community_number }}</span>
         </div>
         <div class="detail-row">
           <span class="detail-label">NFIP Map Panel Effective/Revised Date</span>
-          <span class="detail-value">{{ data.panel_effective_date }}</span>
+          <span class="detail-value" id="firmDateDisplay">{{ data.panel_effective_date }}</span>
         </div>
         <div class="detail-row">
           <span class="detail-label">Determination Date</span>
@@ -249,8 +249,8 @@
         <input type="hidden" name="sfha_status"           value="{{ data.sfha_status }}" />
         <input type="hidden" name="insurance_required"    value="{{ data.insurance_required }}" />
         <input type="hidden" name="panel_number"          value="{{ data.panel_number }}" />
-        <input type="hidden" name="panel_effective_date"  value="{{ data.panel_effective_date }}" />
-        <input type="hidden" name="community_number"      value="{{ data.community_number }}" />
+        <input type="hidden" name="panel_effective_date"  id="certPanelDate"   value="{{ data.panel_effective_date }}" />
+        <input type="hidden" name="community_number"      id="certPanelNumber" value="{{ data.community_number }}" />
         <input type="hidden" name="community_name"        value="{{ data.community_name }}" />
         <input type="hidden" name="county"                value="{{ data.county or '' }}" />
         <input type="hidden" name="determination_date"    value="{{ data.determination_date }}" />
@@ -273,8 +273,8 @@
         <input type="hidden" name="sfha_status"           value="{{ data.sfha_status }}" />
         <input type="hidden" name="insurance_required"    value="{{ data.insurance_required }}" />
         <input type="hidden" name="panel_number"          value="{{ data.panel_number }}" />
-        <input type="hidden" name="panel_effective_date"  value="{{ data.panel_effective_date }}" />
-        <input type="hidden" name="community_number"      value="{{ data.community_number }}" />
+        <input type="hidden" name="panel_effective_date"  id="noticePanelDate"   value="{{ data.panel_effective_date }}" />
+        <input type="hidden" name="community_number"      id="noticePanelNumber" value="{{ data.community_number }}" />
         <input type="hidden" name="community_name"        value="{{ data.community_name }}" />
         <input type="hidden" name="county"                value="{{ data.county or '' }}" />
         <input type="hidden" name="determination_date"    value="{{ data.determination_date }}" />
@@ -436,6 +436,94 @@ async function lolCheck(id, btn) {
     st.textContent = '⚠ Network error. Please try again.';
   }
 }
+</script>
+
+<script>
+/* ── Client-side FIRM panel enrichment ──────────────────────────────────────
+   hazards.fema.gov Layer 3 is blocked server-side on Replit but is reachable
+   from the user's browser.  We fetch FIRM_PAN + EFF_DATE here and overwrite
+   any incomplete fallback values rendered by the server.
+   Only overwrites when the new value is strictly better (longer panel number
+   or a real date vs the "See FEMA Map Service Center" placeholder).
+─────────────────────────────────────────────────────────────────────────── */
+(function enrichFirmPanel() {
+  var lat = {{ data.lat | float }};
+  var lon = {{ data.lon | float }};
+  var NFHL_L3 = 'https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/3/query';
+
+  var queries = [
+    'geometry=' + lon + ',' + lat + '&geometryType=esriGeometryPoint',
+    'geometry=' + (lon-0.003) + ',' + (lat-0.003) + ',' + (lon+0.003) + ',' + (lat+0.003) +
+      '&geometryType=esriGeometryEnvelope',
+  ];
+
+  function applyValues(firmPan, effDate) {
+    var currentPanel = document.getElementById('firmPanelDisplay');
+    var currentDate  = document.getElementById('firmDateDisplay');
+
+    // Only update panel number if new value is longer (more complete)
+    if (firmPan && currentPanel && firmPan.length > currentPanel.textContent.trim().length) {
+      currentPanel.textContent = firmPan;
+      ['certPanelNumber', 'noticePanelNumber'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.value = firmPan;
+      });
+    }
+
+    // Only update date if current value is the fallback placeholder
+    var datePlaceholder = 'See FEMA Map Service Center';
+    if (effDate && currentDate && currentDate.textContent.trim() === datePlaceholder) {
+      currentDate.textContent = effDate;
+      ['certPanelDate', 'noticePanelDate'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.value = effDate;
+      });
+    }
+  }
+
+  function formatDate(ms) {
+    if (!ms) return null;
+    var d = new Date(ms);
+    var m = (d.getUTCMonth() + 1).toString().padStart('2', '0');
+    var day = d.getUTCDate().toString().padStart('2', '0');
+    return m + '/' + day + '/' + d.getUTCFullYear();
+  }
+
+  function formatPanel(raw) {
+    raw = (raw || '').trim();
+    return raw.length >= 7 ? raw.slice(0, 6) + ' ' + raw.slice(6) : raw;
+  }
+
+  (async function tryQueries() {
+    for (var i = 0; i < queries.length; i++) {
+      try {
+        var url = NFHL_L3 + '?' + queries[i] +
+          '&inSR=4326&spatialRel=esriSpatialRelIntersects' +
+          '&outFields=FIRM_PAN,EFF_DATE,PANEL_TYP' +
+          '&returnGeometry=false&resultRecordCount=10&f=json';
+        var resp = await fetch(url);
+        if (!resp.ok) continue;
+        var data = await resp.json();
+        var features = data.features || [];
+        if (!features.length) continue;
+
+        var attrs = null;
+        for (var j = 0; j < features.length; j++) {
+          if ((features[j].attributes.PANEL_TYP || '').indexOf('Panel Printed') !== -1) {
+            attrs = features[j].attributes;
+            break;
+          }
+        }
+        if (!attrs) attrs = features[0].attributes;
+
+        var firmPan = formatPanel(attrs.FIRM_PAN);
+        var effDate = formatDate(attrs.EFF_DATE);
+        applyValues(firmPan, effDate);
+        return; // success — stop trying
+      } catch(e) { /* try next query */ }
+    }
+  })();
+})();
 </script>
 
 <script>
