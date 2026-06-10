@@ -9,7 +9,7 @@ name = "Flood Cert App"
 paths = ["/"]
 
 [services.development]
-run = "cd artifacts/flood-cert && python3.11 -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+run = "cd /home/runner/workspace/artifacts/flood-cert && python3.11 -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
 
 [services.production]
 
