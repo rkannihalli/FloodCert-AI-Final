@@ -73,6 +73,72 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
     return {"flood_zone": "UNDETERMINED", "in_sfha": False}
 
 
+async def query_nfip_community(lat: float, lon: float) -> dict:
+    """Query NFHL Layer 6 for NFIP Community Number and Name."""
+    params = {
+        "geometry": f"{lon},{lat}",
+        "geometryType": "esriGeometryPoint",
+        "inSR": "4326",
+        "spatialRel": "esriSpatialRelIntersects",
+        "outFields": "COMMUNITY_ID,COMMUNITYNAME,COUNTY,STATE_FIPS",
+        "returnGeometry": "false",
+        "f": "json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
+            resp = await client.get(
+                "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/6/query",
+                params=params,
+            )
+            resp.raise_for_status()
+            features = resp.json().get("features", [])
+        if features:
+            a = features[0]["attributes"]
+            return {
+                "community_id": a.get("COMMUNITY_ID", ""),
+                "community_name": a.get("COMMUNITYNAME", ""),
+                "county": a.get("COUNTY", ""),
+            }
+    except Exception as e:
+        print(f"NFIP Community error: {e}")
+    return {}
+
+
+async def query_firm_panel(lat: float, lon: float) -> dict:
+    """Query NFHL Layer 24 for FIRM Panel Number and Effective Date."""
+    params = {
+        "geometry": f"{lon},{lat}",
+        "geometryType": "esriGeometryPoint",
+        "inSR": "4326",
+        "spatialRel": "esriSpatialRelIntersects",
+        "outFields": "FIRM_PAN,EFF_DATE,PANEL_TYP",
+        "returnGeometry": "false",
+        "f": "json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
+            resp = await client.get(
+                "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/24/query",
+                params=params,
+            )
+            resp.raise_for_status()
+            features = resp.json().get("features", [])
+        if features:
+            a = features[0]["attributes"]
+            eff_ts = a.get("EFF_DATE")
+            eff_date = ""
+            if eff_ts and isinstance(eff_ts, (int, float)) and eff_ts > 0:
+                from datetime import datetime
+                eff_date = datetime.utcfromtimestamp(eff_ts / 1000).strftime("%m/%d/%y")
+            return {
+                "firm_panel": a.get("FIRM_PAN", ""),
+                "eff_date": eff_date,
+            }
+    except Exception as e:
+        print(f"FIRM Panel error: {e}")
+    return {}
+
+
 # State FIPS → (full name, abbreviation) — used to derive state from DFIRM_ID prefix
 STATE_FIPS: dict[str, tuple[str, str]] = {
     "01": ("Alabama", "AL"), "02": ("Alaska", "AK"), "04": ("Arizona", "AZ"),
@@ -210,3 +276,16 @@ def determine_flood_info(fema_data: dict) -> dict:
         "community_number": community_number,
         "community_name": community_name,
     }
+
+
+def enrich_flood_info(flood_info: dict, community_data: dict, panel_data: dict) -> dict:
+    """Override flood_info with precise Layer 6 (community) and Layer 24 (panel) data."""
+    if community_data.get("community_id"):
+        flood_info["community_number"] = community_data["community_id"]
+    if community_data.get("community_name"):
+        flood_info["community_name"] = community_data["community_name"]
+    if panel_data.get("firm_panel"):
+        flood_info["panel_number"] = panel_data["firm_panel"]
+    if panel_data.get("eff_date"):
+        flood_info["panel_effective_date"] = panel_data["eff_date"]
+    return flood_info

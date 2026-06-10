@@ -1,0 +1,74 @@
+def query_nfip_community(lat: float, lon: float) -> dict:
+    """
+    Query NFHL Layer 6 to get NFIP Community Number and Name.
+    This is what gives you the '240087' community number like CoreLogic.
+    """
+    url = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/6/query"
+    
+    params = {
+        "geometry": f"{lon},{lat}",
+        "geometryType": "esriGeometryPoint",
+        "inSR": "4326",
+        "spatialRel": "esriSpatialRelIntersects",
+        "outFields": "COMMUNITY_ID,COMMUNITYNAME,COUNTY,STATE_FIPS",
+        "returnGeometry": "false",
+        "f": "json"
+    }
+    
+    try:
+        resp = requests.get(url, params=params, timeout=10)
+        data = resp.json()
+        features = data.get("features", [])
+        
+        if features:
+            a = features[0]["attributes"]
+            return {
+                "community_id": a.get("COMMUNITY_ID", ""),
+                "community_name": a.get("COMMUNITYNAME", ""),
+                "county": a.get("COUNTY", ""),
+            }
+    except Exception as e:
+        print(f"NFIP Community error: {e}")
+    
+    return {}
+
+
+def query_firm_panel(lat: float, lon: float) -> dict:
+    """
+    Query NFHL Layer 24 to get FIRM Panel Number and Effective Date.
+    This gives you '240087 0012F' and '06/16/21' like CoreLogic.
+    """
+    url = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/24/query"
+    
+    params = {
+        "geometry": f"{lon},{lat}",
+        "geometryType": "esriGeometryPoint",
+        "inSR": "4326",
+        "spatialRel": "esriSpatialRelIntersects",
+        "outFields": "FIRM_PAN,EFF_DATE,PANEL_TYP",
+        "returnGeometry": "false",
+        "f": "json"
+    }
+    
+    try:
+        resp = requests.get(url, params=params, timeout=10)
+        data = resp.json()
+        features = data.get("features", [])
+        
+        if features:
+            a = features[0]["attributes"]
+            # Convert UNIX timestamp to date
+            eff_ts = a.get("EFF_DATE")
+            eff_date = ""
+            if eff_ts:
+                from datetime import datetime
+                eff_date = datetime.utcfromtimestamp(
+                    eff_ts/1000).strftime("%m/%d/%y")
+            return {
+                "firm_panel": a.get("FIRM_PAN", ""),
+                "eff_date": eff_date,
+            }
+    except Exception as e:
+        print(f"FIRM Panel error: {e}")
+    
+    return {}
