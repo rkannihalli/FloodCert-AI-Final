@@ -217,29 +217,28 @@ FLOOD_ZONE_DESCRIPTIONS = {
 SFHA_ZONES = {"A", "AE", "AH", "AO", "AR", "A99", "V", "VE"}
 
 
-def determine_flood_info(fema_data: dict) -> dict:
-    """Derive flood zone details, SFHA status, and insurance requirement from normalized FEMA data."""
-    flood_zone = fema_data.get("flood_zone") or "UNDETERMINED"
-    zone_subtype = fema_data.get("zone_subtype") or ""
-    in_sfha = fema_data.get("in_sfha", False)
-    firm_panel = fema_data.get("firm_panel") or ""
-    eff_date_raw = fema_data.get("eff_date")
+def determine_flood_info(merged: dict) -> dict:
+    """Derive flood zone details from a merged dict of all three NFHL layers.
+
+    Expects the result of: {**zone_data, **community_data, **firm_data}
+    where firm_data (Layer 24) naturally overrides zone_data (Layer 28) for
+    firm_panel and eff_date via standard dict merge precedence.
+    """
+    flood_zone = merged.get("flood_zone") or "UNDETERMINED"
+    zone_subtype = merged.get("zone_subtype") or ""
+    in_sfha = merged.get("in_sfha", False)
+    firm_panel = merged.get("firm_panel") or ""
+    eff_date_raw = merged.get("eff_date")
 
     flood_zone_upper = flood_zone.upper()
 
-    if zone_subtype and "0.2" in zone_subtype:
-        zone_key = "X500"
-    else:
-        zone_key = flood_zone_upper
-
+    zone_key = "X500" if (zone_subtype and "0.2" in zone_subtype) else flood_zone_upper
     description = FLOOD_ZONE_DESCRIPTIONS.get(
         zone_key,
-        f"Flood Zone {flood_zone} — See FIRM panel for details"
+        f"Flood Zone {flood_zone} — See FIRM panel for details",
     )
 
-    # in_sfha is already a bool from query_fema_nfhl; fall back to zone-based check if missing
     sfha_bool = in_sfha if isinstance(in_sfha, bool) else flood_zone_upper in SFHA_ZONES
-
     sfha_status = "Yes" if sfha_bool else "No"
     insurance_required = (
         "Yes — Federal mandatory purchase requirement applies"
@@ -247,18 +246,21 @@ def determine_flood_info(fema_data: dict) -> dict:
         else "No — Flood insurance is not federally required"
     )
 
-    # Derive community number from the first 6 chars of DFIRM_ID (stored as firm_panel)
-    if firm_panel and len(firm_panel) >= 6:
-        community_number = firm_panel[:6]
-        panel_number = firm_panel
-    else:
-        community_number = "Not Available"
-        panel_number = "Not Available"
+    # Layer 6 provides community_id / community_name directly; fall back to DFIRM_ID derivation
+    community_number = (
+        merged.get("community_id")
+        or (firm_panel[:6] if len(firm_panel) >= 6 else "Not Available")
+    )
+    community_name = merged.get("community_name") or (
+        "See Community FIRM" if firm_panel else "Not Available"
+    )
+    panel_number = firm_panel or "Not Available"
 
-    community_name = "See Community FIRM" if firm_panel else "Not Available"
-
-    # eff_date from Layer 28 is a Unix timestamp in milliseconds
-    if eff_date_raw and isinstance(eff_date_raw, (int, float)) and eff_date_raw > 0:
+    # eff_date: Layer 24 passes an already-formatted string ("06/16/21");
+    # Layer 28 passes a Unix ms timestamp — handle both.
+    if isinstance(eff_date_raw, str) and eff_date_raw:
+        panel_effective_date = eff_date_raw
+    elif isinstance(eff_date_raw, (int, float)) and eff_date_raw > 0:
         from datetime import datetime, timezone
         panel_effective_date = datetime.fromtimestamp(
             eff_date_raw / 1000, tz=timezone.utc
@@ -276,16 +278,3 @@ def determine_flood_info(fema_data: dict) -> dict:
         "community_number": community_number,
         "community_name": community_name,
     }
-
-
-def enrich_flood_info(flood_info: dict, community_data: dict, panel_data: dict) -> dict:
-    """Override flood_info with precise Layer 6 (community) and Layer 24 (panel) data."""
-    if community_data.get("community_id"):
-        flood_info["community_number"] = community_data["community_id"]
-    if community_data.get("community_name"):
-        flood_info["community_name"] = community_data["community_name"]
-    if panel_data.get("firm_panel"):
-        flood_info["panel_number"] = panel_data["firm_panel"]
-    if panel_data.get("eff_date"):
-        flood_info["panel_effective_date"] = panel_data["eff_date"]
-    return flood_info

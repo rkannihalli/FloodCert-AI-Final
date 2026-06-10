@@ -11,7 +11,7 @@ from datetime import date
 from pdf_generator import generate_flood_certificate_pdf, generate_borrower_notice_pdf, generate_batch_report_pdf
 from fema_lookup import (
     geocode_address, query_fema_nfhl, query_nfip_community, query_firm_panel,
-    determine_flood_info, enrich_flood_info, nfip_community_info,
+    determine_flood_info, nfip_community_info,
 )
 from db import (
     init_db, save_determination, get_determination,
@@ -90,12 +90,12 @@ async def generate(
             }
         })
 
-    fema_data, community_data, panel_data = await asyncio.gather(
+    zone_data, community_data, firm_data = await asyncio.gather(
         query_fema_nfhl(geo_result["lat"], geo_result["lon"]),
         query_nfip_community(geo_result["lat"], geo_result["lon"]),
         query_firm_panel(geo_result["lat"], geo_result["lon"]),
     )
-    flood_info = enrich_flood_info(determine_flood_info(fema_data), community_data, panel_data)
+    flood_info = determine_flood_info({**zone_data, **community_data, **firm_data})
 
     certificate_data = {
         "property_address": property_address,
@@ -241,12 +241,12 @@ async def check_all_monitored():
             errors += 1
             return
         try:
-            fema_data, community_data, panel_data = await asyncio.gather(
+            zone_data, community_data, firm_data = await asyncio.gather(
                 query_fema_nfhl(float(lat), float(lon)),
                 query_nfip_community(float(lat), float(lon)),
                 query_firm_panel(float(lat), float(lon)),
             )
-            new_info = enrich_flood_info(determine_flood_info(fema_data), community_data, panel_data)
+            new_info = determine_flood_info({**zone_data, **community_data, **firm_data})
             changed = (
                 r.get("flood_zone", "") != new_info.get("flood_zone", "") or
                 r.get("panel_effective_date", "") != new_info.get("panel_effective_date", "")
@@ -288,12 +288,12 @@ async def check_fema_update(record_id: int):
     if not lat or not lon:
         return JSONResponse({"error": "No coordinates stored for this record"}, status_code=400)
     try:
-        fema_data, community_data, panel_data = await asyncio.gather(
+        zone_data, community_data, firm_data = await asyncio.gather(
             query_fema_nfhl(float(lat), float(lon)),
             query_nfip_community(float(lat), float(lon)),
             query_firm_panel(float(lat), float(lon)),
         )
-        new_info = enrich_flood_info(determine_flood_info(fema_data), community_data, panel_data)
+        new_info = determine_flood_info({**zone_data, **community_data, **firm_data})
     except Exception as exc:
         return JSONResponse({"error": str(exc)[:300]}, status_code=502)
     old_zone  = record.get("flood_zone", "")
@@ -438,12 +438,12 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str) -> dict:
             "error": "Address could not be geocoded",
         }
 
-    fema_data, community_data, panel_data = await asyncio.gather(
+    zone_data, community_data, firm_data = await asyncio.gather(
         query_fema_nfhl(geo["lat"], geo["lon"]),
         query_nfip_community(geo["lat"], geo["lon"]),
         query_firm_panel(geo["lat"], geo["lon"]),
     )
-    flood_info = enrich_flood_info(determine_flood_info(fema_data), community_data, panel_data)
+    flood_info = determine_flood_info({**zone_data, **community_data, **firm_data})
 
     data = {
         "property_address": property_address,
