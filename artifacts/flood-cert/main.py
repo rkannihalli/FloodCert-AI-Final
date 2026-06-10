@@ -3,6 +3,7 @@ import csv
 import io
 import asyncio
 import uuid
+import re
 from fastapi import FastAPI, Request, Form, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, Response, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,6 +20,26 @@ from db import (
     set_life_of_loan, flag_redetermination, list_monitored, count_flagged,
 )
 from email_sender import send_certificate_email
+
+US_STATES = {
+    "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA",
+    "HI","ID","IL","IN","IA","KS","KY","LA","ME","MD",
+    "MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
+    "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC",
+    "SD","TN","TX","UT","VT","VA","WA","WV","WI","WY",
+    "DC","PR","GU","VI",
+}
+
+def parse_state_zip(address: str) -> tuple[str, str] | None:
+    """Extract (state_abbr, zipcode) from a free-text US address string."""
+    m = re.search(r'\b([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)\s*$', address.strip())
+    return (m.group(1).upper(), m.group(2)) if m else None
+
+def validate_us_address(state: str, zipcode: str) -> None:
+    if state.upper() not in US_STATES:
+        raise HTTPException(400, detail="Only US addresses supported")
+    if not re.match(r"^\d{5}(-\d{4})?$", zipcode):
+        raise HTTPException(400, detail="Invalid US ZIP code format")
 
 # In-memory store for batch CSV results (keyed by batch_id)
 _batch_results: dict[str, bytes] = {}
@@ -62,6 +83,15 @@ async def generate(
         errors.append("Borrower name is required.")
     if not lender_name.strip():
         errors.append("Lender name is required.")
+
+    if property_address.strip():
+        parsed = parse_state_zip(property_address)
+        if parsed:
+            state, zipcode = parsed
+            try:
+                validate_us_address(state, zipcode)
+            except HTTPException as exc:
+                errors.append(exc.detail)
 
     if errors:
         return templates.TemplateResponse("index.html", {
@@ -427,6 +457,20 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str) -> dict:
             "lender_name": lender_name,
             "error": "Missing required fields",
         }
+
+    parsed = parse_state_zip(property_address)
+    if parsed:
+        state, zipcode = parsed
+        try:
+            validate_us_address(state, zipcode)
+        except HTTPException as exc:
+            return {
+                "property_address": property_address,
+                "loan_id": loan_id,
+                "borrower_name": borrower_name,
+                "lender_name": lender_name,
+                "error": exc.detail,
+            }
 
     geo = await geocode_address(property_address)
     if not geo:
