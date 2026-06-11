@@ -57,18 +57,18 @@
   {% set sfha = data.sfha_status == 'Yes' %}
   {% set undetermined = data.flood_zone == 'UNDETERMINED' %}
 
-  <div class="zone-banner {{ 'sfha' if sfha else ('undetermined' if undetermined else 'non-sfha') }}">
-    <div class="zone-badge">{{ data.flood_zone }}</div>
+  <div id="zoneBanner" class="zone-banner {{ 'sfha' if sfha else ('undetermined' if undetermined else 'non-sfha') }}">
+    <div id="zoneBadge" class="zone-badge">{{ data.flood_zone }}</div>
     <div class="zone-info">
-      <h3>
+      <h3 id="zoneTitle">
         {% if sfha %}Special Flood Hazard Area (SFHA)
         {% elif undetermined %}Flood Zone Undetermined
         {% else %}Non-Special Flood Hazard Area
         {% endif %}
       </h3>
-      <p>{{ data.flood_zone_description }}</p>
+      <p id="zoneDescP">{{ data.flood_zone_description }}</p>
     </div>
-    <div class="insurance-tag {{ 'required' if sfha else ('check' if undetermined else 'not-required') }}">
+    <div id="insTag" class="insurance-tag {{ 'required' if sfha else ('check' if undetermined else 'not-required') }}">
       {% if sfha %}Insurance Required
       {% elif undetermined %}Verify Insurance
       {% else %}Not Required
@@ -131,15 +131,15 @@
       <div class="detail-card-body">
         <div class="detail-row">
           <span class="detail-label">Flood Zone</span>
-          <span class="detail-value">{{ data.flood_zone }}</span>
+          <span id="zoneDetailVal" class="detail-value">{{ data.flood_zone }}</span>
         </div>
         <div class="detail-row">
           <span class="detail-label">SFHA Status</span>
-          <span class="detail-value">{{ data.sfha_status }}</span>
+          <span id="sfhaDetailVal" class="detail-value">{{ data.sfha_status }}</span>
         </div>
         <div class="detail-row">
           <span class="detail-label">Insurance Required</span>
-          <span class="detail-value">{{ data.insurance_required }}</span>
+          <span id="insDetailVal" class="detail-value">{{ data.insurance_required }}</span>
         </div>
         <div class="detail-row">
           <span class="detail-label">NFIP Community Name</span>
@@ -196,7 +196,7 @@
         </div>
         <div class="comm-detail-row">
           <span class="comm-detail-label">Study Type</span>
-          <span>{{ data.flood_zone_description[:40] }}…</span>
+          <span id="studyTypeSpan">{{ data.flood_zone_description[:40] }}…</span>
         </div>
       </div>
 
@@ -250,10 +250,10 @@
         <input type="hidden" name="lender_email"          value="{{ data.lender_email or '' }}" />
         <input type="hidden" name="lat"                   value="{{ data.lat }}" />
         <input type="hidden" name="lon"                   value="{{ data.lon }}" />
-        <input type="hidden" name="flood_zone"            value="{{ data.flood_zone }}" />
-        <input type="hidden" name="flood_zone_description" value="{{ data.flood_zone_description }}" />
-        <input type="hidden" name="sfha_status"           value="{{ data.sfha_status }}" />
-        <input type="hidden" name="insurance_required"    value="{{ data.insurance_required }}" />
+        <input type="hidden" name="flood_zone"            id="certZone"     value="{{ data.flood_zone }}" />
+        <input type="hidden" name="flood_zone_description" id="certZoneDesc" value="{{ data.flood_zone_description }}" />
+        <input type="hidden" name="sfha_status"           id="certSfha"     value="{{ data.sfha_status }}" />
+        <input type="hidden" name="insurance_required"    id="certIns"      value="{{ data.insurance_required }}" />
         <input type="hidden" name="panel_number"          id="certCid"         value="{{ data.panel_number }}" />
         <input type="hidden" name="panel_effective_date"  id="certPanelDate"   value="{{ data.panel_effective_date }}" />
         <input type="hidden" name="community_number"      id="certPanelNumber" value="{{ data.community_number }}" />
@@ -274,10 +274,10 @@
         <input type="hidden" name="lender_email"          value="{{ data.lender_email or '' }}" />
         <input type="hidden" name="lat"                   value="{{ data.lat }}" />
         <input type="hidden" name="lon"                   value="{{ data.lon }}" />
-        <input type="hidden" name="flood_zone"            value="{{ data.flood_zone }}" />
-        <input type="hidden" name="flood_zone_description" value="{{ data.flood_zone_description }}" />
-        <input type="hidden" name="sfha_status"           value="{{ data.sfha_status }}" />
-        <input type="hidden" name="insurance_required"    value="{{ data.insurance_required }}" />
+        <input type="hidden" name="flood_zone"            id="noticeZone"     value="{{ data.flood_zone }}" />
+        <input type="hidden" name="flood_zone_description" id="noticeZoneDesc" value="{{ data.flood_zone_description }}" />
+        <input type="hidden" name="sfha_status"           id="noticeSfha"     value="{{ data.sfha_status }}" />
+        <input type="hidden" name="insurance_required"    id="noticeIns"      value="{{ data.insurance_required }}" />
         <input type="hidden" name="panel_number"          id="noticeCid"         value="{{ data.panel_number }}" />
         <input type="hidden" name="panel_effective_date"  id="noticePanelDate"   value="{{ data.panel_effective_date }}" />
         <input type="hidden" name="community_number"      id="noticePanelNumber" value="{{ data.community_number }}" />
@@ -597,6 +597,7 @@ async function lolCheck(id, btn) {
     opacity: 1,
     fillOpacity: 0.9
   }).addTo(map);
+  window._floodMarker = marker;
 
   marker.bindPopup(
     '<div style="font-family:sans-serif;min-width:200px;">' +
@@ -621,6 +622,138 @@ async function lolCheck(id, btn) {
     attribution: 'FEMA NFHL',
     errorTileUrl: ''
   }).addTo(map);
+})();
+</script>
+
+<script>
+/*
+ * Browser-side FEMA NFHL Layer 28 zone enrichment.
+ * hazards.fema.gov is blocked server-side on Replit but accessible from the browser.
+ * This corrects X vs X500 (shaded) vs X-LEVEE cases that the Esri Living Atlas
+ * "Reduced Set" layer may not return ZONE_SUBTY for.
+ */
+(function enrichZoneFromNFHL() {
+  var lat = {{ data.lat | float }};
+  var lon = {{ data.lon | float }};
+
+  var SFHA_ZONES = ["A","AE","AH","AO","AR","A99","V","VE"];
+
+  var ZONE_DESCS = {
+    "X":       "Minimal Flood Hazard \u2014 Zone X (area outside 500-year floodplain; no base flood elevation determined)",
+    "X500":    "Moderate Flood Hazard \u2014 Zone X (Shaded) \u2014 0.2% annual chance flood; property lies within the 500-year floodplain",
+    "X-LEVEE": "Moderate Flood Hazard \u2014 Zone X (Protected by Levee) \u2014 area protected from 1% annual chance flood by a USACE-certified levee system; may be within the 500-year floodplain",
+    "A":   "Special Flood Hazard Area \u2014 Zone A (1% annual chance flood, no BFE determined)",
+    "AE":  "Special Flood Hazard Area \u2014 Zone AE (1% annual chance flood, BFE determined)",
+    "AH":  "Special Flood Hazard Area \u2014 Zone AH (1% annual chance shallow flooding, ponding)",
+    "AO":  "Special Flood Hazard Area \u2014 Zone AO (1% annual chance shallow flooding, sheet flow)",
+    "AR":  "Special Flood Hazard Area \u2014 Zone AR (being restored to BFE via flood control system)",
+    "A99": "Special Flood Hazard Area \u2014 Zone A99 (protected by federal flood control system under construction)",
+    "V":   "Special Flood Hazard Area \u2014 Zone V (coastal flood with velocity/wave action hazard)",
+    "VE":  "Special Flood Hazard Area \u2014 Zone VE (coastal flood with velocity hazard, BFE determined)",
+    "B":   "Moderate Flood Hazard \u2014 Zone B (0.2% annual chance flood; between 100-year and 500-year floodplain)",
+    "C":   "Minimal Flood Hazard \u2014 Zone C (area outside 500-year floodplain)",
+    "D":   "Undetermined Flood Hazard \u2014 Zone D (possible but undetermined flood hazard)",
+  };
+
+  function classifyX(fldZone, zoneSub) {
+    if (fldZone === "X500" || fldZone === "B") return "X500";
+    if (fldZone !== "X") return fldZone;
+    var sub = (zoneSub || "").toUpperCase().trim();
+    if (!sub) return "X";
+    if (sub.indexOf("0.2") >= 0) return "X500";
+    if (sub.indexOf("500") >= 0 && (sub.indexOf("ANNUAL") >= 0 || sub.indexOf("YEAR") >= 0 || sub.indexOf("CHANCE") >= 0)) return "X500";
+    if (sub === "0.2 PCT ANNUAL CHANCE FLOOD HAZARD" || sub === "AREA OF 500-YEAR FLOOD HAZARD" || sub === "500-YEAR FLOOD HAZARD") return "X500";
+    if (sub.indexOf("LEVEE") >= 0) return "X-LEVEE";
+    return "X";
+  }
+
+  function setEl(id, prop, val) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (prop === "text") el.textContent = val;
+    else if (prop === "html") el.innerHTML = val;
+    else if (prop === "class") el.className = val;
+    else if (prop === "value") el.value = val;
+  }
+
+  var layer28 = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28/query";
+  var qs = "?geometry=" + encodeURIComponent(lon + "," + lat) +
+           "&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects" +
+           "&outFields=FLD_ZONE,ZONE_SUBTY,SFHA_TF&returnGeometry=false&resultRecordCount=10&f=json";
+
+  fetch(layer28 + qs, { mode: "cors" })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var features = (data.features || []);
+      if (!features.length) return;
+
+      // Prefer any SFHA zone over X
+      var best = null;
+      for (var i = 0; i < features.length; i++) {
+        var fz = ((features[i].attributes.FLD_ZONE) || "").toUpperCase().trim();
+        if (SFHA_ZONES.indexOf(fz) >= 0) { best = features[i].attributes; break; }
+      }
+      if (!best) best = features[0].attributes;
+
+      var rawZone = (best.FLD_ZONE || "X").toUpperCase().trim();
+      var rawSub  = (best.ZONE_SUBTY || "").trim();
+      var classified = classifyX(rawZone, rawSub);
+
+      // Current zone shown on page
+      var currentBadge = (document.getElementById("zoneBadge") || {}).textContent || "";
+      if (classified === currentBadge.trim()) return; // already correct
+
+      var isSFHA   = SFHA_ZONES.indexOf(classified) >= 0;
+      var dispZone = (classified === "X-LEVEE") ? "X" : classified; // show "X" on badge, desc explains levee
+      var newDesc  = ZONE_DESCS[classified] || ("Flood Zone " + dispZone + " \u2014 See FIRM panel for details");
+      var newSfha  = isSFHA ? "Yes" : "No";
+      var newIns   = isSFHA
+        ? "Yes \u2014 Federal mandatory purchase requirement applies"
+        : "No \u2014 Flood insurance is not federally required";
+
+      // Zone banner
+      setEl("zoneBanner", "class", "zone-banner " + (isSFHA ? "sfha" : "non-sfha"));
+      setEl("zoneBadge",  "text", dispZone);
+      setEl("zoneTitle",  "text", isSFHA ? "Special Flood Hazard Area (SFHA)" : "Non-Special Flood Hazard Area");
+      setEl("zoneDescP",  "text", newDesc);
+      setEl("insTag", "class", "insurance-tag " + (isSFHA ? "required" : "not-required"));
+      setEl("insTag", "text", isSFHA ? "Insurance Required" : "Not Required");
+
+      // Detail card
+      setEl("zoneDetailVal", "text", dispZone);
+      setEl("sfhaDetailVal", "text", newSfha);
+      setEl("insDetailVal",  "text", newIns);
+
+      // Study type snippet
+      var el = document.getElementById("studyTypeSpan");
+      if (el) el.textContent = newDesc.substring(0, 40) + "\u2026";
+
+      // Hidden form inputs (so downloaded PDFs reflect the corrected zone)
+      ["certZone", "noticeZone"].forEach(function(id)     { setEl(id, "value", dispZone); });
+      ["certZoneDesc","noticeZoneDesc"].forEach(function(id) { setEl(id, "value", newDesc); });
+      ["certSfha", "noticeSfha"].forEach(function(id)     { setEl(id, "value", newSfha); });
+      ["certIns",  "noticeIns"].forEach(function(id)      { setEl(id, "value", newIns); });
+
+      // Update map marker color & popup
+      try {
+        var mAddr = {{ data.matched_address | tojson }};
+        var mColor = isSFHA ? "#c0392b" : "#1a7a4a";
+        var m = window._floodMarker;
+        if (m) {
+          m.setStyle({ fillColor: mColor });
+          m.setPopupContent(
+            '<div style="font-family:sans-serif;min-width:200px;">' +
+            '<strong style="color:#003366;font-size:0.95rem;">' + mAddr + '</strong><br/>' +
+            '<div style="margin-top:6px;"><span style="background:' + mColor +
+            ';color:#fff;padding:2px 8px;border-radius:10px;font-size:0.8rem;font-weight:700;">Zone ' + dispZone + '</span></div>' +
+            '<div style="margin-top:6px;font-size:0.8rem;color:#5a6470;">' + newDesc + '</div>' +
+            '<div style="margin-top:5px;font-size:0.78rem;font-weight:600;color:' + mColor + ';">' + newIns + '</div>' +
+            '</div>', { maxWidth: 280 }
+          );
+        }
+      } catch(e) { /* map update non-critical */ }
+    })
+    .catch(function() { /* hazards.fema.gov unreachable — server-side determination stands */ });
 })();
 </script>
 </body>

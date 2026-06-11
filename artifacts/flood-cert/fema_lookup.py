@@ -13,6 +13,55 @@ ESRI_FLOOD_ZONE_URL = (
 SFHA_ZONES = {"A", "AE", "AH", "AO", "AR", "A99", "V", "VE"}
 NFHL_BASE  = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer"
 
+# ZONE_SUBTY values that map to X500 (shaded Zone X, 0.2% annual chance / 500-year floodplain)
+_X500_SUBTYPES = frozenset({
+    "0.2 PCT ANNUAL CHANCE FLOOD HAZARD",
+    "0.2 PCT ANNUAL CHANCE FLOOD",
+    "0.2% ANNUAL CHANCE FLOOD HAZARD",
+    "0.2 PERCENT ANNUAL CHANCE FLOOD HAZARD",
+    "AREA OF 500-YEAR FLOOD HAZARD",
+    "500-YEAR FLOOD HAZARD",
+})
+
+# ZONE_SUBTY values that indicate levee-protected Zone X
+_XLEVEE_SUBTYPES = frozenset({
+    "PROTECTED BY LEVEE",
+    "AREA PROTECTED BY LEVEE",
+    "AREA PROTECTED FROM 100-YEAR FLOOD BY LEVEE",
+})
+
+
+def _classify_x_zone(flood_zone: str, zone_subtype: str) -> str:
+    """Classify Zone X into 'X500', 'X-LEVEE', or plain 'X'.
+
+    FEMA NFHL uses FLD_ZONE='X' for all three variants; ZONE_SUBTY differentiates them.
+    Some older datasets or reduced-set layers use FLD_ZONE='X500' or 'B'.
+    """
+    if flood_zone in ("X500", "B"):
+        return "X500"
+    if flood_zone != "X":
+        return flood_zone
+
+    sub = zone_subtype.upper().strip()
+    if not sub:
+        return "X"
+
+    # Explicit X500 matches
+    if sub in _X500_SUBTYPES:
+        return "X500"
+    # Catch variations: "0.2 PCT ...", "0.2%...", etc.
+    if "0.2" in sub:
+        return "X500"
+    # Catch "500 YEAR FLOOD HAZARD", "500-YEAR ANNUAL CHANCE", etc.
+    if "500" in sub and ("ANNUAL" in sub or "YEAR" in sub or "CHANCE" in sub):
+        return "X500"
+
+    # Levee-protected Zone X
+    if sub in _XLEVEE_SUBTYPES or "LEVEE" in sub:
+        return "X-LEVEE"
+
+    return "X"
+
 TIGERWEB_COUNTY_URL = (
     "https://tigerweb.geo.census.gov/arcgis/rest/services"
     "/TIGERweb/State_County/MapServer/1/query"
@@ -372,11 +421,12 @@ FLOOD_ZONE_DESCRIPTIONS = {
     "A99": "Special Flood Hazard Area — Zone A99 (protected by federal flood control system under construction)",
     "V": "Special Flood Hazard Area — Zone V (coastal flood with velocity/wave action hazard)",
     "VE": "Special Flood Hazard Area — Zone VE (coastal flood with velocity hazard, BFE determined)",
-    "B": "Moderate Flood Hazard Area — Zone B (0.2% annual chance flood, between 100 and 500 year flood)",
-    "C": "Minimal Flood Hazard Area — Zone C (outside 500-year floodplain)",
+    "B": "Moderate Flood Hazard — Zone B (0.2% annual chance flood; between 100-year and 500-year floodplain)",
+    "C": "Minimal Flood Hazard — Zone C (area outside 500-year floodplain)",
     "D": "Undetermined Flood Hazard — Zone D (possible but undetermined flood hazard)",
-    "X": "Minimal Flood Hazard — Zone X (outside 500-year floodplain or protected by levee from 100-year flood)",
-    "X500": "Moderate Flood Hazard — Zone X (Shaded) — 0.2% annual chance / 500-year floodplain",
+    "X": "Minimal Flood Hazard — Zone X (area outside 500-year floodplain; no base flood elevation determined)",
+    "X500": "Moderate Flood Hazard — Zone X (Shaded) — 0.2% annual chance flood; property lies within the 500-year floodplain",
+    "X-LEVEE": "Moderate Flood Hazard — Zone X (Protected by Levee) — area protected from 1% annual chance flood by a USACE-certified levee system; may be within the 500-year floodplain",
 }
 
 
@@ -398,9 +448,12 @@ def determine_flood_info(merged: dict) -> dict:
     geocoded_city   = (merged.get("geocoded_city") or "").strip()
 
     # ── Zone designation ──────────────────────────────────────────────────────
-    # Shaded Zone X (0.2% annual chance): stored and displayed as "X500"
-    is_x500 = flood_zone == "X" and bool(zone_subtype and "0.2" in zone_subtype)
-    flood_zone_out = "X500" if is_x500 else flood_zone
+    # _classify_x_zone handles all Zone X variants:
+    #   X500   → shaded Zone X (0.2% annual chance / 500-year floodplain)
+    #   X-LEVEE → Zone X protected from 100-year flood by USACE-certified levee
+    #   X      → unshaded Zone X (truly outside 500-year floodplain)
+    # Also maps old Zone B → X500, and passes explicit "X500" from FLD_ZONE through.
+    flood_zone_out = _classify_x_zone(flood_zone, zone_subtype)
     zone_key = flood_zone_out
     description = FLOOD_ZONE_DESCRIPTIONS.get(
         zone_key,
