@@ -58,7 +58,11 @@
   {% set undetermined = data.flood_zone == 'UNDETERMINED' %}
 
   <div id="zoneBanner" class="zone-banner {{ 'sfha' if sfha else ('undetermined' if undetermined else 'non-sfha') }}">
-    <div id="zoneBadge" class="zone-badge">{{ data.flood_zone }}</div>
+    {% set _zl = {'X': 'Zone X', 'X500': 'Zone X (Shaded)', 'X-LEVEE': 'Zone X Levee',
+                  'A': 'Zone A', 'AE': 'Zone AE', 'AH': 'Zone AH', 'AO': 'Zone AO',
+                  'AR': 'Zone AR', 'A99': 'Zone A99', 'V': 'Zone V', 'VE': 'Zone VE',
+                  'B': 'Zone B', 'C': 'Zone C', 'D': 'Zone D', 'UNDETERMINED': 'Undetermined'} %}
+    <div id="zoneBadge" class="zone-badge">{{ _zl.get(data.flood_zone, data.flood_zone) }}</div>
     <div class="zone-info">
       <h3 id="zoneTitle">
         {% if sfha %}Special Flood Hazard Area (SFHA)
@@ -131,7 +135,7 @@
       <div class="detail-card-body">
         <div class="detail-row">
           <span class="detail-label">Flood Zone</span>
-          <span id="zoneDetailVal" class="detail-value">{{ data.flood_zone }}</span>
+          <span id="zoneDetailVal" class="detail-value">{{ _zl.get(data.flood_zone, data.flood_zone) }}</span>
         </div>
         <div class="detail-row">
           <span class="detail-label">SFHA Status</span>
@@ -699,12 +703,21 @@ async function lolCheck(id, btn) {
       var rawSub  = (best.ZONE_SUBTY || "").trim();
       var classified = classifyX(rawZone, rawSub);
 
-      // Current zone shown on page
-      var currentBadge = (document.getElementById("zoneBadge") || {}).textContent || "";
-      if (classified === currentBadge.trim()) return; // already correct
+      // Human-readable display labels matching ZONE_DISPLAY_NAMES in fema_lookup.py
+      var ZONE_LABELS = {
+        "X": "Zone X", "X500": "Zone X (Shaded)", "X-LEVEE": "Zone X Levee",
+        "A": "Zone A", "AE": "Zone AE", "AH": "Zone AH", "AO": "Zone AO",
+        "AR": "Zone AR", "A99": "Zone A99", "V": "Zone V", "VE": "Zone VE",
+        "B": "Zone B", "C": "Zone C", "D": "Zone D", "UNDETERMINED": "Undetermined",
+      };
+
+      var dispZone = ZONE_LABELS[classified] || classified;
+
+      // Skip update if the badge already shows the correct label
+      var currentBadge = ((document.getElementById("zoneBadge") || {}).textContent || "").trim();
+      if (currentBadge === dispZone) return;
 
       var isSFHA   = SFHA_ZONES.indexOf(classified) >= 0;
-      var dispZone = (classified === "X-LEVEE") ? "X" : classified; // show "X" on badge, desc explains levee
       var newDesc  = ZONE_DESCS[classified] || ("Flood Zone " + dispZone + " \u2014 See FIRM panel for details");
       var newSfha  = isSFHA ? "Yes" : "No";
       var newIns   = isSFHA

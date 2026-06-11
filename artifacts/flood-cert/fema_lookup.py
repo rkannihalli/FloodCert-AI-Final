@@ -669,6 +669,26 @@ FLOOD_ZONE_DESCRIPTIONS = {
     "X-LEVEE": "Moderate Flood Hazard — Zone X (Protected by Levee) — area protected from 1% annual chance flood by a USACE-certified levee system; may be within the 500-year floodplain",
 }
 
+# Human-readable display labels for each internal zone code.
+# Used in PDF headers, result page badges, and filenames.
+ZONE_DISPLAY_NAMES: dict[str, str] = {
+    "X":           "Zone X",
+    "X500":        "Zone X (Shaded)",
+    "X-LEVEE":     "Zone X Levee",
+    "A":           "Zone A",
+    "AE":          "Zone AE",
+    "AH":          "Zone AH",
+    "AO":          "Zone AO",
+    "AR":          "Zone AR",
+    "A99":         "Zone A99",
+    "V":           "Zone V",
+    "VE":          "Zone VE",
+    "B":           "Zone B",
+    "C":           "Zone C",
+    "D":           "Zone D",
+    "UNDETERMINED": "Undetermined",
+}
+
 
 def determine_flood_info(merged: dict) -> dict:
     """Derive flood zone details from merged NFHL query results.

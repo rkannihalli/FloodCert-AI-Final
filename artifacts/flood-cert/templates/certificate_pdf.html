@@ -30,7 +30,7 @@
 {% set undetermined = flood_zone == 'UNDETERMINED' %}
 
 <div class="zone-banner {{ 'sfha' if sfha else ('undetermined' if undetermined else 'non-sfha') }}">
-  <div class="zone-code">{{ flood_zone }}</div>
+  <div class="zone-code">{{ flood_zone | zone_label }}</div>
   <div class="zone-text">
     <h3>
       {% if sfha %}SPECIAL FLOOD HAZARD AREA (SFHA)
@@ -104,7 +104,7 @@
     </tr>
     <tr>
       <td class="label">Flood Zone</td>
-      <td class="value highlight">{{ flood_zone }}</td>
+      <td class="value highlight">{{ flood_zone | zone_label }}</td>
       <td class="label">SFHA (Special Flood Hazard Area)</td>
       <td class="value highlight">{{ sfha_status }}</td>
     </tr>

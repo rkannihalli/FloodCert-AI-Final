@@ -16,6 +16,7 @@ from pdf_generator import generate_flood_certificate_pdf, generate_borrower_noti
 from fema_lookup import (
     geocode_address, query_fema_nfhl, query_nfip_community, query_firm_panel,
     query_county_name, query_nfip_community_csb, determine_flood_info, nfip_community_info,
+    ZONE_DISPLAY_NAMES,
 )
 from map_utils import generate_map_image
 from db import (
@@ -54,10 +55,13 @@ except ImportError:
     _scheduler = None
 
 def _cert_filename(flood_zone: str, property_address: str) -> str:
-    """Build a clean PDF filename: Flood Cert - Zone {zone} - {street}.pdf
+    """Build a clean PDF filename: Flood Cert - {zone label} - {street}.pdf
     Only the street part (before the first comma) is used so the filename stays short.
+    Zone codes are converted to display labels via ZONE_DISPLAY_NAMES
+    (e.g. 'X-LEVEE' → 'Zone X Levee', 'X500' → 'Zone X (Shaded)').
     """
-    zone = (flood_zone or "Unknown").strip()
+    raw_zone = (flood_zone or "").strip().upper()
+    zone_label = ZONE_DISPLAY_NAMES.get(raw_zone, f"Zone {raw_zone}" if raw_zone else "Unknown")
     addr = (property_address or "Unknown").strip()
     # Keep only the street portion — drop city, state, zip after the first comma
     street = addr.split(",")[0].strip() if addr else "Unknown"
@@ -65,7 +69,7 @@ def _cert_filename(flood_zone: str, property_address: str) -> str:
     street_clean = re.sub(r"\s+", " ", street_clean).strip()
     if len(street_clean) > 80:
         street_clean = street_clean[:80].rstrip()
-    return f"Flood Cert - Zone {zone} - {street_clean}.pdf"
+    return f"Flood Cert - {zone_label} - {street_clean}.pdf"
 
 
 US_STATES = {

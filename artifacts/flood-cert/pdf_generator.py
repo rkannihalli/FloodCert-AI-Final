@@ -1,12 +1,19 @@
 import os
 from jinja2 import Environment, FileSystemLoader
 from weasyprint import HTML, CSS
+from fema_lookup import ZONE_DISPLAY_NAMES
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 
 jinja_env = Environment(loader=FileSystemLoader(TEMPLATE_DIR))
+
+def _zone_label(code: str) -> str:
+    """Convert internal zone code to user-facing display label."""
+    return ZONE_DISPLAY_NAMES.get((code or "").strip().upper(), code or "")
+
+jinja_env.filters["zone_label"] = _zone_label
 
 
 def _render_pdf(template_name: str, data: dict) -> bytes:
