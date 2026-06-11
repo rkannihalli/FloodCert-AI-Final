@@ -13,6 +13,26 @@ ESRI_FLOOD_ZONE_URL = (
 SFHA_ZONES = {"A", "AE", "AH", "AO", "AR", "A99", "V", "VE"}
 NFHL_BASE  = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer"
 
+# Connecticut abolished county government in 1960; Census/TIGERweb now return planning region
+# names instead of traditional counties.  NFIP certificates require traditional county names.
+CT_PLANNING_REGION_TO_COUNTY: dict[str, str] = {
+    "capitol planning region":                       "Hartford County",
+    "greater bridgeport planning region":            "Fairfield County",
+    "lower connecticut river valley planning region":"Middlesex County",
+    "naugatuck valley planning region":              "New Haven County",
+    "northeastern connecticut planning region":      "Windham County",
+    "northwest hills planning region":               "Litchfield County",
+    "south central connecticut planning region":     "New Haven County",
+    "southeastern connecticut planning region":      "New London County",
+    "western connecticut planning region":           "Fairfield County",
+}
+
+# FEMA NFIP Communities Status Book (OpenFEMA).
+# NOTE: www.fema.gov is TLS-blocked server-side on Replit (same as hazards.fema.gov).
+# query_nfip_community_csb() will gracefully return empty on connection failure.
+# The browser-side Layer 22 enrichment in result.html provides the correct CID at render time.
+FEMA_CSB_URL = "https://www.fema.gov/api/open/v1/fimaNfipCommunities"
+
 # ZONE_SUBTY values that map to X500 (shaded Zone X, 0.2% annual chance / 500-year floodplain)
 _X500_SUBTYPES = frozenset({
     "0.2 PCT ANNUAL CHANCE FLOOD HAZARD",
@@ -184,6 +204,55 @@ async def geocode_address(address: str) -> Optional[dict]:
     except Exception as e:
         print(f"Geocoding (Nominatim) error: {e}")
 
+    # ── Attempt 4: Nominatim with street-type stripped (helps "4248 Duck Dr" → "4248 Duck") ──
+    import re as _re
+    _STREET_TYPE = _re.compile(
+        r"\b(Drive|Dr|Street|St|Avenue|Ave|Boulevard|Blvd|Road|Rd|Lane|Ln|"
+        r"Court|Ct|Circle|Cir|Place|Pl|Way|Terrace|Ter|Trail|Trl|"
+        r"Parkway|Pkwy|Highway|Hwy)\b\.?",
+        _re.IGNORECASE,
+    )
+    simplified = _re.sub(r"\s{2,}", " ", _STREET_TYPE.sub("", address)).strip()
+    if simplified and simplified.lower() != address.lower():
+        try:
+            params = {
+                "q": simplified,
+                "format": "json",
+                "limit": "1",
+                "countrycodes": "us",
+                "addressdetails": "1",
+            }
+            headers = {"User-Agent": "FEMA-FloodCert-Generator/1.0"}
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(NOMINATIM_URL, params=params, headers=headers)
+                resp.raise_for_status()
+                results = resp.json()
+            if results:
+                r = results[0]
+                addr_detail = r.get("address", {})
+                city = (
+                    addr_detail.get("city")
+                    or addr_detail.get("town")
+                    or addr_detail.get("village")
+                    or ""
+                ).title()
+                state_abbr = addr_detail.get("state_code", "").upper()
+                county_raw = addr_detail.get("county", "").replace(" County", "").strip()
+                display = r.get("display_name", address).split(",")[0].strip()
+                matched = f"{display}, {addr_detail.get('city', '')}, {state_abbr}".strip(", ")
+                return {
+                    "lat": float(r["lat"]),
+                    "lon": float(r["lon"]),
+                    "matched_address": matched,
+                    "city": city,
+                    "state_abbr": state_abbr,
+                    "state_fips": "",
+                    "county_fips": "",
+                    "county_name": county_raw,
+                }
+        except Exception as e:
+            print(f"Geocoding (Nominatim normalized) error: {e}")
+
     return None
 
 
@@ -191,8 +260,9 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
     """Query flood zone via Esri Living Atlas USA Flood Hazard layer.
 
     Returns FLD_ZONE, ZONE_SUBTY, SFHA_TF, DFIRM_ID — same fields as NFHL Layer 28.
-    The DFIRM_ID here may reflect the wrong county at municipal/county boundaries;
-    use county FIPS from the geocoder to build the correct prefix.
+    DFIRM_ID comes from a true spatial intersection of NFHL flood zone polygons and
+    is the correct county FIPS for that specific map tile.  It is more reliable than
+    the Census geocoder county FIPS for properties near county / municipality boundaries.
     """
     queries = [
         {
@@ -359,6 +429,98 @@ async def query_county_name(lat: float, lon: float) -> dict:
         return {}
 
 
+async def query_nfip_community_csb(
+    state_fips: str,
+    county_fips: str,
+    city: str,
+    state_abbr: str = "",
+) -> dict:
+    """Query FEMA NFIP Community Status Book API for the authoritative community number.
+
+    Returns the official FEMA-assigned community number for the municipality
+    (e.g. "060302" for City of Stockton, CA) instead of a county-FIPS placeholder.
+    Prefers the city/municipality-level community over the county-level community.
+
+    Requires either state_fips (2-digit) or state_abbr (e.g. "CA") plus
+    county_fips (3-digit).  Both must be known; returns empty on failure.
+
+    FEMA endpoint: https://www.fema.gov/api/open/v1/fimaNfipCommunities
+    """
+    empty: dict = {"csb_community_id": "", "csb_community_name": ""}
+
+    # Resolve state abbreviation
+    sa = state_abbr.upper().strip()
+    if not sa and state_fips:
+        _, sa = STATE_FIPS.get(state_fips, ("", ""))
+    if not sa:
+        return empty
+    if not county_fips or len(county_fips) != 3:
+        return empty
+
+    params = {
+        "$filter": f"stateAbbreviation eq '{sa}' and countyFips eq '{county_fips}'",
+        "$select": "communityNumber,communityName,countyName",
+        "$top": "200",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(FEMA_CSB_URL, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as e:
+        print(f"FEMA CSB API error: {e}")
+        return empty
+
+    communities = data.get("fimaNfipCommunities", [])
+    if not communities:
+        return empty
+
+    city_norm = city.lower().strip()
+
+    # 1. Exact / leading city match  ("Stockton, City of" starts with "stockton,")
+    if city_norm:
+        for c in communities:
+            c_name = (c.get("communityName") or "").lower()
+            if (
+                c_name == city_norm
+                or c_name.startswith(city_norm + ",")
+                or c_name.startswith(city_norm + " ")
+            ):
+                return {
+                    "csb_community_id": c.get("communityNumber", ""),
+                    "csb_community_name": c.get("communityName", ""),
+                }
+
+    # 2. Substring match
+    if city_norm:
+        for c in communities:
+            c_name = (c.get("communityName") or "").lower()
+            if city_norm in c_name:
+                return {
+                    "csb_community_id": c.get("communityNumber", ""),
+                    "csb_community_name": c.get("communityName", ""),
+                }
+
+    # 3. County-level / unincorporated community (fallback)
+    for c in communities:
+        c_name = (c.get("communityName") or "").lower()
+        if "county" in c_name or "unincorporated" in c_name:
+            return {
+                "csb_community_id": c.get("communityNumber", ""),
+                "csb_community_name": c.get("communityName", ""),
+            }
+
+    # 4. Single result — use it
+    if len(communities) == 1:
+        c = communities[0]
+        return {
+            "csb_community_id": c.get("communityNumber", ""),
+            "csb_community_name": c.get("communityName", ""),
+        }
+
+    return empty
+
+
 # State FIPS → (full name, abbreviation)
 STATE_FIPS: dict[str, tuple[str, str]] = {
     "01": ("Alabama", "AL"), "02": ("Alaska", "AK"), "04": ("Arizona", "AZ"),
@@ -433,18 +595,22 @@ FLOOD_ZONE_DESCRIPTIONS = {
 def determine_flood_info(merged: dict) -> dict:
     """Derive flood zone details from merged NFHL query results.
 
-    Expects: {**zone_data, **community_data, **firm_data, **county_data, geocoded_city, state_fips, county_fips}
+    Expects keys from zone_data, community_data, firm_data, county_data,
+    csb_data, plus: geocoded_city, state_fips, county_fips, county_name,
+    state_abbr (optional — enriches CSB lookup when state_fips is absent).
     """
     flood_zone      = (merged.get("flood_zone") or "X").strip().upper()
     zone_subtype    = (merged.get("zone_subtype") or "").strip()
     in_sfha         = merged.get("in_sfha", False)
     esri_dfirm      = (merged.get("esri_dfirm_id") or "").strip()
-    firm_panel_l3   = (merged.get("firm_panel_l3") or "").strip()  # from Layer 3 (may be empty)
+    firm_panel_l3   = (merged.get("firm_panel_l3") or "").strip()
     eff_date_raw    = merged.get("eff_date")
     state_fips      = (merged.get("state_fips") or "").strip()
     county_fips     = (merged.get("county_fips") or "").strip()
-    community_id    = (merged.get("community_id") or "").strip()
-    community_nm    = (merged.get("community_name") or "").strip()
+    community_id    = (merged.get("community_id") or "").strip()    # Layer 22
+    community_nm    = (merged.get("community_name") or "").strip()  # Layer 22
+    csb_community_id   = (merged.get("csb_community_id") or "").strip()    # FEMA CSB API
+    csb_community_name = (merged.get("csb_community_name") or "").strip()  # FEMA CSB API
     geocoded_city   = (merged.get("geocoded_city") or "").strip()
 
     # ── Zone designation ──────────────────────────────────────────────────────
@@ -470,55 +636,72 @@ def determine_flood_info(merged: dict) -> dict:
 
     # ── NFIP Map Number (Community-Panel Number) ──────────────────────────────
     # Priority:
-    # 1. Layer 3 full panel (e.g. "48091C 0215F") — most accurate; has correct DFIRM_ID + suffix
-    # 2. County FIPS from geocoder → construct correct community prefix (e.g. "48091C")
-    # 3. DFIRM_ID from Esri Living Atlas — may reflect wrong county near boundaries
+    # 1. Layer 3 full panel (e.g. "48091C 0215F") — direct spatial intersection of FIRM Panels
+    # 2. Esri Living Atlas DFIRM_ID — also from spatial intersection of NFHL flood zone polygons;
+    #    knows the correct county FIPS even for cross-county municipalities and is more reliable
+    #    than the Census geocoder county FIPS (which uses administrative address attribution).
+    # 3. Census geocoder county FIPS — address-based; may be wrong near county boundaries.
     # 4. "Not Available"
     has_full_l3_panel = len(firm_panel_l3.replace(" ", "")) > 6
 
     if has_full_l3_panel:
         # Layer 3 returned a real panel number — trust it completely
         map_number = firm_panel_l3
+    elif esri_dfirm and len(esri_dfirm) >= 5:
+        # DFIRM_ID = state(2) + county(3) FIPS from spatial intersection.
+        # Construct standard community-panel prefix: SSCCCС → e.g. "48091C".
+        map_number = f"{esri_dfirm[:5]}C"
     elif state_fips and len(county_fips) == 3:
-        # Construct correct prefix from Census geocoder county FIPS
-        # Note: the panel suffix (e.g. "0215F") requires Layer 3;
-        # without it we show just the community prefix and let JS enrich the suffix.
+        # Construct prefix from Census geocoder county FIPS (fallback only)
         map_number = f"{state_fips}{county_fips}C"
-    elif esri_dfirm:
-        map_number = esri_dfirm[:6] if len(esri_dfirm) >= 6 else esri_dfirm
     else:
         map_number = "Not Available"
 
     # ── NFIP Community Number (CID) ───────────────────────────────────────────
     # Priority:
-    # 1. CID from Layer 22 — the authoritative NFIP-assigned 6-digit community ID
-    # 2. County FIPS-derived approximation for county jurisdiction (state + county FIPS padded)
-    #    Note: for incorporated cities this will be the county CID, not the city CID;
-    #    the client-side JS Layer 22 enrichment provides the correct municipal CID.
-    # 3. "Not Available"
+    # 1. CID from Layer 22 (hazards.fema.gov) — NFIP-assigned 6-digit ID (when server-reachable)
+    # 2. CID from FEMA NFIP Community Status Book API — authoritative municipal community ID
+    #    (e.g. "060302" for City of Stockton CA, rather than county placeholder "06077C")
+    # 3. County-level approximation: state(2) + county(3) + "0" — county jurisdictions only
+    # 4. Fallback to map number prefix
     if community_id:
         panel_number = community_id
+    elif csb_community_id:
+        panel_number = csb_community_id
     elif state_fips and len(county_fips) == 3:
-        # County-level NFIP CID approximation: state(2) + county(3) + "0" = 6 digits
-        # This is a best-effort value for county jurisdictions; municipal CIDs differ.
+        # County-level NFIP CID approximation — may differ for incorporated municipalities
         panel_number = f"{state_fips}{county_fips}0"
     elif map_number and map_number != "Not Available":
-        # Fall back to map number prefix (first 5-6 chars)
         panel_number = map_number.replace(" ", "")[:6]
     else:
         panel_number = "Not Available"
 
     # ── NFIP Community Name ───────────────────────────────────────────────────
-    # Priority: Layer 22 POL_NAME1 → geocoded city → "Not Available"
-    community_name_out = community_nm or geocoded_city or "Not Available"
+    # Priority: Layer 22 POL_NAME1 → FEMA CSB official name → geocoded city
+    community_name_out = community_nm or csb_community_name or geocoded_city or "Not Available"
 
     # ── County name ───────────────────────────────────────────────────────────
     # Priority: Census geocoder geography → TIGERweb fallback
-    county_name = (merged.get("county_name") or "").strip()  # from geocoder geography
+    county_name = (merged.get("county_name") or "").strip()
     if not county_name:
         county_name = (merged.get("tigerweb_county") or "").strip()
 
+    # Connecticut: Census and TIGERweb return planning region names, not traditional counties.
+    # NFIP certificates must use traditional county names — map planning regions → county.
+    if county_name:
+        ct_county = CT_PLANNING_REGION_TO_COUNTY.get(county_name.lower().strip())
+        if ct_county:
+            county_name = ct_county
+
+    # Last-resort county flag: if county still blank after all lookups, flag it explicitly
+    # so the record is not silently missing a county rather than using empty string.
+    if not county_name:
+        county_name = ""  # caller / template should display "Not Available" for empty
+
     # ── NFIP Map Panel Effective/Revised Date ─────────────────────────────────
+    # Date must come from the specific matched panel polygon's EFF_DATE attribute.
+    # Layer 3 (query_firm_panel) returns this; browser-side JS overrides with
+    # the exact panel polygon EFF_DATE when Layer 3 is unreachable server-side.
     if isinstance(eff_date_raw, str) and eff_date_raw:
         panel_effective_date = eff_date_raw
     elif isinstance(eff_date_raw, (int, float)) and eff_date_raw > 0:

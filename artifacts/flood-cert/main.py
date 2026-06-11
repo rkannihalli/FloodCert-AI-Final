@@ -15,7 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from pdf_generator import generate_flood_certificate_pdf, generate_borrower_notice_pdf, generate_batch_report_pdf
 from fema_lookup import (
     geocode_address, query_fema_nfhl, query_nfip_community, query_firm_panel,
-    query_county_name, determine_flood_info, nfip_community_info,
+    query_county_name, query_nfip_community_csb, determine_flood_info, nfip_community_info,
 )
 from map_utils import generate_map_image
 from db import (
@@ -807,14 +807,20 @@ async def generate(
                     "lender_email": lender_email,
                 }
             })
-        zone_data, community_data, firm_data, county_data = await asyncio.gather(
+        zone_data, community_data, firm_data, county_data, csb_data = await asyncio.gather(
             query_fema_nfhl(geo_result["lat"], geo_result["lon"]),
             query_nfip_community(geo_result["lat"], geo_result["lon"]),
             query_firm_panel(geo_result["lat"], geo_result["lon"]),
             query_county_name(geo_result["lat"], geo_result["lon"]),
+            query_nfip_community_csb(
+                geo_result.get("state_fips", ""),
+                geo_result.get("county_fips", ""),
+                geo_result.get("city", ""),
+                geo_result.get("state_abbr", ""),
+            ),
         )
         flood_info = determine_flood_info({
-            **zone_data, **community_data, **firm_data, **county_data,
+            **zone_data, **community_data, **firm_data, **county_data, **csb_data,
             "geocoded_city": geo_result.get("city", ""),
             "state_fips": geo_result.get("state_fips", ""),
             "county_fips": geo_result.get("county_fips", ""),
@@ -1255,14 +1261,20 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str, company_id=N
             "error": "Address could not be geocoded",
         }
 
-    zone_data, community_data, firm_data, county_data = await asyncio.gather(
+    zone_data, community_data, firm_data, county_data, csb_data = await asyncio.gather(
         query_fema_nfhl(geo["lat"], geo["lon"]),
         query_nfip_community(geo["lat"], geo["lon"]),
         query_firm_panel(geo["lat"], geo["lon"]),
         query_county_name(geo["lat"], geo["lon"]),
+        query_nfip_community_csb(
+            geo.get("state_fips", ""),
+            geo.get("county_fips", ""),
+            geo.get("city", ""),
+            geo.get("state_abbr", ""),
+        ),
     )
     flood_info = determine_flood_info({
-        **zone_data, **community_data, **firm_data, **county_data,
+        **zone_data, **community_data, **firm_data, **county_data, **csb_data,
         "geocoded_city": geo.get("city", ""),
         "state_fips": geo.get("state_fips", ""),
         "county_fips": geo.get("county_fips", ""),

@@ -1,0 +1,158 @@
+You are fixing a flood certificate generation website. Below are all known bugs and the required logic corrections. Read every section carefully and apply ALL fixes. Do not skip any item.
+
+---
+
+## BUG 1 — Batch Flood Cert: County Information Missing
+
+**Problem:** When flood certificates are generated via the Batch run mode, the county field is blank/missing.
+
+**Fix:**
+- In the batch processing pipeline, ensure county is resolved for every address before generating the certificate.
+- County must be derived from the geocoding result (use the `administrative_area_level_2` component from the geocoder response, or the equivalent field from your geocoding provider).
+- If county is not returned by the geocoder, perform a secondary lookup using the FIPS county code from the NFIP map panel number (first 5 digits of the Community Panel Number are the FIPS state+county code — e.g., "48157" = Texas, Harris County).
+- Never leave county blank on a generated certificate. If it cannot be resolved, flag the record with error "County could not be determined" rather than silently omitting it.
+
+---
+
+## BUG 2 — Life-of-Loan Monitoring: No Email Notification on FIRM Panel Change
+
+**Problem:** When Life-of-Loan Monitoring is enabled ("On"), changes to the tracked FIRM panel are not triggering email notifications to the lender.
+
+**Fix:**
+- When Life-of-Loan Monitoring is active for a loan, store the current FIRM panel number and effective/revised date at the time of certificate generation.
+- Run a periodic check (daily or on FIRM update event) comparing stored FIRM panel data against the current NFIP FIRM panel data for that property's map tile.
+- If ANY of the following change: NFIP Map Panel Number (Community Panel Number), NFIP Map Panel Effective/Revised Date, or Flood Zone designation — trigger an automated email to the lender on file.
+- Email must include: Property Address, Loan Number, Old FIRM Panel, New FIRM Panel, Old Effective Date, New Effective Date, Old Flood Zone, New Flood Zone, and a call-to-action: "Please re-run the flood certificate for this property."
+- Do not send duplicate notifications for the same change event.
+
+---
+
+## BUG 3 — NFIP Map Number (Community Panel Number) Mismatch
+
+**Root Cause Analysis:**
+The system is selecting the wrong FIRM map panel. This happens because the property coordinates are being matched to the nearest panel centroid or a panel from the wrong jurisdiction layer (e.g., county-wide panel instead of city/municipality panel, or adjacent panel tile).
+
+**CoreLogic Logic to Replicate:**
+CoreLogic determines the Community Panel Number by:
+1. Geocoding the property to a precise lat/lon.
+2. Performing a **spatial intersection** of that lat/lon point against the FEMA NFIP FIRM panel polygons layer (not a nearest-centroid lookup).
+3. The panel whose polygon **contains** the point is selected.
+4. If the property sits on a panel boundary, the panel with the higher-precision community-level mapping (municipality over county) takes precedence.
+5. The Community Panel Number = FIPS State Code (2 digits) + FIPS County Code (3 digits) + Panel Number + Suffix Letter.
+   - NOTE: For incorporated municipalities/cities with their own FIRM, use the CITY's FIPS-based community number, NOT the county's.
+
+**Specific fixes required for the mismatches:**
+
+| Address | Your Output | Correct (CoreLogic) | Root Cause |
+|---|---|---|---|
+| 879 Willow Ridge Rd, Hudson, WI 54016 | 55109C 0326E | 55109C 0327E | Wrong adjacent panel tile selected — improve point-in-polygon precision |
+| 106 W 6th South St, Summerville, SC 29483 | 45019C 0120K | 45035C 0343E | Wrong county FIPS (019 vs 035) — Summerville spans Dorchester (035) not Berkeley (019) county |
+| 1053 Brewer Ridge Rd, Bulverde, TX 78163 | 48259C 0475F | 48091C 0215F | Wrong county FIPS (259=Kendall vs 091=Comal) — use spatial intersection, not ZIP-to-county mapping |
+| 911/913 Lake St, Dalton, GA 30721 | 13213C 0100D | 13313C 0139D | Wrong county FIPS (213=Murray vs 313=Whitfield) AND wrong effective date |
+| 2909 Travis St, Peru, IN 46970 | 18017C 0295C | 18103C 0170D | Wrong county FIPS (017=Cass vs 103=Miami) AND wrong effective date |
+
+**Code fix:**
+- Replace any ZIP-code-to-county or centroid-proximity lookup with a **point-in-polygon spatial query** against the FEMA FIRM panel shapefile/API.
+- Use the FEMA MSC (Map Service Center) API or FEMA NFIP spatial database for authoritative panel boundaries.
+- FEMA endpoint to use: `https://hazards.fema.gov/gis/nfhl/rest/services/public/NFHL/MapServer` — query the FIRM Panel layer (Layer 28) with the geocoded lat/lon.
+
+---
+
+## BUG 3b — NFIP Map Panel Effective/Revised Date Mismatch
+
+**Root Cause:** The effective date is being pulled from the county-level FIRM rather than the specific panel polygon that contains the property.
+
+**Fix:**
+- The effective/revised date must come from the **same panel record** returned by the spatial intersection in Bug 3.
+- Each FIRM panel polygon has its own `EFF_DATE` attribute — use that, not a county-wide or community-wide date.
+- For the two failing examples:
+  - Dalton, GA: Correct date is 09/19/2007 (from panel 13313C 0139D), not 09/29/2010.
+  - Peru, IN: Correct date is 09/28/2012 (from panel 18103C 0170D), not 09/03/2014.
+
+---
+
+## BUG 4 — NFIP Community Number Mismatch
+
+**Root Cause Analysis:**
+The system is returning a state+county FIPS-derived placeholder (e.g., "06077C") instead of the actual FEMA-assigned NFIP Community Number. The NFIP Community Number is a FEMA-specific identifier and does NOT always match the FIPS county code.
+
+**CoreLogic Logic to Replicate:**
+CoreLogic determines the NFIP Community Number by:
+1. After identifying the correct FIRM panel via spatial intersection (Bug 3), reading the `DFIRM_ID` or `COM_NFO_ID` field from the FIRM panel attribute table.
+2. Cross-referencing the FEMA NFIP Community Status Book (CSB) to get the official 6-digit NFIP Community Number.
+3. For incorporated cities/towns with their own NFIP policy, using the CITY's community number — NOT the county's.
+
+**Specific fixes:**
+
+| Address | Your Output | Correct | Root Cause |
+|---|---|---|---|
+| 2625 Sumac Ave, Stockton, CA 95207 | 06077C | 060302 | Using county FIPS (077=San Joaquin) instead of FEMA community ID for City of Stockton |
+| 107 Pierce St, Lewiston, ME 04240 | 23001C | 230004 | Using county FIPS (001=Androscoggin) instead of FEMA community ID for City of Lewiston |
+| 11 Brabrook Rd, Acton, MA 01720 | 25017C | 250176 | Using county FIPS (017=Middlesex) instead of FEMA community ID for Town of Acton |
+
+**Code fix:**
+- Query the FEMA NFIP Community Status Book API or use the FIRM panel's community attribute to get the correct community number.
+- FEMA CSB endpoint: `https://www.fema.gov/api/open/v1/fimaNfipCommunities`
+- Filter by state and community name/FIPS to get the `communityNumber` field.
+- Never construct the community number by concatenating state FIPS + county FIPS — always look it up from FEMA's authoritative source.
+
+---
+
+## BUG 5 — Miscellaneous Issues
+
+### 5a — 7710 Lavender Ct, Katy, TX 77493: Wrong Panel, Community Number, and Community Name
+**Problem:** Report shows 48157C 0040L / community 480640 / "Waller County". CoreLogic shows 48473C 0375E / community 480301 / "Katy, City of". Also Flood Zone shows "Zone X" instead of "X500".
+**Fix:**
+- The property is within the incorporated city limits of Katy (Fort Bend/Harris/Waller tri-county city). The geocoder is snapping to Waller County (48473 = Waller but city of Katy's NFIP community is 480301 under Fort Bend/Harris jurisdiction).
+- Apply point-in-polygon against FIRM panels — the correct panel is 48473C 0375E.
+- Look up NFIP community number from FEMA CSB → 480301 = City of Katy.
+- Community Name must come from the FEMA NFIP community record, not the county name.
+- **Zone X vs X500:** "Zone X (Shaded)" / "X500" is the 0.2% annual chance flood zone. "Zone X (Unshaded)" is minimal flood hazard. These are DIFFERENT zones and must NOT be collapsed into a single "Zone X" label. Read the `ZONE` and `ZONE_SUBTY` attributes from the FIRM spatial layer — if `ZONE_SUBTY` = "0.2 PCT ANNUAL CHANCE FLOOD HAZARD", display as "X500" or "Zone X (500-year)".
+
+### 5b — 329 Willard St, Jamestown, NY 14701: Missing Map Number, Community Number, and Effective Date
+**Problem:** All three fields are blank.
+**Fix:**
+- This is likely a geocoding or spatial query failure. Add fallback logic: if the primary spatial query returns no FIRM panel, expand the search radius by 50 meters and retry up to 3 times.
+- If still no result, attempt lookup by ZIP code centroid against FEMA NFIP community table.
+- Log the failure reason explicitly and display "Data not found — manual review required" rather than leaving fields blank.
+
+### 5c — 70 Circle Dr, Wallingford, CT 06492: County Shows Planning Region Instead of County
+**Problem:** Report shows "South Central Connecticut Planning Region" instead of "New Haven" county.
+**Fix:**
+- Connecticut uses Planning Regions for some administrative data, but NFIP certificates must use the traditional county name.
+- When the geocoder returns a planning region (or `administrative_area_level_2` is a planning region name), override with the FIPS county name lookup.
+- Maintain a lookup table mapping CT planning regions to their constituent counties, or use the FIPS county code from the FIRM panel to derive the county name.
+- Connecticut counties: New Haven County FIPS = 09009. Map "South Central Connecticut Planning Region" → "New Haven".
+
+### 5d — 2413 Denmead St, Lakewood, CA 90712: Zone X vs X500
+**Problem:** CoreLogic shows "X500", report shows "Zone X".
+**Fix:** Same as 5a Zone fix above — distinguish between shaded (X500) and unshaded (X) Zone X using `ZONE_SUBTY` from the FIRM layer. Never display both as "Zone X".
+
+### 5e — 301 Satinwood Drive Lot 1, Santa Rosa Beach, FL 32459: Zone A vs Zone X
+**Problem:** CoreLogic shows Zone X, report shows Zone A.
+**Fix:**
+- Likely a coordinate precision issue — the geocoder is placing the point in an adjacent Zone A polygon.
+- Apply high-precision geocoding (rooftop-level) and strict point-in-polygon. Do not use parcel centroid if lot boundaries span zone lines — use the primary structure footprint centroid or the geocoded address point.
+
+### 5f — 4248 Duck Dr, Ann Arbor, MI 48103: Geocoding Failure
+**Problem:** "Could not geocode the provided address."
+**Fix:**
+- Add fallback geocoding logic: if the primary geocoder fails, retry with abbreviated address components (remove "Dr", try "Duck" + city + state + zip).
+- Add a second geocoding provider as fallback (e.g., if Google fails, try HERE or Nominatim).
+- If all geocoders fail, return a meaningful error message with the specific failure reason and suggest address correction (e.g., "Address not found — verify street name and ZIP code").
+- Do not allow the certificate to generate with an empty geocode result.
+
+---
+
+## GENERAL CODE QUALITY RULES (apply to all future reports)
+
+1. **Always use point-in-polygon spatial intersection** against FEMA FIRM panel polygons — never use nearest-centroid or ZIP-to-county approximations.
+2. **Always derive NFIP Community Number from FEMA's NFIP Community Status Book API** — never construct it from FIPS codes.
+3. **Community Name must come from the FEMA NFIP community record** — never use the county name as a substitute for community name.
+4. **Distinguish Zone X (unshaded) from Zone X500 (shaded/0.2%)** using the ZONE_SUBTY attribute. Display correctly on every certificate.
+5. **County must always be populated** — use FIPS-to-county-name lookup as fallback if geocoder does not return it.
+6. **FIRM Panel Effective Date must be read from the specific matched panel polygon's EFF_DATE attribute**, not from a community-level or county-level date field.
+7. **Batch runs must apply the same logic as single runs** — no shortcuts or simplified lookups in batch mode.
+8. **Life-of-Loan Monitoring must track panel number, effective date, and flood zone** and alert on any change.
+9. **All geocoding failures must be caught, logged, and surfaced** with descriptive error messages — never silently omit fields.
+10. **For properties in incorporated municipalities**, always prefer the city/municipality FIRM and community number over the county-level data.
