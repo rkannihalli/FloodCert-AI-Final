@@ -667,7 +667,9 @@ async function lolCheck(id, btn) {
     if (sub.indexOf("0.2") >= 0) return "X500";
     if (sub.indexOf("500") >= 0 && (sub.indexOf("ANNUAL") >= 0 || sub.indexOf("YEAR") >= 0 || sub.indexOf("CHANCE") >= 0)) return "X500";
     if (sub === "0.2 PCT ANNUAL CHANCE FLOOD HAZARD" || sub === "AREA OF 500-YEAR FLOOD HAZARD" || sub === "500-YEAR FLOOD HAZARD") return "X500";
-    if (sub.indexOf("LEVEE") >= 0) return "X-LEVEE";
+    // Levee-reduced-risk subtypes ("Area With Reduced Flood Risk Due To Levee",
+    // "Protected by Levee", etc.) are shaded Zone X on the FIRM = X500 on SFHDF.
+    if (sub.indexOf("LEVEE") >= 0) return "X500";
     return "X";
   }
 

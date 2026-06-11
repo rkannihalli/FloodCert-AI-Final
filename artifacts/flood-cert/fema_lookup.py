@@ -52,18 +52,23 @@ CT_PLANNING_REGION_TO_COUNTY: dict[str, str] = {
 # The browser-side Layer 22 enrichment in result.html provides the correct CID at render time.
 FEMA_CSB_URL = "https://www.fema.gov/api/open/v1/fimaNfipCommunities"
 
-# ZONE_SUBTY values that map to X500 (shaded Zone X, 0.2% annual chance / 500-year floodplain)
+# ZONE_SUBTY values that map to X500 (shaded Zone X, 0.2% annual chance / 500-year floodplain).
+# Includes levee-reduced-risk subtypes: per FEMA NFHL data model, "Area With Reduced Flood
+# Risk Due To Levee" and similar values designate the SHADED Zone X on the FIRM = X500 on
+# the SFHDF.  These areas ARE within the 500-year floodplain; the levee provides 100-year
+# protection only, so the FIRM shows them as shaded (X500), not unshaded.
+# Reference: CoreLogic and other flood determination companies correctly label these X500.
 _X500_SUBTYPES = frozenset({
+    # Standard 0.2% / 500-year flood hazard labels
     "0.2 PCT ANNUAL CHANCE FLOOD HAZARD",
     "0.2 PCT ANNUAL CHANCE FLOOD",
     "0.2% ANNUAL CHANCE FLOOD HAZARD",
     "0.2 PERCENT ANNUAL CHANCE FLOOD HAZARD",
     "AREA OF 500-YEAR FLOOD HAZARD",
     "500-YEAR FLOOD HAZARD",
-})
-
-# ZONE_SUBTY values that indicate levee-protected Zone X
-_XLEVEE_SUBTYPES = frozenset({
+    # Levee-reduced-risk labels (Esri Living Atlas / NFHL) — also shaded X = X500
+    "AREA WITH REDUCED FLOOD RISK DUE TO LEVEE",
+    "REDUCED FLOOD RISK DUE TO LEVEE",
     "PROTECTED BY LEVEE",
     "AREA PROTECTED BY LEVEE",
     "AREA PROTECTED FROM 100-YEAR FLOOD BY LEVEE",
@@ -71,9 +76,14 @@ _XLEVEE_SUBTYPES = frozenset({
 
 
 def _classify_x_zone(flood_zone: str, zone_subtype: str) -> str:
-    """Classify Zone X into 'X500', 'X-LEVEE', or plain 'X'.
+    """Classify Zone X into 'X500' or plain 'X'.
 
-    FEMA NFHL uses FLD_ZONE='X' for all three variants; ZONE_SUBTY differentiates them.
+    FEMA NFHL uses FLD_ZONE='X' for both shaded (X500) and unshaded Zone X;
+    ZONE_SUBTY differentiates them.  Levee-reduced-risk subtypes ("Area With
+    Reduced Flood Risk Due To Levee", "Protected by Levee", etc.) are shaded
+    Zone X on the FIRM and must be reported as X500 on the SFHDF — CoreLogic
+    and all major flood-determination services confirm this.
+
     Some older datasets or reduced-set layers use FLD_ZONE='X500' or 'B'.
     """
     if flood_zone in ("X500", "B"):
@@ -85,7 +95,7 @@ def _classify_x_zone(flood_zone: str, zone_subtype: str) -> str:
     if not sub:
         return "X"
 
-    # Explicit X500 matches
+    # Explicit X500 and levee-shaded matches
     if sub in _X500_SUBTYPES:
         return "X500"
     # Catch variations: "0.2 PCT ...", "0.2%...", etc.
@@ -94,10 +104,9 @@ def _classify_x_zone(flood_zone: str, zone_subtype: str) -> str:
     # Catch "500 YEAR FLOOD HAZARD", "500-YEAR ANNUAL CHANCE", etc.
     if "500" in sub and ("ANNUAL" in sub or "YEAR" in sub or "CHANCE" in sub):
         return "X500"
-
-    # Levee-protected Zone X
-    if sub in _XLEVEE_SUBTYPES or "LEVEE" in sub:
-        return "X-LEVEE"
+    # Catch any remaining levee-related subtype — all indicate shaded Zone X = X500
+    if "LEVEE" in sub:
+        return "X500"
 
     return "X"
 
