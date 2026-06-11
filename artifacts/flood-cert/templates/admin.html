@@ -6,153 +6,116 @@
   <title>Admin Panel — FEMA Flood Certificate Generator</title>
   <link rel="stylesheet" href="/static/css/main.css" />
   <style>
-    .admin-wrap { max-width: 1000px; margin: 32px auto; padding: 0 24px 60px; }
-    .admin-section {
-      background: #fff;
-      border-radius: 8px;
-      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-      overflow: hidden;
-      margin-bottom: 28px;
+    :root { --navy:#003366; --blue:#0050a0; --green:#1a7a4a; --amber:#d35400; --red:#c0392b; }
+    body { background:#f5f7fa; }
+    .admin-wrap { max-width: 1200px; margin: 0 auto; padding: 24px 20px 60px; }
+
+    /* ── Stats row ── */
+    .stats-row { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:24px; }
+    .stat-card { background:#fff; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,.06); padding:14px 16px; text-align:center; }
+    .stat-num  { font-size:1.8rem; font-weight:800; color:var(--navy); line-height:1; }
+    .stat-label { font-size:0.7rem; color:#5a6470; margin-top:3px; text-transform:uppercase; letter-spacing:.04em; }
+
+    /* ── Flash box ── */
+    .flash-box { background:#e6f4ed; border:2px solid var(--green); border-radius:8px; padding:16px 20px; margin-bottom:20px; }
+    .flash-box h3 { color:var(--green); margin:0 0 8px; font-size:.9rem; }
+    .cred-block { background:#fff; border:1px solid #b8dfc9; border-radius:6px; padding:10px 14px; font-family:monospace; font-size:.9rem; margin-top:6px; }
+    .cred-label { font-size:.68rem; color:#5a6470; font-family:inherit; margin-top:8px; }
+    .flash-warn { font-size:.76rem; color:var(--amber); margin-top:8px; }
+
+    /* ── Tabs ── */
+    .tab-bar { display:flex; gap:4px; border-bottom:2px solid #e8ecf0; margin-bottom:20px; flex-wrap:wrap; }
+    .tab-btn {
+      padding:10px 20px; font-size:.84rem; font-weight:600; color:#5a6470;
+      background:none; border:none; border-bottom:3px solid transparent;
+      cursor:pointer; border-radius:6px 6px 0 0; transition:all .15s;
+      display:flex; align-items:center; gap:6px;
     }
-    .admin-section-hdr {
-      background: var(--navy);
-      color: #fff;
-      padding: 12px 20px;
-      font-size: 0.9rem;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      display: flex;
-      align-items: center;
-      gap: 10px;
+    .tab-btn:hover { background:#f5f7fa; color:var(--navy); }
+    .tab-btn.active { color:var(--blue); border-bottom-color:var(--blue); background:#fff; }
+    .tab-badge { background:var(--amber); color:#fff; border-radius:20px; padding:1px 7px; font-size:.68rem; }
+    .tab-badge.red { background:var(--red); }
+
+    /* ── Section cards ── */
+    .admin-section { background:#fff; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,.07); overflow:hidden; margin-bottom:20px; }
+    .section-hdr {
+      background:var(--navy); color:#fff; padding:11px 18px;
+      font-size:.82rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+      display:flex; align-items:center; gap:10px;
     }
-    .admin-section-hdr .badge {
-      background: rgba(255,255,255,0.2);
-      border-radius: 20px;
-      padding: 2px 10px;
-      font-size: 0.75rem;
+    .section-hdr .badge { background:rgba(255,255,255,.2); border-radius:20px; padding:2px 9px; font-size:.7rem; }
+
+    /* ── Tables ── */
+    .admin-table { width:100%; border-collapse:collapse; }
+    .admin-table th { background:#f5f7fa; font-size:.7rem; font-weight:700; color:#5a6470; text-transform:uppercase; letter-spacing:.05em; padding:9px 14px; text-align:left; border-bottom:1px solid #e8ecf0; }
+    .admin-table td { padding:10px 14px; font-size:.84rem; color:#1e2530; border-bottom:1px solid #f0f2f5; vertical-align:middle; }
+    .admin-table tr:last-child td { border-bottom:none; }
+    .admin-table tr:hover td { background:#fafbfc; }
+    .empty-row td { text-align:center; color:#9aa3ad; font-style:italic; padding:22px; }
+
+    /* ── Badges ── */
+    .sb { display:inline-block; padding:2px 9px; border-radius:20px; font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+    .sb-active   { background:#e6f4ed; color:var(--green); }
+    .sb-pending  { background:#fdf3e3; color:var(--amber); }
+    .sb-rejected { background:#fdf0ef; color:var(--red); }
+    .sb-inactive { background:#f0f2f5; color:#5a6470; }
+    .sb-admin    { background:#e8f0fb; color:var(--navy); }
+    .sb-sent     { background:#e6f4ed; color:var(--green); }
+    .sb-failed   { background:#fdf0ef; color:var(--red); }
+
+    /* ── Buttons ── */
+    .btn-sm { padding:5px 12px; border-radius:5px; font-size:.76rem; font-weight:600; cursor:pointer; border:none; transition:opacity .15s; }
+    .btn-sm:hover { opacity:.85; }
+    .btn-approve  { background:var(--green); color:#fff; }
+    .btn-reject   { background:#e8ecf0; color:#5a6470; }
+    .btn-reset    { background:var(--blue); color:#fff; }
+    .btn-delete   { background:#fdf0ef; color:var(--red); border:1px solid #f5c6c3; }
+    .btn-activate { background:#e6f4ed; color:var(--green); border:1px solid #b8dfc9; }
+    .action-group { display:flex; gap:5px; flex-wrap:wrap; }
+
+    /* ── Filter row ── */
+    .filter-row {
+      padding:14px 18px; background:#f5f7fa; border-bottom:1px solid #e8ecf0;
+      display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;
     }
-    .admin-table {
-      width: 100%;
-      border-collapse: collapse;
+    .filter-row label { font-size:.7rem; font-weight:700; color:#003366; text-transform:uppercase; letter-spacing:.04em; display:block; margin-bottom:3px; }
+    .filter-row select, .filter-row input[type=text], .filter-row input[type=date] {
+      padding:7px 10px; border:1.5px solid #e8ecf0; border-radius:5px; font-size:.84rem; color:#1e2530;
+      outline:none; background:#fff; font-family:inherit;
     }
-    .admin-table th {
-      background: #f5f7fa;
-      font-size: 0.75rem;
-      font-weight: 700;
-      color: #5a6470;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      padding: 10px 16px;
-      text-align: left;
-      border-bottom: 1px solid #e8ecf0;
+    .filter-row select:focus, .filter-row input:focus { border-color:var(--blue); }
+    .filter-row .btn-filter { padding:7px 16px; background:var(--blue); color:#fff; border:none; border-radius:5px; font-size:.82rem; font-weight:600; cursor:pointer; }
+    .filter-row .btn-clear  { padding:7px 14px; background:#e8ecf0; color:#5a6470; border:none; border-radius:5px; font-size:.82rem; font-weight:600; cursor:pointer; text-decoration:none; }
+
+    /* ── Bulk-delete form ── */
+    .bulk-bar {
+      padding:10px 18px; background:#fff3cd; border-bottom:1px solid #ffc107;
+      display:none; align-items:center; gap:12px; flex-wrap:wrap;
     }
-    .admin-table td {
-      padding: 12px 16px;
-      font-size: 0.88rem;
-      color: #1e2530;
-      border-bottom: 1px solid #f0f2f5;
-      vertical-align: middle;
-    }
-    .admin-table tr:last-child td { border-bottom: none; }
-    .admin-table tr:hover td { background: #fafbfc; }
-    .status-badge {
-      display: inline-block;
-      padding: 3px 10px;
-      border-radius: 20px;
-      font-size: 0.72rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-    .status-active   { background: #e6f4ed; color: #1a7a4a; }
-    .status-pending  { background: #fdf3e3; color: #d35400; }
-    .status-rejected { background: #fdf0ef; color: #c0392b; }
-    .status-admin    { background: #e8f0fb; color: #003366; }
-    .btn-sm {
-      padding: 5px 12px;
-      border-radius: 5px;
-      font-size: 0.78rem;
-      font-weight: 600;
-      cursor: pointer;
-      border: none;
-      transition: opacity 0.15s;
-    }
-    .btn-sm:hover { opacity: 0.85; }
-    .btn-approve { background: #1a7a4a; color: #fff; }
-    .btn-reject  { background: #e8ecf0; color: #5a6470; }
-    .btn-reset   { background: #0050a0; color: #fff; }
-    .btn-delete  { background: #fdf0ef; color: #c0392b; border: 1px solid #f5c6c3; }
-    .btn-activate { background: #e6f4ed; color: #1a7a4a; border: 1px solid #b8dfc9; }
-    .action-group { display: flex; gap: 6px; flex-wrap: wrap; }
-    .empty-row td { text-align: center; color: #9aa3ad; font-style: italic; padding: 24px; }
-    .flash-box {
-      background: #e6f4ed;
-      border: 2px solid #1a7a4a;
-      border-radius: 8px;
-      padding: 18px 22px;
-      margin-bottom: 24px;
-    }
-    .flash-box h3 { color: #1a7a4a; margin: 0 0 8px; font-size: 0.95rem; }
-    .flash-box .cred-block {
-      background: #fff;
-      border: 1px solid #b8dfc9;
-      border-radius: 6px;
-      padding: 12px 16px;
-      font-family: monospace;
-      font-size: 0.95rem;
-      margin-top: 8px;
-    }
-    .flash-box .cred-label { font-size: 0.75rem; color: #5a6470; font-family: inherit; }
-    .flash-warn { font-size: 0.78rem; color: #d35400; margin-top: 8px; }
-    .admin-add-form {
-      padding: 20px 24px;
-      border-top: 1px solid #e8ecf0;
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr auto;
-      gap: 12px;
-      align-items: end;
-    }
-    .admin-add-form label {
-      font-size: 0.72rem;
-      font-weight: 700;
-      color: #003366;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      display: block;
-      margin-bottom: 4px;
-    }
-    .admin-add-form input {
-      width: 100%;
-      padding: 9px 12px;
-      border: 1.5px solid #e8ecf0;
-      border-radius: 6px;
-      font-size: 0.88rem;
-      outline: none;
-      box-sizing: border-box;
-    }
-    .admin-add-form input:focus {
-      border-color: #0050a0;
-      box-shadow: 0 0 0 3px rgba(0,80,160,0.1);
-    }
-    .stats-row {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 14px;
-      margin-bottom: 24px;
-    }
-    .stat-card {
-      background: #fff;
-      border-radius: 8px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-      padding: 16px 20px;
-      text-align: center;
-    }
-    .stat-num { font-size: 2rem; font-weight: 800; color: var(--navy); line-height: 1; }
-    .stat-label { font-size: 0.75rem; color: #5a6470; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
-    @media (max-width: 640px) {
-      .stats-row { grid-template-columns: 1fr 1fr; }
-      .admin-add-form { grid-template-columns: 1fr; }
+    .bulk-bar.visible { display:flex; }
+    .bulk-count { font-size:.84rem; font-weight:700; color:#856404; }
+    .bulk-reason { padding:6px 10px; border:1.5px solid #e8ecf0; border-radius:5px; font-size:.82rem; min-width:200px; font-family:inherit; }
+    .btn-bulk-del { padding:6px 14px; background:var(--red); color:#fff; border:none; border-radius:5px; font-size:.8rem; font-weight:600; cursor:pointer; }
+
+    /* ── Add-user form ── */
+    .add-user-form { padding:16px 18px; display:grid; grid-template-columns:1fr 1fr 1fr 1fr auto; gap:10px; align-items:end; }
+    .add-user-form label { font-size:.7rem; font-weight:700; color:var(--navy); text-transform:uppercase; letter-spacing:.04em; display:block; margin-bottom:3px; }
+    .add-user-form input, .add-user-form select { width:100%; padding:8px 10px; border:1.5px solid #e8ecf0; border-radius:5px; font-size:.84rem; outline:none; box-sizing:border-box; font-family:inherit; }
+    .add-user-form input:focus { border-color:var(--blue); }
+
+    /* ── LOL change table ── */
+    .change-table { width:100%; border-collapse:collapse; font-size:.8rem; }
+    .change-table th { background:#f0f2f5; padding:4px 8px; text-align:left; font-weight:700; font-size:.7rem; color:#5a6470; }
+    .change-table td { padding:4px 8px; border-top:1px solid #f0f2f5; }
+    .old-val { color:var(--red); text-decoration:line-through; }
+    .new-val { color:var(--green); font-weight:600; }
+
+    .history-checkbox { cursor:pointer; width:15px; height:15px; }
+
+    @media(max-width:800px) {
+      .stats-row { grid-template-columns:1fr 1fr; }
+      .add-user-form { grid-template-columns:1fr; }
+      .tab-btn { padding:8px 12px; font-size:.78rem; }
     }
   </style>
 </head>
@@ -167,6 +130,7 @@
     </div>
     <a href="/" class="header-history-link">🏠 App</a>
     <a href="/history" class="header-history-link">📂 History</a>
+    <a href="/lol-monitoring" class="header-history-link">🔔 LOL</a>
     <form method="POST" action="/logout" style="margin:0;">
       <button type="submit" class="header-history-link" style="background:none;border:none;cursor:pointer;color:#fff;font-size:inherit;padding:6px 14px;">⎋ Sign Out</button>
     </form>
@@ -177,16 +141,13 @@
 
   {% if flash %}
   <div class="flash-box">
-    <h3>✅ User Approved — Share these credentials with the user</h3>
+    <h3>✅ Account Updated — Share credentials securely with the user</h3>
     <div class="cred-block">
-      <div class="cred-label">NAME</div>
-      <div>{{ flash.name }}</div>
-      <div class="cred-label" style="margin-top:10px;">EMAIL</div>
-      <div>{{ flash.email }}</div>
-      <div class="cred-label" style="margin-top:10px;">TEMPORARY PASSWORD</div>
-      <div><strong>{{ flash.password }}</strong></div>
+      <div class="cred-label">NAME</div><div>{{ flash.name }}</div>
+      <div class="cred-label">EMAIL</div><div>{{ flash.email }}</div>
+      <div class="cred-label">TEMPORARY PASSWORD</div><div><strong>{{ flash.password }}</strong></div>
     </div>
-    <div class="flash-warn">⚠ This password is shown only once. Copy it now and share it with the user securely.</div>
+    <div class="flash-warn">⚠ This password is shown only once. Copy it now and share with the user securely.</div>
   </div>
   {% endif %}
 
@@ -205,164 +166,516 @@
       <div class="stat-label">Active Users</div>
     </div>
     <div class="stat-card">
-      <div class="stat-num" style="color:var(--gray-600);">{{ stats.rejected }}</div>
+      <div class="stat-num" style="color:#5a6470;">{{ stats.rejected }}</div>
       <div class="stat-label">Rejected</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num" style="color:{{ 'var(--red)' if stats.failed_alerts > 0 else 'var(--navy)' }};">{{ stats.failed_alerts }}</div>
+      <div class="stat-label">Failed LOL Alerts</div>
     </div>
   </div>
 
-  <!-- Pending access requests -->
-  <div class="admin-section">
-    <div class="admin-section-hdr">
-      🔔 Pending Access Requests
-      {% if pending %}<span class="badge">{{ pending | length }}</span>{% endif %}
-    </div>
-    <table class="admin-table">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Email</th>
-          <th>Reason</th>
-          <th>Requested</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% if pending %}
-          {% for u in pending %}
+  <!-- Tab navigation -->
+  <div class="tab-bar">
+    <button class="tab-btn {% if tab == 'requests' %}active{% endif %}" onclick="goTab('requests')">
+      🔔 Access Requests
+      {% if stats.pending > 0 %}<span class="tab-badge">{{ stats.pending }}</span>{% endif %}
+    </button>
+    <button class="tab-btn {% if tab == 'companies' %}active{% endif %}" onclick="goTab('companies')">
+      🏢 Company History
+    </button>
+    <button class="tab-btn {% if tab == 'lol' %}active{% endif %}" onclick="goTab('lol')">
+      📡 LOL Alerts
+      {% if stats.failed_alerts > 0 %}<span class="tab-badge red">{{ stats.failed_alerts }}</span>{% endif %}
+    </button>
+    <button class="tab-btn {% if tab == 'users' %}active{% endif %}" onclick="goTab('users')">
+      👥 User Management
+    </button>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       TAB 1: ACCESS REQUESTS
+       ═══════════════════════════════════════════════════════ -->
+  <div id="pane-requests" class="tab-pane" style="{{ 'display:block' if tab == 'requests' else 'display:none' }}">
+
+    <div class="admin-section">
+      <div class="section-hdr">
+        🔔 Access Requests
+        <span class="badge">{{ access_requests | length }}</span>
+      </div>
+
+      <!-- Filter -->
+      <form method="GET" action="/admin" class="filter-row">
+        <input type="hidden" name="tab" value="requests" />
+        <div>
+          <label>Status</label>
+          <select name="req_status">
+            <option value="">All Statuses</option>
+            <option value="pending"  {% if req_status=='pending'  %}selected{% endif %}>Pending</option>
+            <option value="active"   {% if req_status=='active'   %}selected{% endif %}>Approved</option>
+            <option value="rejected" {% if req_status=='rejected' %}selected{% endif %}>Rejected</option>
+            <option value="inactive" {% if req_status=='inactive' %}selected{% endif %}>Inactive</option>
+          </select>
+        </div>
+        <div style="flex:1;min-width:140px;">
+          <label>Search Name / Company</label>
+          <input type="text" name="company_search" placeholder="Filter by name or company…" />
+        </div>
+        <button type="submit" class="btn-filter">Filter</button>
+        <a href="/admin?tab=requests" class="btn-clear">Clear</a>
+      </form>
+
+      <table class="admin-table" id="reqTable">
+        <thead>
           <tr>
-            <td><strong>{{ u.name }}</strong></td>
-            <td>{{ u.email }}</td>
-            <td style="max-width:220px;color:#5a6470;">{{ u.request_reason or '—' }}</td>
-            <td style="white-space:nowrap;color:#9aa3ad;font-size:0.78rem;">{{ u.created_at[:10] }}</td>
+            <th>Name</th>
+            <th>Company</th>
+            <th>Email</th>
+            <th>Contact</th>
+            <th>Address</th>
+            <th>Submitted</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if access_requests %}
+            {% for u in access_requests %}
+            <tr>
+              <td><strong>{{ u.display_name }}</strong></td>
+              <td>{{ u.company_name or '—' }}</td>
+              <td style="font-size:.8rem;">{{ u.email }}</td>
+              <td style="white-space:nowrap;font-size:.8rem;">{{ u.contact_number or '—' }}</td>
+              <td style="font-size:.78rem;color:#5a6470;max-width:160px;">{{ u.company_address or '—' }}</td>
+              <td style="white-space:nowrap;color:#9aa3ad;font-size:.76rem;">{{ u.created_at[:10] }}</td>
+              <td>
+                <span class="sb sb-{{ u.status }}">{{ u.status | title }}</span>
+              </td>
+              <td>
+                <div class="action-group">
+                  {% if u.status == 'pending' %}
+                  <form method="POST" action="/admin/users/{{ u.id }}/approve">
+                    <button class="btn-sm btn-approve">✓ Approve</button>
+                  </form>
+                  <form method="POST" action="/admin/users/{{ u.id }}/reject">
+                    <button class="btn-sm btn-reject">✕ Reject</button>
+                  </form>
+                  {% elif u.status == 'active' %}
+                  <form method="POST" action="/admin/users/{{ u.id }}/deactivate">
+                    <button class="btn-sm btn-reject">Deactivate</button>
+                  </form>
+                  {% elif u.status in ('rejected','inactive') %}
+                  <form method="POST" action="/admin/users/{{ u.id }}/approve">
+                    <button class="btn-sm btn-activate">Re-activate</button>
+                  </form>
+                  {% endif %}
+                  {% if not u.is_admin %}
+                  <form method="POST" action="/admin/users/{{ u.id }}/delete"
+                        onsubmit="return confirm('Permanently delete user {{ u.display_name | replace(\"'\",\"\\'\")|replace('\"','&quot;') }}?')">
+                    <button class="btn-sm btn-delete">Delete</button>
+                  </form>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr class="empty-row"><td colspan="8">No access requests found.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       TAB 2: COMPANY HISTORY
+       ═══════════════════════════════════════════════════════ -->
+  <div id="pane-companies" class="tab-pane" style="{{ 'display:block' if tab == 'companies' else 'display:none' }}">
+
+    <div class="admin-section">
+      <div class="section-hdr">🏢 Company History</div>
+
+      <form method="GET" action="/admin" class="filter-row">
+        <input type="hidden" name="tab" value="companies" />
+        <div>
+          <label>Company</label>
+          <select name="cid" onchange="this.form.submit()">
+            <option value="">— Select Company —</option>
+            {% for c in companies %}
+            <option value="{{ c.id }}" {% if c.id == cid %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% if cid %}
+        <div>
+          <label>User</label>
+          <select name="uid">
+            <option value="">All Users</option>
+            {% for u in history_users %}
+            <option value="{{ u.id }}" {% if u.id == uid %}selected{% endif %}>{{ u.display_name or u.name or u.email }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>From</label>
+          <input type="date" name="dfrom" value="{{ filter_dfrom }}" />
+        </div>
+        <div>
+          <label>To</label>
+          <input type="date" name="dto" value="{{ filter_dto }}" />
+        </div>
+        <div>
+          <label>Zone</label>
+          <select name="zone">
+            <option value="">Any</option>
+            {% for z in ['AE','AH','AO','A','VE','V','X','X500','D','UNDETERMINED'] %}
+            <option value="{{ z }}" {% if z == filter_zone %}selected{% endif %}>{{ z }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="flex:1;min-width:130px;">
+          <label>Search</label>
+          <input type="text" name="hq" value="{{ filter_hq }}" placeholder="Loan ID, borrower, address…" />
+        </div>
+        <button type="submit" class="btn-filter">Filter</button>
+        <a href="/admin?tab=companies&cid={{ cid }}" class="btn-clear">Clear</a>
+        {% endif %}
+      </form>
+
+      {% if selected_company %}
+      <div style="padding:10px 18px;background:#e8f0fb;border-bottom:1px solid #e8ecf0;font-size:.83rem;color:#003366;">
+        <strong>{{ selected_company.name }}</strong> &nbsp;|&nbsp; {{ history_records | length }} record(s)
+        {% if selected_company.address %} &nbsp;|&nbsp; {{ selected_company.address }}{% endif %}
+      </div>
+      {% endif %}
+
+      {% if cid and history_records %}
+      <!-- Bulk-delete bar -->
+      <form method="POST" action="/admin/history/bulk-delete" id="bulkDelForm">
+        <input type="hidden" name="cid" value="{{ cid }}" />
+        <div class="bulk-bar" id="bulkBar">
+          <span class="bulk-count" id="bulkCount">0 records selected</span>
+          <input type="text" name="reason" class="bulk-reason" placeholder="Reason for deletion (optional)" />
+          <button type="submit" class="btn-bulk-del"
+                  onclick="return confirmBulkDelete()">🗑 Delete Selected</button>
+          <button type="button" class="btn-sm btn-reject" onclick="clearSelection()">Cancel</button>
+        </div>
+
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th><input type="checkbox" id="selectAll" onchange="toggleAll(this)" title="Select all" /></th>
+              <th>Date</th>
+              <th>Loan ID</th>
+              <th>Borrower</th>
+              <th>Address</th>
+              <th>Zone</th>
+              <th>Panel</th>
+              <th>SFHA</th>
+              <th>User</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in history_records %}
+            {% set sfha = r.sfha_status == 'Yes' %}
+            <tr>
+              <td><input type="checkbox" name="record_ids" value="{{ r.id }}" class="history-checkbox" onchange="updateBulkBar()" /></td>
+              <td style="white-space:nowrap;font-size:.8rem;">{{ r.determination_date or r.created_at[:10] }}</td>
+              <td><a href="/history/{{ r.id }}" style="color:var(--blue);font-weight:600;">{{ r.loan_id }}</a></td>
+              <td style="font-size:.83rem;">{{ r.borrower_name }}</td>
+              <td style="font-size:.8rem;max-width:180px;">{{ r.matched_address or r.property_address }}</td>
+              <td>
+                <span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:.75rem;font-weight:700;
+                  background:{{ '#fff0f0' if sfha else '#e6f4ed' }};color:{{ 'var(--red)' if sfha else '#1a4a2e' }};">
+                  {{ r.flood_zone }}
+                </span>
+              </td>
+              <td style="font-family:monospace;font-size:.78rem;">{{ r.community_number or '—' }}</td>
+              <td><span class="sb {{ 'sb-rejected' if sfha else 'sb-active' }}" style="font-size:.68rem;">{{ r.sfha_status }}</span></td>
+              <td style="font-size:.76rem;color:#5a6470;">{{ r.user_id or '—' }}</td>
+              <td>
+                <div class="action-group">
+                  <a href="/history/{{ r.id }}" class="btn-sm btn-activate" style="text-decoration:none;padding:4px 10px;">👁 View</a>
+                  <form method="POST" action="/admin/history/{{ r.id }}/delete"
+                        onsubmit="return confirm('Permanently delete record #{{ r.id }} for loan {{ r.loan_id }}? This cannot be undone.')">
+                    <input type="hidden" name="reason" value="Admin panel deletion" />
+                    <button class="btn-sm btn-delete">🗑</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </form>
+
+      {% elif cid %}
+        <div class="empty-row" style="padding:32px;text-align:center;color:#9aa3ad;">No records found for the selected filters.</div>
+      {% else %}
+        <div class="empty-row" style="padding:32px;text-align:center;color:#9aa3ad;">
+          Select a company from the dropdown above to view its flood certificate history.
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       TAB 3: LOL ALERTS
+       ═══════════════════════════════════════════════════════ -->
+  <div id="pane-lol" class="tab-pane" style="{{ 'display:block' if tab == 'lol' else 'display:none' }}">
+
+    <div class="admin-section">
+      <div class="section-hdr" style="justify-content:space-between;">
+        <span>📡 Life-of-Loan Alerts
+          <span class="badge">{{ lol_alerts | length }}</span>
+        </span>
+        <form method="POST" action="/admin/lol/run-check" style="margin:0;">
+          <button type="submit" style="background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:5px;padding:5px 13px;font-size:.75rem;font-weight:600;cursor:pointer;" title="Run the LOL check right now against FEMA data">
+            ▶ Run Check Now
+          </button>
+        </form>
+      </div>
+
+      {% if lol_alerts %}
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Alert Date</th>
+            <th>Property</th>
+            <th>Loan / Borrower</th>
+            <th>Changed Fields</th>
+            <th>Old → New Values</th>
+            <th>Lender Email</th>
+            <th>Email Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in lol_alerts %}
+          <tr>
+            <td style="white-space:nowrap;font-size:.8rem;">{{ a.alert_sent_at[:16] if a.alert_sent_at else '—' }}</td>
+            <td style="font-size:.82rem;font-weight:600;max-width:200px;">{{ a.property_address or '—' }}</td>
+            <td style="font-size:.78rem;">
+              {{ a.loan_id or '—' }}<br />
+              <span style="color:#5a6470;">{{ a.borrower_name or '' }}</span>
+            </td>
+            <td style="font-size:.78rem;">
+              {% if a.changed_fields is iterable and a.changed_fields is not string %}
+                {% for f in a.changed_fields %}
+                  <div>• {{ f | replace('baseline_','') | replace('_',' ') | title }}</div>
+                {% endfor %}
+              {% else %}
+                {{ a.changed_fields or '—' }}
+              {% endif %}
+            </td>
+            <td>
+              <table class="change-table">
+                {% if a.old_values is mapping %}
+                  {% for k, v in a.old_values.items() %}
+                  <tr>
+                    <td style="font-size:.68rem;color:#5a6470;">{{ k | replace('baseline_','') | replace('_',' ') | title }}</td>
+                    <td class="old-val">{{ v or '—' }}</td>
+                    <td>→</td>
+                    <td class="new-val">{{ a.new_values.get(k, '?') if a.new_values is mapping else '?' }}</td>
+                  </tr>
+                  {% endfor %}
+                {% else %}
+                  <tr><td colspan="4" style="color:#9aa3ad;font-size:.78rem;">—</td></tr>
+                {% endif %}
+              </table>
+            </td>
+            <td style="font-size:.78rem;">{{ a.lender_email or '—' }}</td>
+            <td>
+              <span class="sb {{ 'sb-sent' if a.email_status == 'Sent' else 'sb-failed' }}">
+                {{ a.email_status }}
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty-row" style="padding:40px;text-align:center;color:#9aa3ad;">
+        <div style="font-size:2rem;margin-bottom:10px;">📡</div>
+        <p>No LOL alerts have been generated yet.</p>
+        <p style="font-size:.82rem;">Alerts are generated automatically when FEMA FIRM data changes for a monitored property.</p>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Info box -->
+    <div style="background:#e8f0fb;border-radius:8px;padding:14px 18px;font-size:.82rem;color:#3a4450;line-height:1.6;">
+      <strong style="color:var(--navy);">📋 LOL Check Schedule</strong>&nbsp;—
+      The system automatically runs a full check at <strong>06:00 UTC daily</strong> against FEMA NFHL data.
+      Use the "Run Check Now" button to trigger an immediate check of all active monitoring records.
+      Failed email alerts (shown with red badge) should be reviewed and the lender contacted directly.
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       TAB 4: USER MANAGEMENT
+       ═══════════════════════════════════════════════════════ -->
+  <div id="pane-users" class="tab-pane" style="{{ 'display:block' if tab == 'users' else 'display:none' }}">
+
+    <!-- Active users -->
+    <div class="admin-section">
+      <div class="section-hdr">
+        👥 Active Users
+        <span class="badge">{{ active | length }}</span>
+      </div>
+      <table class="admin-table">
+        <thead>
+          <tr><th>Name</th><th>Email</th><th>Company</th><th>Role</th><th>Approved</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+          {% if active %}
+            {% for u in active %}
+            <tr>
+              <td><strong>{{ u.display_name }}</strong></td>
+              <td style="font-size:.82rem;">{{ u.email }}</td>
+              <td style="font-size:.8rem;color:#5a6470;">{{ u.company_name or '—' }}</td>
+              <td>
+                {% if u.is_admin %}
+                  <span class="sb sb-admin">Super Admin</span>
+                {% else %}
+                  <span class="sb sb-active">User</span>
+                {% endif %}
+              </td>
+              <td style="white-space:nowrap;color:#9aa3ad;font-size:.76rem;">{{ u.approved_at[:10] if u.approved_at else '—' }}</td>
+              <td>
+                {% if not u.is_admin %}
+                <div class="action-group">
+                  <form method="POST" action="/admin/users/{{ u.id }}/reset-password">
+                    <button class="btn-sm btn-reset">↺ Reset PW</button>
+                  </form>
+                  <form method="POST" action="/admin/users/{{ u.id }}/deactivate">
+                    <button class="btn-sm btn-reject">Deactivate</button>
+                  </form>
+                  <form method="POST" action="/admin/users/{{ u.id }}/delete"
+                        onsubmit="return confirm('Permanently delete user {{ u.display_name | replace(\"'\",\"\\'\")|replace('\"','&quot;') }}?')">
+                    <button class="btn-sm btn-delete">Delete</button>
+                  </form>
+                </div>
+                {% else %}
+                  <span style="font-size:.74rem;color:#9aa3ad;">—</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr class="empty-row"><td colspan="6">No active users</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Deactivated / Rejected -->
+    {% if inactive %}
+    <div class="admin-section">
+      <div class="section-hdr">🔒 Deactivated / Rejected</div>
+      <table class="admin-table">
+        <thead>
+          <tr><th>Name</th><th>Email</th><th>Company</th><th>Status</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+          {% for u in inactive %}
+          <tr>
+            <td><strong>{{ u.display_name }}</strong></td>
+            <td style="font-size:.82rem;">{{ u.email }}</td>
+            <td style="font-size:.8rem;color:#5a6470;">{{ u.company_name or '—' }}</td>
+            <td><span class="sb sb-{{ u.status }}">{{ u.status | title }}</span></td>
             <td>
               <div class="action-group">
                 <form method="POST" action="/admin/users/{{ u.id }}/approve">
-                  <button class="btn-sm btn-approve">✓ Approve</button>
-                </form>
-                <form method="POST" action="/admin/users/{{ u.id }}/reject">
-                  <button class="btn-sm btn-reject">✕ Reject</button>
-                </form>
-              </div>
-            </td>
-          </tr>
-          {% endfor %}
-        {% else %}
-          <tr class="empty-row"><td colspan="5">No pending access requests</td></tr>
-        {% endif %}
-      </tbody>
-    </table>
-  </div>
-
-  <!-- Active users -->
-  <div class="admin-section">
-    <div class="admin-section-hdr">👥 Active Users</div>
-    <table class="admin-table">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Email</th>
-          <th>Role</th>
-          <th>Approved</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% if active %}
-          {% for u in active %}
-          <tr>
-            <td><strong>{{ u.name }}</strong></td>
-            <td>{{ u.email }}</td>
-            <td>
-              {% if u.is_admin %}
-                <span class="status-badge status-admin">Super Admin</span>
-              {% else %}
-                <span class="status-badge status-active">User</span>
-              {% endif %}
-            </td>
-            <td style="white-space:nowrap;color:#9aa3ad;font-size:0.78rem;">
-              {{ u.approved_at[:10] if u.approved_at else '—' }}
-            </td>
-            <td>
-              {% if not u.is_admin %}
-              <div class="action-group">
-                <form method="POST" action="/admin/users/{{ u.id }}/reset-password">
-                  <button class="btn-sm btn-reset">↺ Reset PW</button>
-                </form>
-                <form method="POST" action="/admin/users/{{ u.id }}/deactivate">
-                  <button class="btn-sm btn-reject">Deactivate</button>
+                  <button class="btn-sm btn-activate">Re-activate</button>
                 </form>
                 <form method="POST" action="/admin/users/{{ u.id }}/delete"
-                      onsubmit="return confirm('Permanently delete {{ u.name }}?')">
+                      onsubmit="return confirm('Permanently delete {{ u.display_name | replace(\"'\",\"\\'\")|replace('\"','&quot;') }}?')">
                   <button class="btn-sm btn-delete">Delete</button>
                 </form>
               </div>
-              {% else %}
-                <span style="font-size:0.75rem;color:#9aa3ad;">—</span>
-              {% endif %}
             </td>
           </tr>
           {% endfor %}
-        {% else %}
-          <tr class="empty-row"><td colspan="5">No active users</td></tr>
-        {% endif %}
-      </tbody>
-    </table>
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    <!-- Add user directly -->
+    <div class="admin-section">
+      <div class="section-hdr">➕ Add User Directly</div>
+      <form method="POST" action="/admin/users/create" class="add-user-form">
+        <div>
+          <label>First Name</label>
+          <input type="text" name="first_name" placeholder="Jane" />
+        </div>
+        <div>
+          <label>Last Name</label>
+          <input type="text" name="last_name" placeholder="Smith" />
+        </div>
+        <div>
+          <label>Email</label>
+          <input type="email" name="email" placeholder="jane@company.com" required />
+        </div>
+        <div>
+          <label>Company</label>
+          <select name="company_name">
+            <option value="">— No company —</option>
+            {% for c in companies %}
+            <option value="{{ c.name }}">{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>Password</label>
+          <input type="text" name="password" placeholder="Auto-generate if blank" />
+        </div>
+        <div>
+          <button type="submit" class="btn-sm btn-approve" style="padding:9px 18px;">Add User</button>
+        </div>
+      </form>
+    </div>
   </div>
 
-  <!-- Deactivated / Rejected users -->
-  {% if inactive %}
-  <div class="admin-section">
-    <div class="admin-section-hdr">🔒 Deactivated / Rejected Users</div>
-    <table class="admin-table">
-      <thead>
-        <tr><th>Name</th><th>Email</th><th>Status</th><th>Actions</th></tr>
-      </thead>
-      <tbody>
-        {% for u in inactive %}
-        <tr>
-          <td><strong>{{ u.name }}</strong></td>
-          <td>{{ u.email }}</td>
-          <td><span class="status-badge status-{{ u.status }}">{{ u.status | title }}</span></td>
-          <td>
-            <div class="action-group">
-              <form method="POST" action="/admin/users/{{ u.id }}/approve">
-                <button class="btn-sm btn-activate">✓ Re-activate</button>
-              </form>
-              <form method="POST" action="/admin/users/{{ u.id }}/delete"
-                    onsubmit="return confirm('Permanently delete {{ u.name }}?')">
-                <button class="btn-sm btn-delete">Delete</button>
-              </form>
-            </div>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% endif %}
+</div><!-- /.admin-wrap -->
 
-  <!-- Add user directly -->
-  <div class="admin-section">
-    <div class="admin-section-hdr">➕ Add User Directly</div>
-    <form method="POST" action="/admin/users/create" class="admin-add-form">
-      <div>
-        <label for="new_name">Full Name</label>
-        <input type="text" id="new_name" name="name" placeholder="Jane Smith" required />
-      </div>
-      <div>
-        <label for="new_email">Email</label>
-        <input type="email" id="new_email" name="email" placeholder="jane@company.com" required />
-      </div>
-      <div>
-        <label for="new_password">Password</label>
-        <input type="text" id="new_password" name="password" placeholder="Leave blank to auto-generate" />
-      </div>
-      <div>
-        <button type="submit" class="btn-sm btn-approve" style="padding:9px 18px;font-size:0.85rem;">Add User</button>
-      </div>
-    </form>
-  </div>
+<script>
+function goTab(name) {
+  // Redirect so server loads correct tab data (especially LOL & Company History)
+  const url = new URL(window.location.href);
+  url.searchParams.set('tab', name);
+  // Keep company filter when switching to companies tab
+  if (name !== 'companies') url.searchParams.delete('cid');
+  if (name !== 'requests')  { url.searchParams.delete('req_status'); }
+  window.location.href = url.toString();
+}
 
-</div>
+// Bulk-select helpers
+function toggleAll(cb) {
+  document.querySelectorAll('.history-checkbox').forEach(c => c.checked = cb.checked);
+  updateBulkBar();
+}
+function updateBulkBar() {
+  const count = document.querySelectorAll('.history-checkbox:checked').length;
+  const bar   = document.getElementById('bulkBar');
+  const txt   = document.getElementById('bulkCount');
+  if (bar) {
+    bar.classList.toggle('visible', count > 0);
+    if (txt) txt.textContent = count + ' record' + (count !== 1 ? 's' : '') + ' selected';
+  }
+}
+function clearSelection() {
+  document.querySelectorAll('.history-checkbox').forEach(c => c.checked = false);
+  const sa = document.getElementById('selectAll');
+  if (sa) sa.checked = false;
+  updateBulkBar();
+}
+function confirmBulkDelete() {
+  const count = document.querySelectorAll('.history-checkbox:checked').length;
+  if (count === 0) { alert('No records selected.'); return false; }
+  return confirm('Are you sure you want to permanently delete ' + count + ' record(s)? This cannot be undone.');
+}
+</script>
 </body>
 </html>

@@ -17,6 +17,7 @@
     </div>
     <a href="/batch" class="header-history-link">⚡ Batch</a>
     <a href="/history" class="header-history-link">📂 History</a>
+    <a href="/lol-monitoring" class="header-history-link" title="Life-of-Loan Monitoring">🔔 LOL</a>
     {% if current_user and current_user.is_admin %}
     <a href="/admin" class="header-history-link" style="background:rgba(255,200,0,0.15);border:1px solid rgba(255,200,0,0.4);">⚙ Admin</a>
     {% endif %}
@@ -42,7 +43,12 @@
   <div class="history-header">
     <div>
       <h2>Determination History</h2>
-      <p>All saved flood hazard determinations — search by loan ID, borrower, or address.
+      <p>
+        {% if current_user and current_user.is_admin %}
+          All flood hazard determinations (admin view).
+        {% else %}
+          Flood hazard determinations for <strong>{{ current_user.company_name or 'your company' }}</strong>.
+        {% endif %}
         {% if monitored_count > 0 %}
         &nbsp;|&nbsp; <span style="color:#e67e22;font-weight:600;">🔔 {{ monitored_count }} monitored</span>
         {% endif %}
@@ -145,10 +151,14 @@
                     id="chk-btn-{{ r.id }}"
                     onclick="checkRecord({{ r.id }}, this)"
                     title="Re-check FEMA NFHL for zone changes">🔍</button>
-            <form method="POST" action="/history/{{ r.id }}/delete"
-                  onsubmit="return confirm('Delete this determination record?')" style="display:inline">
-              <button type="submit" class="action-btn del-btn" title="Delete record">🗑</button>
+            {# Admin-only delete button — non-admin users cannot delete records #}
+            {% if current_user and current_user.is_admin %}
+            <form method="POST" action="/admin/history/{{ r.id }}/delete"
+                  onsubmit="return confirm('Permanently delete determination record #{{ r.id }} for {{ r.loan_id }}? This cannot be undone.')" style="display:inline">
+              <input type="hidden" name="reason" value="Deleted from history view" />
+              <button type="submit" class="action-btn del-btn" title="Delete record (admin)">🗑</button>
             </form>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -194,6 +204,7 @@ async function toggleMonitor(id, btn) {
     btn.dataset.on = nowOn ? '1' : '0';
     btn.title = nowOn ? 'Life-of-loan monitoring ON — click to disable' : 'Enable life-of-loan monitoring';
     btn.classList.toggle('monitor-on', nowOn);
+    if (nowOn) showBanner('checkAllBanner', '🔔 LOL monitoring enabled for record #' + id + ' — baselines captured', 'ok');
   } catch(e) { }
   btn.disabled = false;
 }

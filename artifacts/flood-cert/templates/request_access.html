@@ -19,7 +19,7 @@
       border-radius: 12px;
       box-shadow: 0 8px 40px rgba(0,0,0,0.22);
       width: 100%;
-      max-width: 460px;
+      max-width: 540px;
       overflow: hidden;
     }
     .auth-card-header {
@@ -30,16 +30,16 @@
     }
     .auth-card-header h1 { font-size: 1.15rem; font-weight: 700; margin: 0; }
     .auth-card-header p  { font-size: 0.8rem; opacity: 0.75; margin-top: 5px; }
-    .auth-card-body { padding: 30px 36px; }
+    .auth-card-body { padding: 28px 36px 32px; }
     .auth-success {
       background: #e6f4ed;
       border: 1.5px solid #1a7a4a;
       color: #0f4f2e;
       border-radius: 6px;
-      padding: 14px 16px;
+      padding: 16px 18px;
       font-size: 0.88rem;
       margin-bottom: 20px;
-      line-height: 1.5;
+      line-height: 1.6;
     }
     .auth-error {
       background: #fdf0ef;
@@ -48,35 +48,60 @@
       border-radius: 6px;
       padding: 10px 14px;
       font-size: 0.85rem;
-      margin-bottom: 20px;
+      margin-bottom: 16px;
     }
-    .auth-group { margin-bottom: 16px; }
+    .auth-error ul { margin: 4px 0 0 16px; padding: 0; }
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+    .auth-group { margin-bottom: 14px; }
+    .form-row .auth-group { margin-bottom: 0; }
     .auth-group label {
       display: block;
-      font-size: 0.78rem;
+      font-size: 0.75rem;
       font-weight: 700;
       color: #003366;
       text-transform: uppercase;
       letter-spacing: 0.04em;
-      margin-bottom: 6px;
+      margin-bottom: 5px;
     }
-    .auth-group input, .auth-group textarea {
+    .auth-group input {
       width: 100%;
-      padding: 11px 14px;
+      padding: 11px 13px;
       border: 1.5px solid #e8ecf0;
       border-radius: 6px;
-      font-size: 0.93rem;
+      font-size: 0.92rem;
       color: #1e2530;
       outline: none;
       transition: border-color 0.15s, box-shadow 0.15s;
       box-sizing: border-box;
       font-family: inherit;
     }
-    .auth-group input:focus, .auth-group textarea:focus {
+    .auth-group input:focus {
       border-color: #0050a0;
       box-shadow: 0 0 0 3px rgba(0,80,160,0.12);
     }
-    .auth-group textarea { resize: vertical; min-height: 80px; }
+    .auth-group input.input-error {
+      border-color: #c0392b;
+    }
+    .auth-group .field-hint {
+      font-size: 0.72rem;
+      color: #9aa3ad;
+      margin-top: 4px;
+    }
+    .section-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #9aa3ad;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin: 18px 0 10px;
+      border-bottom: 1px solid #e8ecf0;
+      padding-bottom: 6px;
+    }
     .auth-btn {
       width: 100%;
       padding: 13px;
@@ -88,11 +113,11 @@
       font-weight: 600;
       cursor: pointer;
       transition: opacity 0.15s;
-      margin-top: 4px;
+      margin-top: 6px;
     }
     .auth-btn:hover { opacity: 0.9; }
     .auth-footer {
-      margin-top: 20px;
+      margin-top: 18px;
       text-align: center;
       font-size: 0.82rem;
       color: #5a6470;
@@ -109,6 +134,10 @@
       margin-bottom: 20px;
       line-height: 1.5;
     }
+    @media (max-width: 480px) {
+      .form-row { grid-template-columns: 1fr; }
+      .auth-card-body { padding: 22px 20px 28px; }
+    }
   </style>
 </head>
 <body>
@@ -123,8 +152,8 @@
       {% if submitted %}
       <div class="auth-success">
         <strong>✅ Request submitted!</strong><br />
-        Your access request has been sent to the platform administrator. You will receive your login
-        credentials once your request is reviewed and approved.
+        Your access request has been received. You will be notified once approved.<br />
+        A confirmation email has been sent to your address.
       </div>
       <div class="auth-footer">
         <a href="/login">← Back to Sign In</a>
@@ -134,33 +163,70 @@
 
       <div class="notice">
         Access is controlled by the platform administrator. Submit your details below and you'll
-        be contacted with login credentials once approved.
+        be contacted with login credentials once approved. All fields are required.
       </div>
 
-      {% if error %}
-      <div class="auth-error">{{ error }}</div>
+      {% if errors %}
+      <div class="auth-error">
+        {% if errors | length == 1 %}
+          {{ errors[0] }}
+        {% else %}
+          <ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+        {% endif %}
+      </div>
       {% endif %}
 
-      <form method="POST" action="/request-access">
-        <div class="auth-group">
-          <label for="name">Full Name</label>
-          <input type="text" id="name" name="name"
-                 placeholder="e.g. Jane Smith"
-                 value="{{ form.name if form else '' }}" required />
+      <form method="POST" action="/request-access" id="reqForm" novalidate>
+
+        <div class="section-label">Personal Information</div>
+
+        <div class="form-row">
+          <div class="auth-group">
+            <label for="first_name">First Name</label>
+            <input type="text" id="first_name" name="first_name"
+                   placeholder="Jane"
+                   value="{{ form.first_name if form else '' }}" required autocomplete="given-name" />
+          </div>
+          <div class="auth-group">
+            <label for="last_name">Last Name</label>
+            <input type="text" id="last_name" name="last_name"
+                   placeholder="Smith"
+                   value="{{ form.last_name if form else '' }}" required autocomplete="family-name" />
+          </div>
         </div>
+
         <div class="auth-group">
-          <label for="email">Work Email</label>
+          <label for="email">Email Address</label>
           <input type="email" id="email" name="email"
                  placeholder="your@company.com"
-                 value="{{ form.email if form else '' }}" required />
+                 value="{{ form.email if form else '' }}" required autocomplete="email" />
         </div>
+
         <div class="auth-group">
-          <label for="reason">Reason for Access</label>
-          <textarea id="reason" name="reason"
-                    placeholder="Briefly describe your role and why you need access to this platform…"
-                    required>{{ form.reason if form else '' }}</textarea>
+          <label for="contact_number">Contact Number</label>
+          <input type="tel" id="contact_number" name="contact_number"
+                 placeholder="(555) 867-5309"
+                 value="{{ form.contact_number if form else '' }}" required autocomplete="tel" />
+          <div class="field-hint">US format — 10 digits, e.g. (555) 867-5309</div>
         </div>
-        <button type="submit" class="auth-btn">Submit Request</button>
+
+        <div class="section-label">Company Information</div>
+
+        <div class="auth-group">
+          <label for="company_name">Company Name</label>
+          <input type="text" id="company_name" name="company_name"
+                 placeholder="Acme Mortgage LLC"
+                 value="{{ form.company_name if form else '' }}" required autocomplete="organization" />
+        </div>
+
+        <div class="auth-group">
+          <label for="company_address">Company Address</label>
+          <input type="text" id="company_address" name="company_address"
+                 placeholder="123 Main St, Suite 100, Austin TX 78701"
+                 value="{{ form.company_address if form else '' }}" required autocomplete="street-address" />
+        </div>
+
+        <button type="submit" class="auth-btn">Submit Access Request</button>
       </form>
 
       <div class="auth-footer" style="margin-top:16px;">
@@ -171,5 +237,46 @@
     </div>
   </div>
 </div>
+
+<script>
+// Auto-format phone number as (XXX) XXX-XXXX
+const phoneInput = document.getElementById('contact_number');
+if (phoneInput) {
+  phoneInput.addEventListener('input', function() {
+    let val = this.value.replace(/\D/g, '').slice(0, 10);
+    if (val.length >= 7) {
+      this.value = '(' + val.slice(0,3) + ') ' + val.slice(3,6) + '-' + val.slice(6);
+    } else if (val.length >= 4) {
+      this.value = '(' + val.slice(0,3) + ') ' + val.slice(3);
+    } else if (val.length > 0) {
+      this.value = '(' + val;
+    }
+  });
+}
+
+// Client-side validation before submit
+document.getElementById('reqForm') && document.getElementById('reqForm').addEventListener('submit', function(e) {
+  const fields = ['first_name','last_name','email','contact_number','company_name','company_address'];
+  let ok = true;
+  fields.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('input-error');
+    if (!el.value.trim()) { el.classList.add('input-error'); ok = false; }
+  });
+
+  const emailEl = document.getElementById('email');
+  if (emailEl && emailEl.value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailEl.value)) {
+    emailEl.classList.add('input-error'); ok = false;
+  }
+
+  const phoneEl = document.getElementById('contact_number');
+  if (phoneEl && phoneEl.value && phoneEl.value.replace(/\D/g,'').length !== 10) {
+    phoneEl.classList.add('input-error'); ok = false;
+  }
+
+  if (!ok) e.preventDefault();
+});
+</script>
 </body>
 </html>

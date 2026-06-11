@@ -4,13 +4,14 @@ import io
 import asyncio
 import uuid
 import re
+import json
+from datetime import date, datetime
 from fastapi import FastAPI, Request, Form, HTTPException, UploadFile, File
-from fastapi.responses import HTMLResponse, Response, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, Response, RedirectResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
-from datetime import date
 from pdf_generator import generate_flood_certificate_pdf, generate_borrower_notice_pdf, generate_batch_report_pdf
 from fema_lookup import (
     geocode_address, query_fema_nfhl, query_nfip_community, query_firm_panel,
@@ -19,17 +20,38 @@ from fema_lookup import (
 from map_utils import generate_map_image
 from db import (
     init_db, save_determination, get_determination,
-    search_determinations, list_determinations, delete_determination,
+    search_determinations, list_determinations, list_determinations_admin,
+    delete_determination, bulk_delete_determinations,
     set_life_of_loan, flag_redetermination, list_monitored, count_flagged,
     init_auth_tables, create_user, get_user_by_email, get_user_by_id,
-    list_users_by_status, approve_user, reject_user, update_user_password,
-    set_user_status, delete_user, count_pending_users,
+    list_users_by_status, list_users_by_company,
+    approve_user, reject_user, update_user_password, set_user_status, delete_user,
+    count_pending_users, set_user_company,
+    init_companies, get_or_create_company, get_company_by_id, list_companies,
+    init_audit_tables, log_admin_deletion, list_admin_deletion_log,
+    init_lol_tables, upsert_lol_monitoring, get_lol_monitoring,
+    list_lol_monitoring, list_active_lol_monitoring,
+    close_lol_monitoring, update_lol_last_checked,
+    create_lol_alert, list_lol_alerts, count_failed_lol_alerts,
+    ADMIN_COMPANY_ID, ADMIN_COMPANY_NAME,
 )
-from email_sender import send_certificate_email, send_redetermination_notification
+from email_sender import (
+    send_certificate_email, send_redetermination_notification,
+    send_access_request_confirmation, send_admin_access_notification,
+    send_welcome_email, send_rejection_email, send_lol_alert_email,
+)
 from auth import (
     SUPER_ADMIN_EMAIL, SECRET_KEY, is_public,
     hash_password, verify_password, generate_temp_password, get_session_user,
 )
+
+try:
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    _scheduler = AsyncIOScheduler()
+    _SCHEDULER_AVAILABLE = True
+except ImportError:
+    _SCHEDULER_AVAILABLE = False
+    _scheduler = None
 
 US_STATES = {
     "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA",
@@ -40,10 +62,16 @@ US_STATES = {
     "DC","PR","GU","VI",
 }
 
+# In-memory store for batch CSV results (keyed by batch_id)
+_batch_results: dict[str, bytes] = {}
+_batch_record_ids: dict[str, list[int]] = {}
+_batch_full_results: dict[str, list] = {}
+
+
 def parse_state_zip(address: str) -> tuple[str, str] | None:
-    """Extract (state_abbr, zipcode) from a free-text US address string."""
     m = re.search(r'\b([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)\s*$', address.strip())
     return (m.group(1).upper(), m.group(2)) if m else None
+
 
 def validate_us_address(state: str, zipcode: str) -> None:
     if state.upper() not in US_STATES:
@@ -51,12 +79,6 @@ def validate_us_address(state: str, zipcode: str) -> None:
     if not re.match(r"^\d{5}(-\d{4})?$", zipcode):
         raise HTTPException(400, detail="Invalid US ZIP code format")
 
-# In-memory store for batch CSV results (keyed by batch_id)
-_batch_results: dict[str, bytes] = {}
-# In-memory store for batch record IDs (for bulk email)
-_batch_record_ids: dict[str, list[int]] = {}
-# In-memory store for full batch results (for report PDF)
-_batch_full_results: dict[str, list] = {}
 
 app = FastAPI(title="FEMA Flood Certificate Generator")
 
@@ -65,7 +87,7 @@ templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
 
-# ── Auth middleware stack ────────────────────────────────────────────────────
+# ── Auth middleware ───────────────────────────────────────────────────────────
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -77,50 +99,186 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-# Order matters: SessionMiddleware is outermost (added last), so it populates
-# request.session before AuthMiddleware checks it.
 app.add_middleware(AuthMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=60 * 60 * 8)
 
 
-# ── Startup ──────────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _require_admin(request: Request) -> dict:
+    user = get_session_user(request)
+    if not user or not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+def _session_company_id(request: Request) -> int | None:
+    """Return company_id from session; None for admin (admin sees all)."""
+    user = get_session_user(request)
+    if not user:
+        return None
+    if user.get("is_admin"):
+        return None  # Admin has no company scope restriction
+    return user.get("company_id")
+
+
+# ── LOL monitoring core check logic ──────────────────────────────────────────
+
+_LOL_CHECKS = [
+    # (lol_monitoring baseline key, human label, determine_flood_info result key)
+    ("baseline_panel_number",     "NFIP Map Panel Number",         "community_number"),
+    ("baseline_effective_date",   "FIRM Panel Effective Date",     "panel_effective_date"),
+    ("baseline_flood_zone",       "Flood Zone",                    "flood_zone"),
+    ("baseline_community_number", "NFIP Community Number (CID)",   "panel_number"),
+]
+
+
+async def _check_lol_record(mon: dict) -> None:
+    """Check one active lol_monitoring record; create alert + send email if changed."""
+    lat, lon = mon.get("lat"), mon.get("lon")
+    if not lat or not lon:
+        return
+    try:
+        zone_data, community_data, firm_data = await asyncio.gather(
+            query_fema_nfhl(float(lat), float(lon)),
+            query_nfip_community(float(lat), float(lon)),
+            query_firm_panel(float(lat), float(lon)),
+        )
+        new_info = determine_flood_info({**zone_data, **community_data, **firm_data})
+    except Exception as exc:
+        print(f"[LOL] FEMA query failed for monitoring_id={mon['id']}: {exc}")
+        return
+
+    update_lol_last_checked(mon["id"])
+
+    changed_items = []
+    for baseline_key, label, new_key in _LOL_CHECKS:
+        old_val = mon.get(baseline_key, "")
+        new_val = new_info.get(new_key, "")
+        if str(old_val) != str(new_val):
+            changed_items.append({
+                "field": baseline_key,
+                "label": label,
+                "old_value": old_val,
+                "new_value": new_val,
+            })
+
+    if not changed_items:
+        return
+
+    old_vals = {c["field"]: c["old_value"] for c in changed_items}
+    new_vals = {c["field"]: c["new_value"] for c in changed_items}
+    field_names = [c["field"] for c in changed_items]
+
+    lender_email = (mon.get("lender_email") or "").strip()
+    email_status = "Sent"
+
+    if lender_email:
+        last_exc = None
+        for attempt in range(3):
+            try:
+                send_lol_alert_email(lender_email, mon, changed_items)
+                break
+            except Exception as e:
+                last_exc = e
+                await asyncio.sleep(2)
+        else:
+            email_status = "Failed"
+            print(f"[LOL] Alert email failed after 3 attempts for monitoring_id={mon['id']}: {last_exc}")
+    else:
+        email_status = "Failed"
+
+    create_lol_alert(
+        monitoring_id=mon["id"],
+        changed_fields=field_names,
+        old_values=old_vals,
+        new_values=new_vals,
+        lender_email=lender_email,
+        email_status=email_status,
+    )
+
+
+async def run_lol_daily_check():
+    """Daily scheduled job: check all active LOL monitoring records."""
+    records = list_active_lol_monitoring()
+    if not records:
+        return
+    print(f"[LOL] Daily check started for {len(records)} active records")
+    sem = asyncio.Semaphore(3)
+
+    async def bounded(mon):
+        async with sem:
+            await _check_lol_record(mon)
+
+    await asyncio.gather(*[bounded(m) for m in records])
+    print("[LOL] Daily check complete")
+
+
+# ── Startup ───────────────────────────────────────────────────────────────────
 
 @app.on_event("startup")
 async def startup():
+    init_companies()
     init_db()
     init_auth_tables()
-    # Seed or update Rishu's admin account from ADMIN_PASSWORD env var
+    init_audit_tables()
+    init_lol_tables()
+
+    # Seed / update super admin account
     admin_pw = os.getenv("ADMIN_PASSWORD", "")
+    existing_admin = get_user_by_email(SUPER_ADMIN_EMAIL)
     if admin_pw:
-        existing = get_user_by_email(SUPER_ADMIN_EMAIL)
-        if not existing:
-            create_user(
+        if not existing_admin:
+            uid = create_user(
                 email=SUPER_ADMIN_EMAIL,
                 name="Rishu Kannihalli",
+                first_name="Rishu",
+                last_name="Kannihalli",
+                company_id=ADMIN_COMPANY_ID,
                 status="active",
                 is_admin=1,
                 password_hash=hash_password(admin_pw),
             )
-            print(f"[AUTH] Super admin account created for {SUPER_ADMIN_EMAIL}")
+            print(f"[AUTH] Super admin created for {SUPER_ADMIN_EMAIL}")
         else:
-            # Always keep admin hash in sync with env var so pw changes take effect
-            update_user_password(existing["id"], hash_password(admin_pw))
+            update_user_password(existing_admin["id"], hash_password(admin_pw))
+            if not existing_admin.get("company_id"):
+                set_user_company(existing_admin["id"], ADMIN_COMPANY_ID)
     else:
-        existing = get_user_by_email(SUPER_ADMIN_EMAIL)
-        if not existing:
+        if not existing_admin:
             tmp = generate_temp_password()
             create_user(
                 email=SUPER_ADMIN_EMAIL,
                 name="Rishu Kannihalli",
+                first_name="Rishu",
+                last_name="Kannihalli",
+                company_id=ADMIN_COMPANY_ID,
                 status="active",
                 is_admin=1,
                 password_hash=hash_password(tmp),
             )
-            print(f"[AUTH] ⚠ ADMIN_PASSWORD not set. Super admin created with password: {tmp}")
-            print(f"[AUTH] Set ADMIN_PASSWORD env var to persist the admin password across restarts.")
+            print(f"[AUTH] Super admin created with temp password: {tmp}")
+        else:
+            if not existing_admin.get("company_id"):
+                set_user_company(existing_admin["id"], ADMIN_COMPANY_ID)
+
+    # Start APScheduler
+    if _SCHEDULER_AVAILABLE and _scheduler:
+        try:
+            _scheduler.add_job(run_lol_daily_check, "cron", hour=6, minute=0, id="lol_daily")
+            _scheduler.start()
+            print("[LOL] Daily scheduler started (runs at 06:00 UTC)")
+        except Exception as e:
+            print(f"[LOL] Scheduler startup error: {e}")
 
 
-# ── Auth routes ──────────────────────────────────────────────────────────────
+@app.on_event("shutdown")
+async def shutdown():
+    if _SCHEDULER_AVAILABLE and _scheduler and _scheduler.running:
+        _scheduler.shutdown(wait=False)
+
+
+# ── Auth routes ───────────────────────────────────────────────────────────────
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_get(request: Request):
@@ -156,11 +314,23 @@ async def login_post(
             "login.html",
             {"request": request, "error": "Invalid email or password.", "email": email},
         )
+
+    company_id = user.get("company_id")
+    if user.get("is_admin") and not company_id:
+        company_id = ADMIN_COMPANY_ID
+
+    display_name = (
+        user.get("name")
+        or f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+        or user["email"]
+    )
     request.session["user"] = {
         "id": user["id"],
         "email": user["email"],
-        "name": user["name"],
+        "name": display_name,
         "is_admin": bool(user["is_admin"]),
+        "company_id": company_id,
+        "company_name": user.get("company_name") or "",
     }
     return RedirectResponse("/", status_code=303)
 
@@ -179,63 +349,168 @@ async def request_access_get(request: Request):
 @app.post("/request-access", response_class=HTMLResponse)
 async def request_access_post(
     request: Request,
-    name: str = Form(...),
+    first_name: str = Form(...),
+    last_name: str = Form(...),
+    company_name: str = Form(...),
+    company_address: str = Form(...),
     email: str = Form(...),
-    reason: str = Form(...),
+    contact_number: str = Form(...),
 ):
-    name = name.strip()
-    email = email.strip().lower()
-    reason = reason.strip()
-    if not name or not email or not reason:
+    first_name     = first_name.strip()
+    last_name      = last_name.strip()
+    company_name   = company_name.strip()
+    company_address = company_address.strip()
+    email          = email.strip().lower()
+    contact_number = contact_number.strip()
+
+    errors = []
+    if not all([first_name, last_name, company_name, company_address, email, contact_number]):
+        errors.append("All fields are required.")
+
+    if email and not re.match(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$', email):
+        errors.append("Please enter a valid email address.")
+
+    digits_only = re.sub(r'\D', '', contact_number)
+    if len(digits_only) != 10:
+        errors.append("Contact number must be exactly 10 digits (US format).")
+    else:
+        contact_number = f"({digits_only[:3]}) {digits_only[3:6]}-{digits_only[6:]}"
+
+    form_data = {
+        "first_name": first_name,
+        "last_name": last_name,
+        "company_name": company_name,
+        "company_address": company_address,
+        "email": email,
+        "contact_number": contact_number,
+    }
+
+    if errors:
         return templates.TemplateResponse(
             "request_access.html",
-            {"request": request, "error": "All fields are required.", "form": {"name": name, "email": email, "reason": reason}},
+            {"request": request, "errors": errors, "form": form_data},
         )
+
     existing = get_user_by_email(email)
     if existing:
         if existing["status"] == "active":
             return templates.TemplateResponse(
                 "request_access.html",
-                {"request": request, "error": "An account with this email already exists. Please sign in.", "form": {"name": name, "email": email, "reason": reason}},
+                {"request": request, "errors": ["An account with this email already exists. Please sign in."], "form": form_data},
             )
-        return templates.TemplateResponse(
-            "request_access.html",
-            {"request": request, "submitted": True},
-        )
-    create_user(email=email, name=name, reason=reason, status="pending")
+        return templates.TemplateResponse("request_access.html", {"request": request, "submitted": True})
+
+    create_user(
+        email=email,
+        first_name=first_name,
+        last_name=last_name,
+        company_name=company_name,
+        company_address=company_address,
+        contact_number=contact_number,
+        status="pending",
+    )
+
+    user_data = {
+        "first_name": first_name, "last_name": last_name,
+        "company_name": company_name, "company_address": company_address,
+        "email": email, "contact_number": contact_number,
+        "created_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+    }
+    try:
+        send_access_request_confirmation(email, user_data)
+    except Exception as e:
+        print(f"[REQUEST-ACCESS] Confirmation email failed: {e}")
+    try:
+        send_admin_access_notification(SUPER_ADMIN_EMAIL, user_data)
+    except Exception as e:
+        print(f"[REQUEST-ACCESS] Admin notification email failed: {e}")
+
     return templates.TemplateResponse("request_access.html", {"request": request, "submitted": True})
 
 
 # ── Admin routes ──────────────────────────────────────────────────────────────
 
-def _require_admin(request: Request):
-    user = get_session_user(request)
-    if not user or not user.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin access required")
-    return user
-
-
 @app.get("/admin", response_class=HTMLResponse)
-async def admin_panel(request: Request):
+async def admin_panel(
+    request: Request,
+    tab: str = "requests",
+    cid: int = 0,
+    uid: int = 0,
+    dfrom: str = "",
+    dto: str = "",
+    hq: str = "",
+    zone: str = "",
+    req_status: str = "",
+):
     _require_admin(request)
     flash = request.session.pop("flash_approval", None)
+
+    # ── User Management tab data ──
     all_users = list_users_by_status()
     pending  = [u for u in all_users if u["status"] == "pending"]
     active   = [u for u in all_users if u["status"] == "active"]
     inactive = [u for u in all_users if u["status"] in ("inactive", "rejected")]
+
+    # ── Access Requests tab data ──
+    status_scope = req_status if req_status in ("pending", "active", "rejected", "inactive") else None
+    access_requests = list_users_by_status(status=status_scope)
+
+    # Enrich with display name
+    for u in access_requests:
+        if not u.get("name") or u["name"] == "":
+            u["display_name"] = f"{u.get('first_name', '')} {u.get('last_name', '')}".strip() or u["email"]
+        else:
+            u["display_name"] = u["name"]
+    for u in all_users + pending + active + inactive:
+        if not u.get("name") or u["name"] == "":
+            u["display_name"] = f"{u.get('first_name', '')} {u.get('last_name', '')}".strip() or u["email"]
+        else:
+            u["display_name"] = u["name"]
+
+    # ── Company History tab data ──
+    companies = list_companies()
+    history_records = []
+    history_users = []
+    selected_company = None
+    if tab == "companies" and cid:
+        history_records = list_determinations_admin(
+            company_id=cid,
+            user_id=uid or None,
+            date_from=dfrom or None,
+            date_to=dto or None,
+            query=hq or None,
+            flood_zone=zone or None,
+        )
+        history_users = list_users_by_company(cid)
+        selected_company = get_company_by_id(cid)
+
+    # ── LOL Alerts tab data ──
+    lol_alerts = list_lol_alerts() if tab == "lol" else []
+
     stats = {
         "total": len(all_users),
         "pending": len(pending),
         "active": len(active),
         "rejected": len(inactive),
+        "failed_alerts": count_failed_lol_alerts(),
     }
+
     return templates.TemplateResponse("admin.html", {
         "request": request,
-        "pending": pending,
-        "active": active,
-        "inactive": inactive,
-        "stats": stats,
-        "flash": flash,
+        "tab": tab,
+        "pending": pending, "active": active, "inactive": inactive,
+        "stats": stats, "flash": flash,
+        "access_requests": access_requests,
+        "req_status": req_status,
+        "companies": companies,
+        "selected_company": selected_company,
+        "cid": cid, "uid": uid,
+        "history_records": history_records,
+        "history_users": history_users,
+        "filter_dfrom": dfrom, "filter_dto": dto,
+        "filter_hq": hq, "filter_zone": zone,
+        "lol_alerts": lol_alerts,
+        "current_user": get_session_user(request),
     })
 
 
@@ -245,10 +520,37 @@ async def admin_approve(request: Request, user_id: int):
     user = get_user_by_id(user_id)
     if not user:
         raise HTTPException(404)
+
+    # Find or create company from user's submitted company_name
+    company_name = (user.get("company_name") or "").strip()
+    company_address = (user.get("company_address") or "").strip()
+    if company_name:
+        company_id = get_or_create_company(company_name, company_address)
+    else:
+        company_id = ADMIN_COMPANY_ID
+
+    set_user_company(user_id, company_id)
+
     tmp_pw = generate_temp_password()
     approve_user(user_id, hash_password(tmp_pw))
+
+    display_name = (
+        f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+        or user.get("name") or user["email"]
+    )
+
+    try:
+        send_welcome_email(
+            to_email=user["email"],
+            name=display_name,
+            company_name=company_name or ADMIN_COMPANY_NAME,
+            temp_password=tmp_pw,
+        )
+    except Exception as e:
+        print(f"[ADMIN] Welcome email failed: {e}")
+
     request.session["flash_approval"] = {
-        "name": user["name"],
+        "name": display_name,
         "email": user["email"],
         "password": tmp_pw,
     }
@@ -258,7 +560,18 @@ async def admin_approve(request: Request, user_id: int):
 @app.post("/admin/users/{user_id}/reject")
 async def admin_reject(request: Request, user_id: int):
     _require_admin(request)
+    user = get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(404)
     reject_user(user_id)
+    try:
+        display_name = (
+            f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+            or user.get("name") or ""
+        )
+        send_rejection_email(user["email"], display_name)
+    except Exception as e:
+        print(f"[ADMIN] Rejection email failed: {e}")
     return RedirectResponse("/admin", status_code=303)
 
 
@@ -269,7 +582,17 @@ async def admin_deactivate(request: Request, user_id: int):
     if user and user.get("is_admin"):
         raise HTTPException(400, detail="Cannot deactivate an admin account")
     set_user_status(user_id, "inactive")
-    return RedirectResponse("/admin", status_code=303)
+    return RedirectResponse("/admin?tab=users", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/reactivate")
+async def admin_reactivate(request: Request, user_id: int):
+    _require_admin(request)
+    user = get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(404)
+    set_user_status(user_id, "active")
+    return RedirectResponse("/admin?tab=users", status_code=303)
 
 
 @app.post("/admin/users/{user_id}/reset-password")
@@ -280,12 +603,16 @@ async def admin_reset_password(request: Request, user_id: int):
         raise HTTPException(404)
     tmp_pw = generate_temp_password()
     update_user_password(user_id, hash_password(tmp_pw))
+    display_name = (
+        f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+        or user.get("name") or user["email"]
+    )
     request.session["flash_approval"] = {
-        "name": user["name"],
+        "name": display_name,
         "email": user["email"],
         "password": tmp_pw,
     }
-    return RedirectResponse("/admin", status_code=303)
+    return RedirectResponse("/admin?tab=users", status_code=303)
 
 
 @app.post("/admin/users/{user_id}/delete")
@@ -295,31 +622,87 @@ async def admin_delete_user(request: Request, user_id: int):
     if user and user.get("is_admin"):
         raise HTTPException(400, detail="Cannot delete the admin account")
     delete_user(user_id)
-    return RedirectResponse("/admin", status_code=303)
+    return RedirectResponse("/admin?tab=users", status_code=303)
 
 
 @app.post("/admin/users/create")
 async def admin_create_user(
     request: Request,
-    name: str = Form(...),
+    first_name: str = Form(default=""),
+    last_name: str = Form(default=""),
+    name: str = Form(default=""),
     email: str = Form(...),
     password: str = Form(default=""),
+    company_name: str = Form(default=""),
 ):
     _require_admin(request)
-    name = name.strip()
     email = email.strip().lower()
     tmp_pw = password.strip() if password.strip() else generate_temp_password()
     existing = get_user_by_email(email)
     if existing:
-        return RedirectResponse("/admin", status_code=303)
+        return RedirectResponse("/admin?tab=users", status_code=303)
+
+    display_name = name.strip() or f"{first_name.strip()} {last_name.strip()}".strip() or email
+    company_id = None
+    if company_name.strip():
+        company_id = get_or_create_company(company_name.strip())
+
     create_user(
         email=email,
-        name=name,
+        name=display_name,
+        first_name=first_name.strip(),
+        last_name=last_name.strip(),
+        company_name=company_name.strip(),
+        company_id=company_id,
         status="active",
         password_hash=hash_password(tmp_pw),
     )
-    request.session["flash_approval"] = {"name": name, "email": email, "password": tmp_pw}
-    return RedirectResponse("/admin", status_code=303)
+    request.session["flash_approval"] = {"name": display_name, "email": email, "password": tmp_pw}
+    return RedirectResponse("/admin?tab=users", status_code=303)
+
+
+# Admin: delete history records (with audit log)
+
+@app.post("/admin/history/{record_id}/delete")
+async def admin_delete_history(
+    request: Request,
+    record_id: int,
+    reason: str = Form(default=""),
+):
+    admin_user = _require_admin(request)
+    record = get_determination(record_id)
+    if not record:
+        raise HTTPException(404)
+    log_admin_deletion(admin_user["id"], [record_id], reason)
+    delete_determination(record_id)
+    company_id = record.get("company_id") or 0
+    return RedirectResponse(f"/admin?tab=companies&cid={company_id}", status_code=303)
+
+
+@app.post("/admin/history/bulk-delete")
+async def admin_bulk_delete(request: Request):
+    admin_user = _require_admin(request)
+    form = await request.form()
+    ids_raw = form.getlist("record_ids")
+    reason = form.get("reason", "")
+    cid_back = form.get("cid", "0")
+    try:
+        record_ids = [int(x) for x in ids_raw if x]
+    except ValueError:
+        raise HTTPException(400, "Invalid record IDs")
+    if record_ids:
+        log_admin_deletion(admin_user["id"], record_ids, reason)
+        bulk_delete_determinations(record_ids)
+    return RedirectResponse(f"/admin?tab=companies&cid={cid_back}", status_code=303)
+
+
+# Admin: trigger LOL check manually
+
+@app.post("/admin/lol/run-check")
+async def admin_run_lol_check(request: Request):
+    _require_admin(request)
+    asyncio.create_task(run_lol_daily_check())
+    return RedirectResponse("/admin?tab=lol", status_code=303)
 
 
 # ── App routes ────────────────────────────────────────────────────────────────
@@ -328,12 +711,15 @@ async def admin_create_user(
 async def index(request: Request):
     user = get_session_user(request)
     pending_count = count_pending_users() if user and user.get("is_admin") else 0
-    return templates.TemplateResponse("index.html", {"request": request, "current_user": user, "pending_count": pending_count})
+    return templates.TemplateResponse("index.html", {
+        "request": request,
+        "current_user": user,
+        "pending_count": pending_count,
+    })
 
 
 @app.post("/geocode")
 async def geocode_endpoint(request: Request):
-    from fastapi.responses import JSONResponse
     body = await request.json()
     address = (body.get("address") or "").strip()
     if not address:
@@ -384,19 +770,16 @@ async def generate(
             except HTTPException as exc:
                 errors.append(exc.detail)
 
+    session_user = get_session_user(request)
+
     if errors:
         return templates.TemplateResponse("index.html", {
-            "request": request,
-            "errors": errors,
-            "current_user": get_session_user(request),
-            "pending_count": 0,
+            "request": request, "errors": errors,
+            "current_user": session_user, "pending_count": 0,
             "form": {
-                "property_address": property_address,
-                "loan_id": loan_id,
-                "borrower_name": borrower_name,
-                "lender_name": lender_name,
-                "lender_address": lender_address,
-                "lender_email": lender_email,
+                "property_address": property_address, "loan_id": loan_id,
+                "borrower_name": borrower_name, "lender_name": lender_name,
+                "lender_address": lender_address, "lender_email": lender_email,
             }
         })
 
@@ -404,14 +787,10 @@ async def generate(
 
     if precomputed:
         flood_info = {
-            "flood_zone": flood_zone,
-            "flood_zone_description": flood_zone_description,
-            "sfha_status": sfha_status,
-            "insurance_required": insurance_required,
-            "panel_number": panel_number,
-            "panel_effective_date": panel_effective_date,
-            "community_number": community_number,
-            "community_name": community_name,
+            "flood_zone": flood_zone, "flood_zone_description": flood_zone_description,
+            "sfha_status": sfha_status, "insurance_required": insurance_required,
+            "panel_number": panel_number, "panel_effective_date": panel_effective_date,
+            "community_number": community_number, "community_name": community_name,
         }
         geo_lat = float(lat)
         geo_lon = float(lon)
@@ -423,10 +802,8 @@ async def generate(
                 "request": request,
                 "errors": ["Could not geocode the provided address. Please check the address and try again."],
                 "form": {
-                    "property_address": property_address,
-                    "loan_id": loan_id,
-                    "borrower_name": borrower_name,
-                    "lender_name": lender_name,
+                    "property_address": property_address, "loan_id": loan_id,
+                    "borrower_name": borrower_name, "lender_name": lender_name,
                     "lender_email": lender_email,
                 }
             })
@@ -447,6 +824,13 @@ async def generate(
         geo_lon = geo_result["lon"]
         geo_matched = geo_result.get("matched_address", property_address)
 
+    # Determine company_id and user_id from session
+    s_company_id = session_user.get("company_id") if session_user else None
+    s_user_id = session_user.get("id") if session_user else None
+    # Admin certs go to Admin company
+    if session_user and session_user.get("is_admin") and not s_company_id:
+        s_company_id = ADMIN_COMPANY_ID
+
     certificate_data = {
         "property_address": property_address,
         "matched_address": geo_matched,
@@ -455,8 +839,7 @@ async def generate(
         "lender_name": lender_name,
         "lender_address": lender_address.strip(),
         "lender_email": lender_email.strip(),
-        "lat": geo_lat,
-        "lon": geo_lon,
+        "lat": geo_lat, "lon": geo_lon,
         "flood_zone": flood_info["flood_zone"],
         "flood_zone_description": flood_info["flood_zone_description"],
         "sfha_status": flood_info["sfha_status"],
@@ -468,6 +851,8 @@ async def generate(
         "county": flood_info.get("county", ""),
         "determination_date": date.today().strftime("%B %d, %Y"),
         "determination_date_iso": date.today().isoformat(),
+        "company_id": s_company_id,
+        "user_id": s_user_id,
     }
 
     record_id = save_determination(certificate_data)
@@ -483,12 +868,8 @@ async def generate(
         "data": certificate_data,
         "record_id": record_id,
         "comm": comm_info,
-        "current_user": get_session_user(request),
+        "current_user": session_user,
     })
-
-
-def _build_data_from_form(**kwargs) -> dict:
-    return {k: v for k, v in kwargs.items()}
 
 
 @app.post("/download/certificate")
@@ -518,11 +899,8 @@ async def download_certificate(
     data["map_image_b64"] = await generate_map_image(float(lat), float(lon))
     pdf_bytes = generate_flood_certificate_pdf(data)
     filename = f"flood_certificate_{loan_id}.pdf".replace(" ", "_")
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    return Response(content=pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @app.post("/download/notice")
@@ -552,20 +930,20 @@ async def download_notice(
     data["map_image_b64"] = await generate_map_image(float(lat), float(lon))
     pdf_bytes = generate_borrower_notice_pdf(data)
     filename = f"borrower_notice_{loan_id}.pdf".replace(" ", "_")
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    return Response(content=pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
+
+# ── History routes ─────────────────────────────────────────────────────────────
 
 @app.get("/history", response_class=HTMLResponse)
 async def history(request: Request, q: str = ""):
-    if q.strip():
-        records = search_determinations(q.strip())
-    else:
-        records = list_determinations(50)
     user = get_session_user(request)
+    company_id = None if (user and user.get("is_admin")) else (user.get("company_id") if user else None)
+    if q.strip():
+        records = search_determinations(q.strip(), company_id=company_id)
+    else:
+        records = list_determinations(100, company_id=company_id)
     return templates.TemplateResponse("history.html", {
         "request": request,
         "records": records,
@@ -577,19 +955,17 @@ async def history(request: Request, q: str = ""):
 
 
 @app.get("/api/community/{community_number}")
-async def community_status_api(
-    community_number: str,
-    lat: float = 0.0,
-    lon: float = 0.0,
-):
-    from fastapi.responses import JSONResponse
+async def community_status_api(community_number: str, lat: float = 0.0, lon: float = 0.0):
     return JSONResponse(nfip_community_info(community_number, lat=lat, lon=lon))
 
 
 @app.post("/history/check-all")
-async def check_all_monitored():
-    from fastapi.responses import JSONResponse
+async def check_all_monitored(request: Request):
+    user = get_session_user(request)
+    company_id = None if (user and user.get("is_admin")) else (user.get("company_id") if user else None)
     records = list_monitored()
+    if company_id is not None:
+        records = [r for r in records if r.get("company_id") == company_id]
     if not records:
         return JSONResponse({"checked": 0, "flagged": 0, "unchanged": 0, "errors": 0})
     checked, flagged, unchanged, errors = 0, 0, 0, 0
@@ -634,19 +1010,29 @@ async def check_all_monitored():
 
 @app.post("/history/{record_id}/monitor")
 async def toggle_monitor(record_id: int, request: Request):
-    from fastapi.responses import JSONResponse
     record = get_determination(record_id)
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
+
+    session_user = get_session_user(request)
+    if not session_user:
+        raise HTTPException(403)
+    if not session_user.get("is_admin"):
+        if record.get("company_id") and record.get("company_id") != session_user.get("company_id"):
+            raise HTTPException(403)
+
     body = await request.json()
     enable = bool(body.get("enable", not record.get("life_of_loan", 0)))
     set_life_of_loan(record_id, enable)
+
+    if enable:
+        upsert_lol_monitoring(record)
+
     return JSONResponse({"record_id": record_id, "life_of_loan": int(enable)})
 
 
 @app.post("/history/{record_id}/check")
 async def check_fema_update(record_id: int):
-    from fastapi.responses import JSONResponse
     record = get_determination(record_id)
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
@@ -662,6 +1048,7 @@ async def check_fema_update(record_id: int):
         new_info = determine_flood_info({**zone_data, **community_data, **firm_data})
     except Exception as exc:
         return JSONResponse({"error": str(exc)[:300]}, status_code=502)
+
     old_zone  = record.get("flood_zone", "")
     old_panel = record.get("panel_effective_date", "")
     new_zone  = new_info.get("flood_zone", "")
@@ -688,21 +1075,22 @@ async def check_fema_update(record_id: int):
 
 @app.get("/history/{record_id}", response_class=HTMLResponse)
 async def history_detail(request: Request, record_id: int):
+    user = get_session_user(request)
     record = get_determination(record_id)
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
+    # Enforce company scope for non-admin
+    if user and not user.get("is_admin"):
+        if record.get("company_id") and record.get("company_id") != user.get("company_id"):
+            raise HTTPException(403)
     comm_info = nfip_community_info(
         record.get("community_number", ""),
         lat=record.get("lat", 0.0),
         lon=record.get("lon", 0.0),
     )
     return templates.TemplateResponse("result.html", {
-        "request": request,
-        "data": record,
-        "record_id": record_id,
-        "from_history": True,
-        "comm": comm_info,
-        "current_user": get_session_user(request),
+        "request": request, "data": record, "record_id": record_id,
+        "from_history": True, "comm": comm_info, "current_user": user,
     })
 
 
@@ -713,11 +1101,8 @@ async def history_download_certificate(record_id: int):
         raise HTTPException(status_code=404, detail="Record not found")
     pdf_bytes = generate_flood_certificate_pdf(record)
     filename = f"flood_certificate_{record['loan_id']}.pdf".replace(" ", "_")
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    return Response(content=pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @app.post("/history/{record_id}/download/notice")
@@ -727,17 +1112,8 @@ async def history_download_notice(record_id: int):
         raise HTTPException(status_code=404, detail="Record not found")
     pdf_bytes = generate_borrower_notice_pdf(record)
     filename = f"borrower_notice_{record['loan_id']}.pdf".replace(" ", "_")
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-@app.post("/history/{record_id}/delete")
-async def history_delete(record_id: int):
-    delete_determination(record_id)
-    return RedirectResponse(url="/history", status_code=303)
+    return Response(content=pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @app.post("/history/{record_id}/send-email")
@@ -754,10 +1130,7 @@ async def history_send_email(record_id: int):
     try:
         pdf_bytes = generate_flood_certificate_pdf(record)
         send_certificate_email(to_email, record, pdf_bytes)
-        return RedirectResponse(
-            url=f"/history/{record_id}?email_sent=1&email_to={to_email}",
-            status_code=303,
-        )
+        return RedirectResponse(url=f"/history/{record_id}?email_sent=1&email_to={to_email}", status_code=303)
     except ValueError as exc:
         msg = str(exc).replace(" ", "+")
         return RedirectResponse(url=f"/history/{record_id}?email_error={msg}", status_code=303)
@@ -765,6 +1138,70 @@ async def history_send_email(record_id: int):
         msg = f"Failed+to+send+email:+{str(exc)[:120].replace(' ', '+')}".replace("&", "%26")
         return RedirectResponse(url=f"/history/{record_id}?email_error={msg}", status_code=303)
 
+
+@app.get("/history/export/csv")
+async def export_csv(request: Request, q: str = ""):
+    user = get_session_user(request)
+    company_id = None if (user and user.get("is_admin")) else (user.get("company_id") if user else None)
+    if q.strip():
+        records = search_determinations(q.strip(), company_id=company_id)
+        filename = "flood_determinations_search.csv"
+    else:
+        records = list_determinations(limit=10000, company_id=company_id)
+        filename = "flood_determinations_all.csv"
+
+    columns = [
+        "id", "determination_date", "loan_id", "borrower_name", "lender_name",
+        "property_address", "matched_address", "lat", "lon",
+        "flood_zone", "flood_zone_description", "sfha_status", "insurance_required",
+        "panel_number", "panel_effective_date", "community_number", "community_name",
+        "county", "created_at",
+    ]
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    for r in records:
+        writer.writerow(r)
+    csv_bytes = output.getvalue().encode("utf-8-sig")
+    return Response(content=csv_bytes, media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+# ── LOL Monitoring routes ─────────────────────────────────────────────────────
+
+@app.get("/lol-monitoring", response_class=HTMLResponse)
+async def lol_monitoring_page(request: Request):
+    user = get_session_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    company_id = None if user.get("is_admin") else user.get("company_id")
+    records = list_lol_monitoring(company_id=company_id)
+    companies = list_companies() if user.get("is_admin") else []
+    return templates.TemplateResponse("lol_monitoring.html", {
+        "request": request,
+        "records": records,
+        "current_user": user,
+        "companies": companies,
+        "pending_count": count_pending_users() if user.get("is_admin") else 0,
+    })
+
+
+@app.post("/lol-monitoring/{monitoring_id}/close")
+async def close_lol_record(request: Request, monitoring_id: int):
+    user = get_session_user(request)
+    if not user:
+        raise HTTPException(403)
+    rec = get_lol_monitoring(monitoring_id)
+    if not rec:
+        raise HTTPException(404)
+    if not user.get("is_admin"):
+        if rec.get("company_id") != user.get("company_id"):
+            raise HTTPException(403, detail="Access denied")
+    close_lol_monitoring(monitoring_id)
+    return RedirectResponse("/lol-monitoring", status_code=303)
+
+
+# ── Batch routes ──────────────────────────────────────────────────────────────
 
 @app.get("/batch", response_class=HTMLResponse)
 async def batch_page(request: Request):
@@ -780,26 +1217,21 @@ async def batch_template():
         "789 River Rd, New Orleans LA 70112,2024-003,Bob Johnson,Gulf Coast Mortgage,\n"
     )
     csv_bytes = (header + rows).encode("utf-8-sig")
-    return Response(
-        content=csv_bytes,
-        media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="batch_template.csv"'},
-    )
+    return Response(content=csv_bytes, media_type="text/csv",
+                    headers={"Content-Disposition": 'attachment; filename="batch_template.csv"'})
 
 
-async def _process_row(row: dict, det_date: str, det_date_iso: str) -> dict:
+async def _process_row(row: dict, det_date: str, det_date_iso: str, company_id=None, user_id=None) -> dict:
     property_address = row.get("property_address", "").strip()
-    loan_id = row.get("loan_id", "").strip()
-    borrower_name = row.get("borrower_name", "").strip()
-    lender_name = row.get("lender_name", "").strip()
-    lender_email = row.get("lender_email", "").strip()
+    loan_id          = row.get("loan_id", "").strip()
+    borrower_name    = row.get("borrower_name", "").strip()
+    lender_name      = row.get("lender_name", "").strip()
+    lender_email     = row.get("lender_email", "").strip()
 
     if not all([property_address, loan_id, borrower_name, lender_name]):
         return {
-            "property_address": property_address,
-            "loan_id": loan_id,
-            "borrower_name": borrower_name,
-            "lender_name": lender_name,
+            "property_address": property_address, "loan_id": loan_id,
+            "borrower_name": borrower_name, "lender_name": lender_name,
             "error": "Missing required fields",
         }
 
@@ -810,20 +1242,16 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str) -> dict:
             validate_us_address(state, zipcode)
         except HTTPException as exc:
             return {
-                "property_address": property_address,
-                "loan_id": loan_id,
-                "borrower_name": borrower_name,
-                "lender_name": lender_name,
+                "property_address": property_address, "loan_id": loan_id,
+                "borrower_name": borrower_name, "lender_name": lender_name,
                 "error": exc.detail,
             }
 
     geo = await geocode_address(property_address)
     if not geo:
         return {
-            "property_address": property_address,
-            "loan_id": loan_id,
-            "borrower_name": borrower_name,
-            "lender_name": lender_name,
+            "property_address": property_address, "loan_id": loan_id,
+            "borrower_name": borrower_name, "lender_name": lender_name,
             "error": "Address could not be geocoded",
         }
 
@@ -844,12 +1272,9 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str) -> dict:
     data = {
         "property_address": property_address,
         "matched_address": geo.get("matched_address", property_address),
-        "loan_id": loan_id,
-        "borrower_name": borrower_name,
-        "lender_name": lender_name,
-        "lender_email": lender_email,
-        "lat": geo["lat"],
-        "lon": geo["lon"],
+        "loan_id": loan_id, "borrower_name": borrower_name,
+        "lender_name": lender_name, "lender_email": lender_email,
+        "lat": geo["lat"], "lon": geo["lon"],
         "flood_zone": flood_info["flood_zone"],
         "flood_zone_description": flood_info["flood_zone_description"],
         "sfha_status": flood_info["sfha_status"],
@@ -861,6 +1286,8 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str) -> dict:
         "county": flood_info.get("county", ""),
         "determination_date": det_date,
         "determination_date_iso": det_date_iso,
+        "company_id": company_id,
+        "user_id": user_id,
     }
     record_id = save_determination(data)
     return {**data, "record_id": record_id}
@@ -869,7 +1296,6 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str) -> dict:
 @app.post("/batch", response_class=HTMLResponse)
 async def batch_process(request: Request, csv_file: UploadFile = File(...)):
     errors = []
-
     if not csv_file.filename.lower().endswith(".csv"):
         errors.append("File must be a .csv file.")
         return templates.TemplateResponse("batch.html", {"request": request, "errors": errors})
@@ -901,22 +1327,24 @@ async def batch_process(request: Request, csv_file: UploadFile = File(...)):
         errors.append(f"Maximum 100 rows per batch. Your file contains {len(rows)} rows.")
         return templates.TemplateResponse("batch.html", {"request": request, "errors": errors})
 
-    # Normalise column names to lowercase stripped
     normalised_rows = [{k.strip().lower(): v for k, v in r.items()} for r in rows]
-
     det_date = date.today().strftime("%B %d, %Y")
     det_date_iso = date.today().isoformat()
 
-    # Process concurrently with a semaphore to avoid hammering the APIs
+    session_user = get_session_user(request)
+    s_company_id = session_user.get("company_id") if session_user else None
+    s_user_id = session_user.get("id") if session_user else None
+    if session_user and session_user.get("is_admin") and not s_company_id:
+        s_company_id = ADMIN_COMPANY_ID
+
     sem = asyncio.Semaphore(5)
 
     async def bounded(row):
         async with sem:
-            return await _process_row(row, det_date, det_date_iso)
+            return await _process_row(row, det_date, det_date_iso, company_id=s_company_id, user_id=s_user_id)
 
     results = await asyncio.gather(*[bounded(r) for r in normalised_rows])
 
-    # Build CSV output
     out_columns = [
         "loan_id", "borrower_name", "lender_name",
         "property_address", "matched_address", "lat", "lon",
@@ -936,19 +1364,16 @@ async def batch_process(request: Request, csv_file: UploadFile = File(...)):
     _batch_full_results[batch_id] = list(results)
 
     return templates.TemplateResponse("batch_results.html", {
-        "request": request,
-        "results": results,
-        "batch_id": batch_id,
-        "determination_date": det_date,
+        "request": request, "results": results,
+        "batch_id": batch_id, "determination_date": det_date,
     })
 
 
 @app.post("/batch/{batch_id}/email-all")
 async def batch_email_all(batch_id: str):
-    from fastapi.responses import JSONResponse
     record_ids = _batch_record_ids.get(batch_id)
     if record_ids is None:
-        return JSONResponse({"error": "Batch not found or expired. Re-run the batch to email certificates."}, status_code=404)
+        return JSONResponse({"error": "Batch not found or expired."}, status_code=404)
 
     sent, skipped, failed, details = 0, 0, 0, []
 
@@ -973,7 +1398,6 @@ async def batch_email_all(batch_id: str):
             failed += 1
             details.append({"record_id": rid, "loan_id": record.get("loan_id"), "status": "error", "msg": str(exc)[:200]})
 
-    # Run with a semaphore so we don't flood the SMTP server
     sem = asyncio.Semaphore(3)
     async def bounded(rid):
         async with sem:
@@ -987,20 +1411,17 @@ async def batch_email_all(batch_id: str):
 async def batch_download(batch_id: str):
     csv_bytes = _batch_results.get(batch_id)
     if not csv_bytes:
-        raise HTTPException(status_code=404, detail="Batch result not found or expired. Please re-run the batch.")
+        raise HTTPException(status_code=404, detail="Batch result not found or expired.")
     filename = f"flood_batch_{date.today().isoformat()}.csv"
-    return Response(
-        content=csv_bytes,
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    return Response(content=csv_bytes, media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @app.get("/batch/{batch_id}/report")
 async def batch_report_pdf(batch_id: str):
     results = _batch_full_results.get(batch_id)
     if results is None:
-        raise HTTPException(status_code=404, detail="Batch report not found or expired. Please re-run the batch.")
+        raise HTTPException(status_code=404, detail="Batch report not found or expired.")
     if not results:
         raise HTTPException(status_code=404, detail="No results in this batch.")
     det_date = next(
@@ -1009,40 +1430,5 @@ async def batch_report_pdf(batch_id: str):
     )
     pdf_bytes = generate_batch_report_pdf(results, det_date)
     filename = f"batch_flood_report_{date.today().isoformat()}.pdf"
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-@app.get("/history/export/csv")
-async def export_csv(q: str = ""):
-    if q.strip():
-        records = search_determinations(q.strip())
-        filename = f"flood_determinations_search.csv"
-    else:
-        records = list_determinations(limit=10000)
-        filename = f"flood_determinations_all.csv"
-
-    columns = [
-        "id", "determination_date", "loan_id", "borrower_name", "lender_name",
-        "property_address", "matched_address", "lat", "lon",
-        "flood_zone", "flood_zone_description", "sfha_status", "insurance_required",
-        "panel_number", "panel_effective_date", "community_number", "community_name",
-        "created_at",
-    ]
-
-    output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=columns, extrasaction="ignore")
-    writer.writeheader()
-    for r in records:
-        writer.writerow(r)
-
-    csv_bytes = output.getvalue().encode("utf-8-sig")
-
-    return Response(
-        content=csv_bytes,
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    return Response(content=pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})

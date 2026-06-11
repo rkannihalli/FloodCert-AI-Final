@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Life-of-Loan Monitoring — FEMA Flood Certificate Generator</title>
+  <link rel="stylesheet" href="/static/css/main.css" />
+  <style>
+    .lol-wrap { max-width: 1100px; margin: 32px auto; padding: 0 24px 60px; }
+    .lol-hdr {
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 12px; margin-bottom: 24px;
+    }
+    .lol-hdr h2 { margin: 0; font-size: 1.3rem; color: #003366; }
+    .lol-hdr p  { margin: 4px 0 0; font-size: 0.85rem; color: #5a6470; }
+    .lol-card {
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+      overflow: hidden;
+      margin-bottom: 24px;
+    }
+    .lol-card-hdr {
+      background: var(--navy);
+      color: #fff;
+      padding: 11px 20px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .lol-card-hdr .badge {
+      background: rgba(255,255,255,0.2);
+      border-radius: 20px; padding: 2px 10px; font-size: 0.72rem;
+    }
+    .lol-table { width: 100%; border-collapse: collapse; }
+    .lol-table th {
+      background: #f5f7fa;
+      font-size: 0.72rem; font-weight: 700; color: #5a6470;
+      text-transform: uppercase; letter-spacing: 0.05em;
+      padding: 10px 14px; text-align: left; border-bottom: 1px solid #e8ecf0;
+    }
+    .lol-table td {
+      padding: 11px 14px; font-size: 0.86rem; color: #1e2530;
+      border-bottom: 1px solid #f0f2f5; vertical-align: middle;
+    }
+    .lol-table tr:last-child td { border-bottom: none; }
+    .lol-table tr:hover td { background: #fafbfc; }
+    .status-active   { display:inline-block; padding:2px 10px; border-radius:20px; font-size:0.72rem; font-weight:700; background:#e6f4ed; color:#1a7a4a; }
+    .status-closed   { display:inline-block; padding:2px 10px; border-radius:20px; font-size:0.72rem; font-weight:700; background:#f0f2f5; color:#9aa3ad; }
+    .lol-address { font-weight:600; color:#003366; }
+    .lol-loan    { font-size:0.8rem; color:#5a6470; }
+    .btn-close {
+      padding: 5px 12px; border-radius: 5px; font-size: 0.78rem; font-weight: 600;
+      background: #fdf0ef; color: #c0392b; border: 1px solid #f5c6c3;
+      cursor: pointer; transition: opacity 0.15s;
+    }
+    .btn-close:hover { opacity: 0.8; }
+    .empty-state {
+      text-align: center; padding: 48px 24px; color: #9aa3ad;
+    }
+    .empty-state .icon { font-size: 2.5rem; margin-bottom: 12px; }
+    .lol-meta { font-size: 0.72rem; color: #9aa3ad; margin-top: 2px; }
+    .zone-badge {
+      display:inline-block; padding:2px 8px; border-radius:4px; font-size:0.75rem; font-weight:700;
+      background:#e8f0fb; color:#003366;
+    }
+    .zone-badge.sfha { background:#fff0f0; color:#c0392b; }
+    .info-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; }
+    .info-lbl { font-size:0.68rem; color:#9aa3ad; text-transform:uppercase; letter-spacing:0.05em; }
+    .info-val { font-size:0.82rem; color:#1e2530; font-weight:600; }
+  </style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <div class="header-seal">🌊</div>
+    <div class="header-text">
+      <h1>FEMA Flood Certificate Generator</h1>
+      <p>Life-of-Loan Monitoring</p>
+    </div>
+    <a href="/" class="header-history-link">🏠 Home</a>
+    <a href="/history" class="header-history-link">📂 History</a>
+    {% if current_user and current_user.is_admin %}
+    <a href="/admin" class="header-history-link" style="background:rgba(255,200,0,0.15);border:1px solid rgba(255,200,0,0.4);">
+      ⚙ Admin
+      {% if pending_count %}<span style="background:#e53935;color:#fff;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px;">{{ pending_count }}</span>{% endif %}
+    </a>
+    {% endif %}
+    <form method="POST" action="/logout" style="margin:0;">
+      <button type="submit" class="header-history-link" style="background:none;border:none;cursor:pointer;color:#fff;font-size:inherit;">⎋ Sign Out</button>
+    </form>
+  </div>
+</header>
+
+<div class="lol-wrap">
+
+  <div class="lol-hdr">
+    <div>
+      <h2>🔔 Life-of-Loan Monitoring</h2>
+      <p>
+        {% if current_user and current_user.is_admin %}
+          All active monitoring records across all companies.
+        {% else %}
+          Monitoring records for <strong>{{ current_user.company_name or 'your company' }}</strong>.
+        {% endif %}
+        Records are automatically checked daily for FIRM map changes.
+      </p>
+    </div>
+    <a href="/history" class="btn-secondary" style="text-decoration:none;">← Back to History</a>
+  </div>
+
+  {% set active_records = records | selectattr('status', 'equalto', 'Active') | list %}
+  {% set closed_records = records | selectattr('status', 'equalto', 'Closed') | list %}
+
+  <!-- Active Monitoring Records -->
+  <div class="lol-card">
+    <div class="lol-card-hdr">
+      🟢 Active Monitoring
+      <span class="badge">{{ active_records | length }}</span>
+    </div>
+
+    {% if active_records %}
+    <table class="lol-table">
+      <thead>
+        <tr>
+          <th>Property / Loan</th>
+          <th>Lender</th>
+          <th>Baseline Zone</th>
+          <th>Baseline Panel</th>
+          <th>Baseline CID</th>
+          <th>Panel Date</th>
+          <th>Last Checked</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in active_records %}
+        <tr>
+          <td>
+            <div class="lol-address">{{ r.property_address }}</div>
+            <div class="lol-loan">Loan: {{ r.loan_id or '—' }} &nbsp;|&nbsp; {{ r.borrower_name or '—' }}</div>
+            {% if current_user and current_user.is_admin and r.company_id %}
+            <div class="lol-meta">Company ID: {{ r.company_id }}</div>
+            {% endif %}
+          </td>
+          <td>
+            <div style="font-weight:600;">{{ r.lender_name or '—' }}</div>
+            <div class="lol-meta">{{ r.lender_email or '—' }}</div>
+          </td>
+          <td>
+            <span class="zone-badge {{ 'sfha' if r.baseline_flood_zone in ['A','AE','AH','AO','AV','V','VE','AR'] else '' }}">
+              {{ r.baseline_flood_zone or '—' }}
+            </span>
+          </td>
+          <td style="font-family:monospace;font-size:0.82rem;">{{ r.baseline_panel_number or '—' }}</td>
+          <td style="font-family:monospace;font-size:0.82rem;">{{ r.baseline_community_number or '—' }}</td>
+          <td style="font-size:0.82rem;">{{ r.baseline_effective_date or '—' }}</td>
+          <td>
+            {% if r.last_checked_at %}
+              <div style="font-size:0.8rem;">{{ r.last_checked_at[:10] }}</div>
+            {% else %}
+              <div style="font-size:0.78rem;color:#9aa3ad;">Not yet checked</div>
+            {% endif %}
+          </td>
+          <td>
+            <form method="POST" action="/lol-monitoring/{{ r.id }}/close"
+                  onsubmit="return confirm('Mark this monitoring record as Closed? Future automated checks will stop, but the history is preserved.')">
+              <button type="submit" class="btn-close">Close</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% else %}
+    <div class="empty-state">
+      <div class="icon">🔔</div>
+      <p>No active monitoring records.</p>
+      <p style="font-size:0.85rem;">Enable Life-of-Loan monitoring on any determination from the
+        <a href="/history" style="color:#0050a0;">History</a> page.</p>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Closed Monitoring Records -->
+  {% if closed_records %}
+  <div class="lol-card">
+    <div class="lol-card-hdr" style="background:#5a6470;">
+      🔒 Closed Monitoring Records
+      <span class="badge">{{ closed_records | length }}</span>
+    </div>
+    <table class="lol-table">
+      <thead>
+        <tr>
+          <th>Property / Loan</th>
+          <th>Lender</th>
+          <th>Baseline Zone</th>
+          <th>Baseline Panel</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in closed_records %}
+        <tr>
+          <td>
+            <div class="lol-address">{{ r.property_address }}</div>
+            <div class="lol-loan">Loan: {{ r.loan_id or '—' }} &nbsp;|&nbsp; {{ r.borrower_name or '—' }}</div>
+          </td>
+          <td>{{ r.lender_name or '—' }}</td>
+          <td>
+            <span class="zone-badge">{{ r.baseline_flood_zone or '—' }}</span>
+          </td>
+          <td style="font-family:monospace;font-size:0.82rem;">{{ r.baseline_panel_number or '—' }}</td>
+          <td><span class="status-closed">Closed</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- Info Box -->
+  <div style="background:#e8f0fb;border-radius:8px;padding:16px 20px;font-size:0.84rem;color:#3a4450;line-height:1.6;">
+    <strong style="color:#003366;">📋 How Life-of-Loan Monitoring Works</strong><br />
+    When LOL monitoring is enabled for a determination, the system automatically checks FEMA FIRM map data
+    daily for changes to: <strong>Flood Zone, NFIP Map Panel Number, Panel Effective Date,</strong> and
+    <strong>NFIP Community Number (CID)</strong>. If any value changes, an alert email is sent to the
+    lender on file immediately. All alerts are logged and visible in the
+    {% if current_user and current_user.is_admin %}<a href="/admin?tab=lol" style="color:#0050a0;">Admin LOL Alerts</a> tab.{% else %}Admin panel.{% endif %}
+  </div>
+
+</div>
+</body>
+</html>
