@@ -1,0 +1,32 @@
+Here are the few issue noticed when flood certificate run through newly developed website and mis-match data compared to corelogic info. Identify the core issue and ensure that correct logic is applied for all future reports generated.
+1.	In the Batch flood cert run the county information is missing.
+2.	If Life-of-loan Monitoring is “On” then any changes to track FIRM panel, then email notification should be sent to lender to re-run the flood certificate.
+3.	Some common issues noticed in the flood certificate (Instruction: Understand the core issue and how the corelogic is determining the NFIP MAP Number(Community Panel Number) & NFIP Map Panel Effective/Revised Date and apply those changes to match the data. Note: all future run should follow the same logic). 
+a.	NFIP MAP Number(Community Panel Number) mis-match with corelogic. Below are the examples:
+Property Address	Issue
+879 Willow Ridge Rd, Hudson, WI 54016	NFIP Map Number (CommunityPanel Number) 55109C 0326E & Corelogic 55109C 0327E
+106 W 6th South St, Summerville, SC 29483	NFIP Map Number (CommunityPanel Number) 45019C 0120K & Corelogic 45035C 0343E
+1053 Brewer Ridge Rd, Bulverde, TX 78163	NFIP Map Number (CommunityPanel Number) 48259C 0475F & Corelogic 48091C 0215F
+911/913 Lake St, Dalton, GA, 30721	NFIP Map Number (CommunityPanel Number) 13213C 0100D & Corelogic 13313C 0139D and NFIP Map Panel Effective/Revised Date 09/29/2010 but corelogice shows 09/19/2007
+2909 Travis St, Peru, IN, 46970	NFIP Map Number (CommunityPanel Number) 18017C 0295C & Corelogic 18103C 0170D and NFIP Map Panel Effective/Revised Date 09/03/2014 but corelogice shows 09/28/2012
+
+
+4.	Some common issues noticed in the flood certificate (Instruction: Understand the core issue and how the corelogic is determining the NFIP Community number and apply those changes to match the data. Note: all future run should follow the same logic). 
+b.	NFIP Community Number mis-match with corelogic. Below are the examples:
+Property Address	Issue
+2625 Sumac Ave, Stockton, CA 95207	NFIP Community Number 06077C & Corelogic 060302
+107 Pierce St, Lewiston, ME 04240	NFIP Community Number 23001C & Corelogic 230004
+11 Brabrook Rd, Acton, MA, 1720	NFIP Community Number 25017C & Corelogic 250176
+
+5.	Other misc issue noticed. 
+Property Address	Issue
+7710 Lavender Ct, Katy, TX, 77493	As per Corelogic NFIP MAP Number(Community Panel Number) 48473C 0375E and Report shows 48157C 0040L. NFIP Community Number as per corelogic 480301 and report shows 480640. NFIP Community Name as per Corelogic Katy, City of and report shows Waller County
+329 Willard St, Jamestown, NY, 14701	Didn't pull NFIP Map Number (Community Panel Number), NFIP Community Number & NFIP MAP Panel Effective/Revised Date
+70 Circle Dr, Wallingford, CT, 6492	As per Corelogic county is New Haven but report shows South Central Connecticut Planning Region, 
+2413 Denmead St, Lakewood, CA, 90712	Corelogic report Flood Zone as X500 and report shows Zone X
+7710 Lavender Ct, Katy, TX, 77493	As per Corelogic NFIP MAP Number(Community Panel Number) 48473C 0375E and Report shows 48157C 0040L. NFIP Community Number as per corelogic 480301 and report shows 480640. NFIP Community Name as per Corelogic Katy, City of and report shows Waller County, Corelogic Flood Zone X500 but report shows Zone X
+301 Satinwood Drive Lot 1, Santa Rosa Beach, FL, 32459	As per corelogic the Zone X and report shows Zone A
+4248 Duck Dr, Ann Arbor, MI 48103	Could not geocode the provided address. Please check the address and try again.
+
+
+

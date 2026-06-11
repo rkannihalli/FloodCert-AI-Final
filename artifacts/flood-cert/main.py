@@ -25,7 +25,7 @@ from db import (
     list_users_by_status, approve_user, reject_user, update_user_password,
     set_user_status, delete_user, count_pending_users,
 )
-from email_sender import send_certificate_email
+from email_sender import send_certificate_email, send_redetermination_notification
 from auth import (
     SUPER_ADMIN_EMAIL, SECRET_KEY, is_public,
     hash_password, verify_password, generate_temp_password, get_session_user,
@@ -439,6 +439,9 @@ async def generate(
         flood_info = determine_flood_info({
             **zone_data, **community_data, **firm_data, **county_data,
             "geocoded_city": geo_result.get("city", ""),
+            "state_fips": geo_result.get("state_fips", ""),
+            "county_fips": geo_result.get("county_fips", ""),
+            "county_name": geo_result.get("county_name", ""),
         })
         geo_lat = geo_result["lat"]
         geo_lon = geo_result["lon"]
@@ -613,6 +616,11 @@ async def check_all_monitored():
             checked += 1
             flagged += int(changed)
             unchanged += int(not changed)
+            if changed and (r.get("lender_email") or "").strip():
+                try:
+                    send_redetermination_notification(r)
+                except Exception as mail_exc:
+                    print(f"Redetermination email error (record {r['id']}): {mail_exc}")
         except Exception:
             errors += 1
 
@@ -661,12 +669,20 @@ async def check_fema_update(record_id: int):
     changed = (old_zone != new_zone) or (old_panel != new_panel)
     checked_date = date.today().strftime("%B %d, %Y")
     flag_redetermination(record_id, changed, checked_date)
+    email_sent = False
+    if changed and (record.get("lender_email") or "").strip():
+        try:
+            send_redetermination_notification(record)
+            email_sent = True
+        except Exception as mail_exc:
+            print(f"Redetermination email error (record {record_id}): {mail_exc}")
     return JSONResponse({
         "changed": changed,
         "old_zone": old_zone, "new_zone": new_zone,
         "old_panel": old_panel, "new_panel": new_panel,
         "needs_redetermination": changed,
         "checked_date": checked_date,
+        "notification_sent": email_sent,
     })
 
 
@@ -820,6 +836,9 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str) -> dict:
     flood_info = determine_flood_info({
         **zone_data, **community_data, **firm_data, **county_data,
         "geocoded_city": geo.get("city", ""),
+        "state_fips": geo.get("state_fips", ""),
+        "county_fips": geo.get("county_fips", ""),
+        "county_name": geo.get("county_name", ""),
     })
 
     data = {
@@ -903,7 +922,7 @@ async def batch_process(request: Request, csv_file: UploadFile = File(...)):
         "property_address", "matched_address", "lat", "lon",
         "flood_zone", "flood_zone_description", "sfha_status", "insurance_required",
         "panel_number", "panel_effective_date", "community_number", "community_name",
-        "determination_date", "record_id", "error",
+        "county", "determination_date", "record_id", "error",
     ]
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=out_columns, extrasaction="ignore")

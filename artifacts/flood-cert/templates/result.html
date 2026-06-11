@@ -143,11 +143,11 @@
         </div>
         <div class="detail-row">
           <span class="detail-label">NFIP Community Name</span>
-          <span class="detail-value">{{ data.community_name }}</span>
+          <span class="detail-value" id="commNameDisplay">{{ data.community_name }}</span>
         </div>
         <div class="detail-row">
           <span class="detail-label">NFIP Community Number</span>
-          <span class="detail-value">{{ data.panel_number }}</span>
+          <span class="detail-value" id="cidDisplay">{{ data.panel_number }}</span>
         </div>
         <div class="detail-row">
           <span class="detail-label">NFIP Map Number (Community-Panel Number)</span>
@@ -254,10 +254,10 @@
         <input type="hidden" name="flood_zone_description" value="{{ data.flood_zone_description }}" />
         <input type="hidden" name="sfha_status"           value="{{ data.sfha_status }}" />
         <input type="hidden" name="insurance_required"    value="{{ data.insurance_required }}" />
-        <input type="hidden" name="panel_number"          value="{{ data.panel_number }}" />
+        <input type="hidden" name="panel_number"          id="certCid"         value="{{ data.panel_number }}" />
         <input type="hidden" name="panel_effective_date"  id="certPanelDate"   value="{{ data.panel_effective_date }}" />
         <input type="hidden" name="community_number"      id="certPanelNumber" value="{{ data.community_number }}" />
-        <input type="hidden" name="community_name"        value="{{ data.community_name }}" />
+        <input type="hidden" name="community_name"        id="certCommName"    value="{{ data.community_name }}" />
         <input type="hidden" name="county"                value="{{ data.county or '' }}" />
         <input type="hidden" name="determination_date"    value="{{ data.determination_date }}" />
         <input type="hidden" name="determination_date_iso" value="{{ data.determination_date_iso }}" />
@@ -278,10 +278,10 @@
         <input type="hidden" name="flood_zone_description" value="{{ data.flood_zone_description }}" />
         <input type="hidden" name="sfha_status"           value="{{ data.sfha_status }}" />
         <input type="hidden" name="insurance_required"    value="{{ data.insurance_required }}" />
-        <input type="hidden" name="panel_number"          value="{{ data.panel_number }}" />
+        <input type="hidden" name="panel_number"          id="noticeCid"         value="{{ data.panel_number }}" />
         <input type="hidden" name="panel_effective_date"  id="noticePanelDate"   value="{{ data.panel_effective_date }}" />
         <input type="hidden" name="community_number"      id="noticePanelNumber" value="{{ data.community_number }}" />
-        <input type="hidden" name="community_name"        value="{{ data.community_name }}" />
+        <input type="hidden" name="community_name"        id="noticeCommName"    value="{{ data.community_name }}" />
         <input type="hidden" name="county"                value="{{ data.county or '' }}" />
         <input type="hidden" name="determination_date"    value="{{ data.determination_date }}" />
         <input type="hidden" name="determination_date_iso" value="{{ data.determination_date_iso }}" />
@@ -445,88 +445,125 @@ async function lolCheck(id, btn) {
 </script>
 
 <script>
-/* ── Client-side FIRM panel enrichment ──────────────────────────────────────
-   hazards.fema.gov Layer 3 is blocked server-side on Replit but is reachable
-   from the user's browser.  We fetch FIRM_PAN + EFF_DATE here and overwrite
-   any incomplete fallback values rendered by the server.
-   Only overwrites when the new value is strictly better (longer panel number
-   or a real date vs the "See FEMA Map Service Center" placeholder).
+/* ── Client-side NFHL enrichment (Layer 3 + Layer 22) ───────────────────────
+   hazards.fema.gov is network-blocked on Replit server-side but IS reachable
+   from the user's browser.  Two parallel queries run here:
+     • Layer 3  (S_FIRM_PAN)   → FIRM_PAN (map number) + EFF_DATE
+     • Layer 22 (S_POL_AR)     → CID (community number) + POL_NAME1 (community name)
+   Values are only overwritten when the new value is strictly better.
 ─────────────────────────────────────────────────────────────────────────── */
-(function enrichFirmPanel() {
+(function enrichNFHL() {
   var lat = {{ data.lat | float }};
   var lon = {{ data.lon | float }};
-  var NFHL_L3 = 'https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/3/query';
+  var NFHL = 'https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/';
 
-  var queries = [
-    'geometry=' + lon + ',' + lat + '&geometryType=esriGeometryPoint',
-    'geometry=' + (lon-0.003) + ',' + (lat-0.003) + ',' + (lon+0.003) + ',' + (lat+0.003) +
-      '&geometryType=esriGeometryEnvelope',
-  ];
-
-  function applyValues(firmPan, effDate) {
-    var currentPanel = document.getElementById('firmPanelDisplay');
-    var currentDate  = document.getElementById('firmDateDisplay');
-
-    // Only update panel number if new value is longer (more complete)
-    if (firmPan && currentPanel && firmPan.length > currentPanel.textContent.trim().length) {
-      currentPanel.textContent = firmPan;
-      ['certPanelNumber', 'noticePanelNumber'].forEach(function(id) {
-        var el = document.getElementById(id);
-        if (el) el.value = firmPan;
-      });
-    }
-
-    // Only update date if current value is the fallback placeholder
-    var datePlaceholder = 'See FEMA Map Service Center';
-    if (effDate && currentDate && currentDate.textContent.trim() === datePlaceholder) {
-      currentDate.textContent = effDate;
-      ['certPanelDate', 'noticePanelDate'].forEach(function(id) {
-        var el = document.getElementById(id);
-        if (el) el.value = effDate;
-      });
-    }
-  }
+  var pointGeom  = 'geometry=' + lon + ',' + lat + '&geometryType=esriGeometryPoint';
+  var envGeom    = 'geometry=' + (lon-0.003) + ',' + (lat-0.003) + ','
+                 + (lon+0.003) + ',' + (lat+0.003) + '&geometryType=esriGeometryEnvelope';
+  var spatialQS  = '&inSR=4326&spatialRel=esriSpatialRelIntersects&returnGeometry=false&f=json';
 
   function formatDate(ms) {
     if (!ms) return null;
     var d = new Date(ms);
-    var m = (d.getUTCMonth() + 1).toString().padStart('2', '0');
-    var day = d.getUTCDate().toString().padStart('2', '0');
+    var m   = (d.getUTCMonth() + 1).toString().padStart(2, '0');
+    var day = d.getUTCDate().toString().padStart(2, '0');
     return m + '/' + day + '/' + d.getUTCFullYear();
   }
-
   function formatPanel(raw) {
     raw = (raw || '').trim();
     return raw.length >= 7 ? raw.slice(0, 6) + ' ' + raw.slice(6) : raw;
   }
+  function setText(id, val) {
+    var el = document.getElementById(id);
+    if (el && val) el.textContent = val;
+  }
+  function setVal(id, val) {
+    var el = document.getElementById(id);
+    if (el && val) el.value = val;
+  }
 
-  (async function tryQueries() {
-    for (var i = 0; i < queries.length; i++) {
+  async function queryLayer(layerNum, geomQS, outFields, recordCount) {
+    var url = NFHL + layerNum + '/query?' + geomQS + spatialQS
+            + '&outFields=' + outFields + '&resultRecordCount=' + (recordCount || 10);
+    var resp = await fetch(url);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var data = await resp.json();
+    return data.features || [];
+  }
+
+  /* ── Layer 3: FIRM panel + effective date ──────────────────────────────── */
+  (async function enrichL3() {
+    var geoms = [pointGeom, envGeom];
+    for (var i = 0; i < geoms.length; i++) {
       try {
-        var url = NFHL_L3 + '?' + queries[i] +
-          '&inSR=4326&spatialRel=esriSpatialRelIntersects' +
-          '&outFields=FIRM_PAN,EFF_DATE,PANEL_TYP' +
-          '&returnGeometry=false&resultRecordCount=10&f=json';
-        var resp = await fetch(url);
-        if (!resp.ok) continue;
-        var data = await resp.json();
-        var features = data.features || [];
+        var features = await queryLayer(3, geoms[i], 'FIRM_PAN,EFF_DATE,PANEL_TYP', 10);
         if (!features.length) continue;
 
         var attrs = null;
         for (var j = 0; j < features.length; j++) {
           if ((features[j].attributes.PANEL_TYP || '').indexOf('Panel Printed') !== -1) {
-            attrs = features[j].attributes;
-            break;
+            attrs = features[j].attributes; break;
           }
         }
         if (!attrs) attrs = features[0].attributes;
 
         var firmPan = formatPanel(attrs.FIRM_PAN);
         var effDate = formatDate(attrs.EFF_DATE);
-        applyValues(firmPan, effDate);
-        return; // success — stop trying
-      } catch(e) { /* try next query */ }
+
+        // Map number: only update if new value is longer (more complete)
+        var panelEl = document.getElementById('firmPanelDisplay');
+        if (firmPan && panelEl && firmPan.length > panelEl.textContent.trim().length) {
+          setText('firmPanelDisplay', firmPan);
+          setVal('certPanelNumber', firmPan);
+          setVal('noticePanelNumber', firmPan);
+        }
+
+        // Effective date: only update if current is placeholder
+        var dateEl = document.getElementById('firmDateDisplay');
+        if (effDate && dateEl && dateEl.textContent.trim() === 'See FEMA Map Service Center') {
+          setText('firmDateDisplay', effDate);
+          setVal('certPanelDate', effDate);
+          setVal('noticePanelDate', effDate);
+        }
+        return;
+      } catch(e) { /* try next geometry */ }
+    }
+  })();
+
+  /* ── Layer 22: Community ID (CID) + community name ─────────────────────── */
+  (async function enrichL22() {
+    var geoms = [pointGeom, envGeom];
+    for (var i = 0; i < geoms.length; i++) {
+      try {
+        var features = await queryLayer(22, geoms[i], 'CID,POL_NAME1', 5);
+        if (!features.length) continue;
+
+        var attrs = features[0].attributes;
+        var cid     = (attrs.CID       || '').trim();
+        var polName = (attrs.POL_NAME1 || '').trim();
+
+        // CID: only replace if it looks like a proper 6-digit NFIP code
+        if (cid && /^\d{6}$/.test(cid)) {
+          var cidEl = document.getElementById('cidDisplay');
+          // Only update if current value is not already a proper 6-digit CID
+          if (cidEl && !/^\d{6}$/.test(cidEl.textContent.trim())) {
+            setText('cidDisplay', cid);
+            setVal('certCid', cid);
+            setVal('noticeCid', cid);
+          }
+        }
+
+        // Community name: only update if new value is longer / more specific
+        if (polName) {
+          var nameEl = document.getElementById('commNameDisplay');
+          if (nameEl && polName.length > nameEl.textContent.trim().length) {
+            setText('commNameDisplay', polName);
+            setVal('certCommName', polName);
+            setVal('noticeCommName', polName);
+          }
+        }
+        return;
+      } catch(e) { /* try next geometry */ }
     }
   })();
 })();

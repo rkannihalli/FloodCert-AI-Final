@@ -1,1 +1,2 @@
-- [FEMA NFHL server access](fema-nfhl-access.md) — hazards.fema.gov is TLS-blocked on Replit; use Esri Living Atlas instead for server-side flood zone queries.
+- [FEMA NFHL server access](fema-nfhl-access.md) — hazards.fema.gov is network-blocked on Replit (TCP reset, not TLS); Esri Living Atlas works for flood zones; browser JS can reach NFHL Layers 3 & 22.
+- [Flood cert data accuracy fixes](flood-cert-accuracy.md) — root causes and fixes for wrong county prefix, Zone X500, community CID, county name, batch CSV county, and life-of-loan email.

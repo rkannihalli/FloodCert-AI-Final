@@ -1,7 +1,9 @@
 import httpx
 from typing import Optional
 
-CENSUS_GEOCODER_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
+CENSUS_GEO_URL = "https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress"
+CENSUS_LOC_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
+NOMINATIM_URL  = "https://nominatim.openstreetmap.org/search"
 
 ESRI_FLOOD_ZONE_URL = (
     "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services"
@@ -9,8 +11,8 @@ ESRI_FLOOD_ZONE_URL = (
 )
 
 SFHA_ZONES = {"A", "AE", "AH", "AO", "AR", "A99", "V", "VE"}
+NFHL_BASE  = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer"
 
-NFHL_BASE = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer"
 TIGERWEB_COUNTY_URL = (
     "https://tigerweb.geo.census.gov/arcgis/rest/services"
     "/TIGERweb/State_County/MapServer/1/query"
@@ -18,56 +20,130 @@ TIGERWEB_COUNTY_URL = (
 
 
 async def geocode_address(address: str) -> Optional[dict]:
-    """Geocode an address using the US Census Bureau Geocoder."""
-    params = {
-        "address": address,
-        "benchmark": "Public_AR_Current",
-        "format": "json",
-    }
+    """Geocode a US address.
+
+    Strategy:
+    1. Census geographies endpoint → lat/lon + county FIPS + county name.
+    2. Census locations endpoint fallback (no county FIPS).
+    3. Nominatim (OSM) final fallback for addresses the Census geocoder misses.
+    """
+    # ── Attempt 1: Census geographies (county FIPS + county name) ─────────────
     try:
-        async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
-            resp = await client.get(CENSUS_GEOCODER_URL, params=params)
+        params = {
+            "address": address,
+            "benchmark": "Public_AR_Current",
+            "vintage": "Census2020",
+            "layers": "Counties",
+            "format": "json",
+        }
+        async with httpx.AsyncClient(timeout=18.0, verify=False) as client:
+            resp = await client.get(CENSUS_GEO_URL, params=params)
             resp.raise_for_status()
             data = resp.json()
 
-        result = data.get("result", {})
-        address_matches = result.get("addressMatches", [])
-
-        if not address_matches:
-            return None
-
-        match = address_matches[0]
-        coords = match.get("coordinates", {})
-        matched_address = match.get("matchedAddress", address)
-
-        components = match.get("addressComponents", {})
-        city = components.get("city", "").title()
-        state_abbr = components.get("state", "")
-
-        return {
-            "lat": coords.get("y"),
-            "lon": coords.get("x"),
-            "matched_address": matched_address,
-            "city": city,
-            "state_abbr": state_abbr,
-        }
+        matches = data.get("result", {}).get("addressMatches", [])
+        if matches:
+            m = matches[0]
+            coords = m.get("coordinates", {})
+            components = m.get("addressComponents", {})
+            counties = m.get("geographies", {}).get("Counties", [])
+            geoid = counties[0].get("GEOID", "") if counties else ""
+            county_raw = counties[0].get("NAME", "") if counties else ""
+            state_fips  = geoid[:2] if len(geoid) >= 5 else ""
+            county_fips = geoid[2:] if len(geoid) >= 5 else ""
+            return {
+                "lat": coords.get("y"),
+                "lon": coords.get("x"),
+                "matched_address": m.get("matchedAddress", address),
+                "city": components.get("city", "").title(),
+                "state_abbr": components.get("state", ""),
+                "state_fips": state_fips,
+                "county_fips": county_fips,
+                "county_name": county_raw.strip(),
+            }
     except Exception as e:
-        print(f"Geocoding error: {e}")
-        return None
+        print(f"Geocoding (geographies) error: {e}")
+
+    # ── Attempt 2: Census locations endpoint (no county FIPS) ─────────────────
+    try:
+        params = {
+            "address": address,
+            "benchmark": "Public_AR_Current",
+            "format": "json",
+        }
+        async with httpx.AsyncClient(timeout=18.0, verify=False) as client:
+            resp = await client.get(CENSUS_LOC_URL, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+
+        matches = data.get("result", {}).get("addressMatches", [])
+        if matches:
+            m = matches[0]
+            coords = m.get("coordinates", {})
+            components = m.get("addressComponents", {})
+            return {
+                "lat": coords.get("y"),
+                "lon": coords.get("x"),
+                "matched_address": m.get("matchedAddress", address),
+                "city": components.get("city", "").title(),
+                "state_abbr": components.get("state", ""),
+                "state_fips": "",
+                "county_fips": "",
+                "county_name": "",
+            }
+    except Exception as e:
+        print(f"Geocoding (locations) error: {e}")
+
+    # ── Attempt 3: Nominatim / OSM fallback ───────────────────────────────────
+    try:
+        params = {
+            "q": address,
+            "format": "json",
+            "limit": "1",
+            "countrycodes": "us",
+            "addressdetails": "1",
+        }
+        headers = {"User-Agent": "FEMA-FloodCert-Generator/1.0"}
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(NOMINATIM_URL, params=params, headers=headers)
+            resp.raise_for_status()
+            results = resp.json()
+
+        if results:
+            r = results[0]
+            addr_detail = r.get("address", {})
+            city = (
+                addr_detail.get("city")
+                or addr_detail.get("town")
+                or addr_detail.get("village")
+                or ""
+            ).title()
+            state_abbr = addr_detail.get("state_code", "").upper()
+            county_raw = addr_detail.get("county", "").replace(" County", "").strip()
+            display = r.get("display_name", address).split(",")[0].strip()
+            matched = f"{display}, {addr_detail.get('city', '')}, {state_abbr}".strip(", ")
+            return {
+                "lat": float(r["lat"]),
+                "lon": float(r["lon"]),
+                "matched_address": matched,
+                "city": city,
+                "state_abbr": state_abbr,
+                "state_fips": "",
+                "county_fips": "",
+                "county_name": county_raw,
+            }
+    except Exception as e:
+        print(f"Geocoding (Nominatim) error: {e}")
+
+    return None
 
 
 async def query_fema_nfhl(lat: float, lon: float) -> dict:
-    """Query flood zone via Esri Living Atlas USA Flood Hazard layer (server-accessible).
-
-    Uses the Esri public cloud (services.arcgis.com) which hosts FEMA's NFHL data and
-    is reachable from the server — unlike hazards.fema.gov which drops TLS connections.
-
-    Strategy:
-    1. Point query first (precise match).
-    2. ~100m envelope fallback for polygon-boundary gap cases.
-    3. Default to Zone X (minimal hazard, not SFHA) if no data found.
+    """Query flood zone via Esri Living Atlas USA Flood Hazard layer.
 
     Returns FLD_ZONE, ZONE_SUBTY, SFHA_TF, DFIRM_ID — same fields as NFHL Layer 28.
+    The DFIRM_ID here may reflect the wrong county at municipal/county boundaries;
+    use county FIPS from the geocoder to build the correct prefix.
     """
     queries = [
         {
@@ -100,7 +176,6 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
             if not features:
                 continue
 
-            # Prefer any SFHA zone if multiple features returned (most conservative)
             best = None
             for f in features:
                 a = f["attributes"]
@@ -114,19 +189,22 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
             return {
                 "flood_zone": (best.get("FLD_ZONE") or "X").strip(),
                 "zone_subtype": best.get("ZONE_SUBTY") or "",
-                "firm_panel": best.get("DFIRM_ID") or "",
+                "esri_dfirm_id": best.get("DFIRM_ID") or "",
                 "in_sfha": best.get("SFHA_TF", "F") == "T",
             }
         except Exception as e:
             print(f"FEMA flood zone query error ({q['geometryType']}): {e}")
 
-    # Default: Zone X — minimal flood hazard, not in SFHA.
-    # Properties with no NFHL data are generally in unmapped/minimal hazard areas.
-    return {"flood_zone": "X", "in_sfha": False, "zone_subtype": "", "firm_panel": ""}
+    return {"flood_zone": "X", "in_sfha": False, "zone_subtype": "", "esri_dfirm_id": ""}
 
 
 async def query_nfip_community(lat: float, lon: float) -> dict:
-    """Query NFHL Layer 22 (Political Jurisdictions) for NFIP community name and number."""
+    """Query NFHL Layer 22 (Political Jurisdictions) for NFIP community name and CID.
+
+    hazards.fema.gov is network-blocked server-side on Replit (connection reset).
+    We try anyway (in case network rules change); the browser-side JS enrichment
+    fetches this independently from Layer 22 and overrides stale values.
+    """
     params = {
         "geometry": f"{lon},{lat}",
         "geometryType": "esriGeometryPoint",
@@ -137,7 +215,7 @@ async def query_nfip_community(lat: float, lon: float) -> dict:
         "f": "json",
     }
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=12.0, verify=False) as client:
             resp = await client.get(f"{NFHL_BASE}/22/query", params=params)
             resp.raise_for_status()
             data = resp.json()
@@ -150,15 +228,16 @@ async def query_nfip_community(lat: float, lon: float) -> dict:
             "community_name": (attrs.get("POL_NAME1") or "").strip(),
         }
     except Exception as e:
-        print(f"NFIP community query error (Layer 22): {e}")
+        print(f"NFIP community query (Layer 22) error: {e}")
         return {}
 
 
 async def query_firm_panel(lat: float, lon: float) -> dict:
-    """Query NFHL Layer 3 (FIRM Panels) for panel number and effective date.
+    """Query NFHL Layer 3 (FIRM Panels) for full panel number and effective date.
 
-    Tries a precise point query first, then widens to a ~400 m envelope if the
-    point falls on a panel boundary or the server returns no features.
+    hazards.fema.gov is network-blocked server-side on Replit (connection reset).
+    We try anyway; the browser-side JS enrichment is the reliable fallback.
+    Returns the full FIRM_PAN (e.g. "48091C 0215F") and EFF_DATE when reachable.
     """
     queries = [
         {"geometry": f"{lon},{lat}", "geometryType": "esriGeometryPoint"},
@@ -179,14 +258,13 @@ async def query_firm_panel(lat: float, lon: float) -> dict:
             "f": "json",
         }
         try:
-            async with httpx.AsyncClient(timeout=20.0, verify=False) as client:
+            async with httpx.AsyncClient(timeout=12.0, verify=False) as client:
                 resp = await client.get(f"{NFHL_BASE}/3/query", params=params)
                 resp.raise_for_status()
                 data = resp.json()
             features = data.get("features", [])
             if not features:
                 continue
-            # Prefer "Panel Printed" type; fall back to first feature
             attrs = None
             for f in features:
                 if "Panel Printed" in (f["attributes"].get("PANEL_TYP") or ""):
@@ -195,20 +273,19 @@ async def query_firm_panel(lat: float, lon: float) -> dict:
             if attrs is None:
                 attrs = features[0]["attributes"]
             raw = (attrs.get("FIRM_PAN") or "").strip()
-            # Format: "12103C0194H" → "12103C 0194H"
             firm_pan = f"{raw[:6]} {raw[6:]}" if len(raw) >= 7 else raw
             return {
-                "firm_panel": firm_pan or (attrs.get("DFIRM_ID") or ""),
+                "firm_panel_l3": firm_pan or (attrs.get("DFIRM_ID") or ""),
                 "eff_date": attrs.get("EFF_DATE"),
             }
         except Exception as e:
-            print(f"FIRM panel query error (Layer 3, {q['geometryType']}): {e}")
+            print(f"FIRM panel query (Layer 3, {q['geometryType']}) error: {e}")
 
     return {}
 
 
 async def query_county_name(lat: float, lon: float) -> dict:
-    """Query TIGERweb Census county layer for county name from coordinates."""
+    """TIGERweb county name — fallback only; Census geocoder geography is preferred."""
     params = {
         "geometry": f"{lon},{lat}",
         "geometryType": "esriGeometryPoint",
@@ -227,13 +304,13 @@ async def query_county_name(lat: float, lon: float) -> dict:
         if not features:
             return {}
         raw = (features[0]["attributes"].get("NAME") or "").strip()
-        return {"county_name": raw.title() if raw else ""}
+        return {"tigerweb_county": raw.title() if raw else ""}
     except Exception as e:
-        print(f"County name query error (TIGERweb): {e}")
+        print(f"County name query (TIGERweb) error: {e}")
         return {}
 
 
-# State FIPS → (full name, abbreviation) — used to derive state from DFIRM_ID prefix
+# State FIPS → (full name, abbreviation)
 STATE_FIPS: dict[str, tuple[str, str]] = {
     "01": ("Alabama", "AL"), "02": ("Alaska", "AK"), "04": ("Arizona", "AZ"),
     "05": ("Arkansas", "AR"), "06": ("California", "CA"), "08": ("Colorado", "CO"),
@@ -258,13 +335,7 @@ STATE_FIPS: dict[str, tuple[str, str]] = {
 
 
 def nfip_community_info(community_number: str, lat: float = 0.0, lon: float = 0.0) -> dict:
-    """Derive NFIP community context from the stored DFIRM_ID / community number.
-
-    FEMA does not expose a public NFIP community-status API; the authoritative
-    source is the Community Status Book (CSB) published per state.  This function
-    extracts the state from the DFIRM_ID prefix, builds direct links to the
-    relevant FEMA pages, and returns all the structured data the template needs.
-    """
+    """Derive NFIP community context from the stored DFIRM_ID / community number."""
     raw = (community_number or "").strip()
     valid = raw not in ("", "0", "N/A", "Not Available")
 
@@ -305,32 +376,38 @@ FLOOD_ZONE_DESCRIPTIONS = {
     "C": "Minimal Flood Hazard Area — Zone C (outside 500-year floodplain)",
     "D": "Undetermined Flood Hazard — Zone D (possible but undetermined flood hazard)",
     "X": "Minimal Flood Hazard — Zone X (outside 500-year floodplain or protected by levee from 100-year flood)",
-    "X500": "Moderate Flood Hazard — Zone X (0.2% annual chance / 500-year floodplain)",
+    "X500": "Moderate Flood Hazard — Zone X (Shaded) — 0.2% annual chance / 500-year floodplain",
 }
 
 
 def determine_flood_info(merged: dict) -> dict:
-    """Derive flood zone details from a merged dict of all three NFHL layers.
+    """Derive flood zone details from merged NFHL query results.
 
-    Expects the result of: {**zone_data, **community_data, **firm_data}
-    where firm_data (Layer 24) naturally overrides zone_data (Layer 28) for
-    firm_panel and eff_date via standard dict merge precedence.
+    Expects: {**zone_data, **community_data, **firm_data, **county_data, geocoded_city, state_fips, county_fips}
     """
-    flood_zone = merged.get("flood_zone") or "X"
-    zone_subtype = merged.get("zone_subtype") or ""
-    in_sfha = merged.get("in_sfha", False)
-    firm_panel = merged.get("firm_panel") or ""
-    eff_date_raw = merged.get("eff_date")
+    flood_zone      = (merged.get("flood_zone") or "X").strip().upper()
+    zone_subtype    = (merged.get("zone_subtype") or "").strip()
+    in_sfha         = merged.get("in_sfha", False)
+    esri_dfirm      = (merged.get("esri_dfirm_id") or "").strip()
+    firm_panel_l3   = (merged.get("firm_panel_l3") or "").strip()  # from Layer 3 (may be empty)
+    eff_date_raw    = merged.get("eff_date")
+    state_fips      = (merged.get("state_fips") or "").strip()
+    county_fips     = (merged.get("county_fips") or "").strip()
+    community_id    = (merged.get("community_id") or "").strip()
+    community_nm    = (merged.get("community_name") or "").strip()
+    geocoded_city   = (merged.get("geocoded_city") or "").strip()
 
-    flood_zone_upper = flood_zone.upper()
-
-    zone_key = "X500" if (zone_subtype and "0.2" in zone_subtype) else flood_zone_upper
+    # ── Zone designation ──────────────────────────────────────────────────────
+    # Shaded Zone X (0.2% annual chance): stored and displayed as "X500"
+    is_x500 = flood_zone == "X" and bool(zone_subtype and "0.2" in zone_subtype)
+    flood_zone_out = "X500" if is_x500 else flood_zone
+    zone_key = flood_zone_out
     description = FLOOD_ZONE_DESCRIPTIONS.get(
         zone_key,
-        f"Flood Zone {flood_zone} — See FIRM panel for details",
+        f"Flood Zone {flood_zone_out} — See FIRM panel for details",
     )
 
-    sfha_bool = in_sfha if isinstance(in_sfha, bool) else flood_zone_upper in SFHA_ZONES
+    sfha_bool = in_sfha if isinstance(in_sfha, bool) else flood_zone in SFHA_ZONES
     sfha_status = "Yes" if sfha_bool else "No"
     insurance_required = (
         "Yes — Federal mandatory purchase requirement applies"
@@ -338,30 +415,57 @@ def determine_flood_info(merged: dict) -> dict:
         else "No — Flood insurance is not federally required"
     )
 
-    # NFIP Map Number (Community-Panel Number): Layer 3 FIRM_PAN formatted as "240087 0018G"
-    # Falls back to DFIRM_ID from Esri (community prefix only) when Layer 3 is unavailable.
-    community_number = firm_panel if firm_panel else "Not Available"
+    # ── NFIP Map Number (Community-Panel Number) ──────────────────────────────
+    # Priority:
+    # 1. Layer 3 full panel (e.g. "48091C 0215F") — most accurate; has correct DFIRM_ID + suffix
+    # 2. County FIPS from geocoder → construct correct community prefix (e.g. "48091C")
+    # 3. DFIRM_ID from Esri Living Atlas — may reflect wrong county near boundaries
+    # 4. "Not Available"
+    has_full_l3_panel = len(firm_panel_l3.replace(" ", "")) > 6
 
-    # NFIP Community Number: CID from Layer 22 (e.g. "240087")
-    # Falls back to the community prefix derived from firm_panel.
-    community_id_raw = (merged.get("community_id") or "").strip()
-    if not community_id_raw and firm_panel:
-        community_id_raw = firm_panel.split()[0] if " " in firm_panel else firm_panel[:6]
-    panel_number = community_id_raw or "Not Available"
+    if has_full_l3_panel:
+        # Layer 3 returned a real panel number — trust it completely
+        map_number = firm_panel_l3
+    elif state_fips and len(county_fips) == 3:
+        # Construct correct prefix from Census geocoder county FIPS
+        # Note: the panel suffix (e.g. "0215F") requires Layer 3;
+        # without it we show just the community prefix and let JS enrich the suffix.
+        map_number = f"{state_fips}{county_fips}C"
+    elif esri_dfirm:
+        map_number = esri_dfirm[:6] if len(esri_dfirm) >= 6 else esri_dfirm
+    else:
+        map_number = "Not Available"
 
-    # NFIP Community Name: Layer 22 POL_NAME1 → geocoded city → Not Available
-    geocoded_city = (merged.get("geocoded_city") or "").strip()
-    community_name = (
-        (merged.get("community_name") or "").strip()
-        or geocoded_city
-        or "Not Available"
-    )
+    # ── NFIP Community Number (CID) ───────────────────────────────────────────
+    # Priority:
+    # 1. CID from Layer 22 — the authoritative NFIP-assigned 6-digit community ID
+    # 2. County FIPS-derived approximation for county jurisdiction (state + county FIPS padded)
+    #    Note: for incorporated cities this will be the county CID, not the city CID;
+    #    the client-side JS Layer 22 enrichment provides the correct municipal CID.
+    # 3. "Not Available"
+    if community_id:
+        panel_number = community_id
+    elif state_fips and len(county_fips) == 3:
+        # County-level NFIP CID approximation: state(2) + county(3) + "0" = 6 digits
+        # This is a best-effort value for county jurisdictions; municipal CIDs differ.
+        panel_number = f"{state_fips}{county_fips}0"
+    elif map_number and map_number != "Not Available":
+        # Fall back to map number prefix (first 5-6 chars)
+        panel_number = map_number.replace(" ", "")[:6]
+    else:
+        panel_number = "Not Available"
 
-    # County: TIGERweb census county layer
-    county = (merged.get("county_name") or "").strip()
+    # ── NFIP Community Name ───────────────────────────────────────────────────
+    # Priority: Layer 22 POL_NAME1 → geocoded city → "Not Available"
+    community_name_out = community_nm or geocoded_city or "Not Available"
 
-    # NFIP Map Panel Effective/Revised Date: EFF_DATE from Layer 3 (Unix ms timestamp).
-    # Formatted as MM/DD/YYYY per FEMA SFHDF standard.
+    # ── County name ───────────────────────────────────────────────────────────
+    # Priority: Census geocoder geography → TIGERweb fallback
+    county_name = (merged.get("county_name") or "").strip()  # from geocoder geography
+    if not county_name:
+        county_name = (merged.get("tigerweb_county") or "").strip()
+
+    # ── NFIP Map Panel Effective/Revised Date ─────────────────────────────────
     if isinstance(eff_date_raw, str) and eff_date_raw:
         panel_effective_date = eff_date_raw
     elif isinstance(eff_date_raw, (int, float)) and eff_date_raw > 0:
@@ -373,13 +477,13 @@ def determine_flood_info(merged: dict) -> dict:
         panel_effective_date = "See FEMA Map Service Center"
 
     return {
-        "flood_zone": flood_zone,
+        "flood_zone": flood_zone_out,
         "flood_zone_description": description,
         "sfha_status": sfha_status,
         "insurance_required": insurance_required,
-        "panel_number": panel_number,
+        "panel_number": panel_number,          # NFIP Community Number (CID)
         "panel_effective_date": panel_effective_date,
-        "community_number": community_number,
-        "community_name": community_name,
-        "county": county,
+        "community_number": map_number,        # NFIP Map Number (Community-Panel Number)
+        "community_name": community_name_out,
+        "county": county_name,
     }
