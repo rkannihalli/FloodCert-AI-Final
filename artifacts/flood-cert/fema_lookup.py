@@ -116,6 +116,53 @@ TIGERWEB_COUNTY_URL = (
 )
 
 
+def _geocode_plausible(input_address: str, matched_address: str) -> bool:
+    """Return False when matched_address is clearly wrong for input_address.
+
+    Requires that BOTH the house number AND the primary street name from
+    input_address appear in matched_address.  If either is absent the geocoder
+    found an unrelated location and the result must be discarded.
+
+    Example failure (both signals missing → reject):
+      input:   "4248 Duck Dr, Ann Arbor, MI 48103"
+      matched: "Oak Valley Drive, Pittsfield Charter Township, MI 48103"
+               ↳ "4248" absent  AND  "DUCK" absent → False
+    """
+    if not matched_address:
+        return True  # nothing to compare; pass through
+
+    inp = input_address.upper()
+    mat = matched_address.upper()
+
+    # ── House number ──────────────────────────────────────────────────────────
+    num_m = re.match(r"\s*(\d+)", inp)
+    house_num = num_m.group(1) if num_m else ""
+
+    # ── Primary street word ───────────────────────────────────────────────────
+    # Strip leading house number, then pick the first word that isn't a suffix.
+    street_part = re.sub(r"^\s*\d+\s*", "", inp.split(",")[0])
+    _STOP = {
+        "DR", "ST", "AVE", "BLVD", "RD", "LN", "CT", "CIR", "PL", "WAY",
+        "TER", "TRL", "PKWY", "HWY", "DRIVE", "STREET", "AVENUE",
+        "BOULEVARD", "ROAD", "LANE", "COURT", "CIRCLE", "PLACE",
+        "TERRACE", "TRAIL", "PARKWAY", "HIGHWAY", "UNIT", "APT", "STE",
+    }
+    sig_words = [w for w in re.findall(r"\b[A-Z]{2,}\b", street_part) if w not in _STOP]
+    primary_word = sig_words[0] if sig_words else ""
+
+    house_ok  = bool(house_num)    and house_num    in mat
+    street_ok = bool(primary_word) and primary_word in mat
+
+    # Both signals absent → almost certainly the wrong location
+    return house_ok or street_ok
+
+
+# Photon OSM keys that represent actual buildings or streets.
+# Keys like "amenity", "shop", "leisure", "tourism" are POIs (bus stops,
+# pharmacies, golf courses, etc.) and must never be used as geocoding results.
+_PHOTON_OK_KEYS = frozenset({"building", "highway", "place", "addr"})
+
+
 async def geocode_address(address: str) -> Optional[dict]:
     """Geocode a US address to lat/lon + county FIPS.
 
@@ -158,7 +205,7 @@ async def geocode_address(address: str) -> Optional[dict]:
             county_raw = counties[0].get("NAME", "") if counties else ""
             state_fips  = geoid[:2] if len(geoid) >= 5 else ""
             county_fips = geoid[2:] if len(geoid) >= 5 else ""
-            return {
+            result = {
                 "lat": coords.get("y"),
                 "lon": coords.get("x"),
                 "matched_address": m.get("matchedAddress", address),
@@ -168,6 +215,9 @@ async def geocode_address(address: str) -> Optional[dict]:
                 "county_fips": county_fips,
                 "county_name": county_raw.strip(),
             }
+            if _geocode_plausible(geocode_q, result["matched_address"]):
+                return result
+            print(f"Geocoding (geographies) plausibility rejected: {result['matched_address']!r}")
     except Exception as e:
         print(f"Geocoding (geographies) error: {e}")
 
@@ -188,7 +238,7 @@ async def geocode_address(address: str) -> Optional[dict]:
             m = matches[0]
             coords = m.get("coordinates", {})
             components = m.get("addressComponents", {})
-            return {
+            result = {
                 "lat": coords.get("y"),
                 "lon": coords.get("x"),
                 "matched_address": m.get("matchedAddress", address),
@@ -198,12 +248,21 @@ async def geocode_address(address: str) -> Optional[dict]:
                 "county_fips": "",
                 "county_name": "",
             }
+            if _geocode_plausible(geocode_q, result["matched_address"]):
+                return result
+            print(f"Geocoding (locations) plausibility rejected: {result['matched_address']!r}")
     except Exception as e:
         print(f"Geocoding (locations) error: {e}")
 
     # ── Attempt 3: Photon — OSM building-polygon centroids (rooftop precision) ─
     # Free public API, no key required.  Returns building-level OSM objects
     # rather than interpolated street points, fixing zone boundary edge cases.
+    #
+    # IMPORTANT: Photon results include POIs (bus stops, pharmacies, golf
+    # courses) that share the same ZIP or neighbourhood as the target.  Only
+    # accept results whose osm_key indicates a building, street, or place;
+    # never a POI.  Additionally validate the matched address with
+    # _geocode_plausible() before returning.
     try:
         params = {
             "q": geocode_q,
@@ -218,15 +277,21 @@ async def geocode_address(address: str) -> Optional[dict]:
             data = resp.json()
 
         features = data.get("features", [])
-        # Prefer building/house-level results over road interpolations
+        # 1st pass: prefer rooftop building results
         best = None
         for f in features:
             osm_value = (f.get("properties", {}).get("osm_value") or "").lower()
-            if osm_value in ("house", "residential", "detached", "apartments"):
+            if osm_value in ("house", "residential", "detached", "apartments",
+                             "yes", "building", "terrace", "semi", "bungalow"):
                 best = f
                 break
-        if best is None and features:
-            best = features[0]
+        # 2nd pass: fall back to street/road — but NEVER to POI types
+        if best is None:
+            for f in features:
+                osm_key = (f.get("properties", {}).get("osm_key") or "").lower()
+                if osm_key in _PHOTON_OK_KEYS:
+                    best = f
+                    break
 
         if best:
             props = best.get("properties", {})
@@ -243,7 +308,7 @@ async def geocode_address(address: str) -> Optional[dict]:
                 st = props.get("street", "")
                 pc = props.get("postcode", "")
                 matched_p = f"{hn} {st}, {city_p}, {state_abbr_p} {pc}".strip(", ")
-                return {
+                result = {
                     "lat": lat_p,
                     "lon": lon_p,
                     "matched_address": matched_p or address,
@@ -253,6 +318,10 @@ async def geocode_address(address: str) -> Optional[dict]:
                     "county_fips": "",
                     "county_name": county_p,
                 }
+                if _geocode_plausible(geocode_q, result["matched_address"]):
+                    return result
+                print(f"Geocoding (Photon) plausibility rejected: {result['matched_address']!r} "
+                      f"(osm_key={props.get('osm_key')}, osm_value={props.get('osm_value')})")
     except Exception as e:
         print(f"Geocoding (Photon) error: {e}")
 
@@ -284,7 +353,7 @@ async def geocode_address(address: str) -> Optional[dict]:
             county_raw = addr_detail.get("county", "").replace(" County", "").strip()
             display = r.get("display_name", address).split(",")[0].strip()
             matched = f"{display}, {addr_detail.get('city', '')}, {state_abbr}".strip(", ")
-            return {
+            result = {
                 "lat": float(r["lat"]),
                 "lon": float(r["lon"]),
                 "matched_address": matched,
@@ -294,6 +363,9 @@ async def geocode_address(address: str) -> Optional[dict]:
                 "county_fips": "",
                 "county_name": county_raw,
             }
+            if _geocode_plausible(geocode_q, result["matched_address"]):
+                return result
+            print(f"Geocoding (Nominatim) plausibility rejected: {result['matched_address']!r}")
     except Exception as e:
         print(f"Geocoding (Nominatim) error: {e}")
 
@@ -327,7 +399,7 @@ async def geocode_address(address: str) -> Optional[dict]:
                 county_raw = addr_detail.get("county", "").replace(" County", "").strip()
                 display = r.get("display_name", address).split(",")[0].strip()
                 matched = f"{display}, {addr_detail.get('city', '')}, {state_abbr}".strip(", ")
-                return {
+                result = {
                     "lat": float(r["lat"]),
                     "lon": float(r["lon"]),
                     "matched_address": matched,
@@ -337,6 +409,10 @@ async def geocode_address(address: str) -> Optional[dict]:
                     "county_fips": "",
                     "county_name": county_raw,
                 }
+                if _geocode_plausible(geocode_q, result["matched_address"]):
+                    return result
+                print(f"Geocoding (Nominatim normalized) plausibility rejected: "
+                      f"{result['matched_address']!r}")
         except Exception as e:
             print(f"Geocoding (Nominatim normalized) error: {e}")
 
