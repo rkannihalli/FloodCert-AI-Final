@@ -53,6 +53,17 @@ except ImportError:
     _SCHEDULER_AVAILABLE = False
     _scheduler = None
 
+def _cert_filename(flood_zone: str, property_address: str) -> str:
+    """Build a clean PDF filename: Flood Cert - {zone} - {address}.pdf"""
+    zone = (flood_zone or "Unknown").strip()
+    addr = (property_address or "Unknown").strip()
+    addr_clean = re.sub(r'[\\/:*?"<>|]', "", addr)
+    addr_clean = re.sub(r"\s+", " ", addr_clean).strip()
+    if len(addr_clean) > 80:
+        addr_clean = addr_clean[:80].rstrip()
+    return f"Flood Cert - {zone} - {addr_clean}.pdf"
+
+
 US_STATES = {
     "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA",
     "HI","ID","IL","IN","IA","KS","KY","LA","ME","MD",
@@ -904,7 +915,7 @@ async def download_certificate(
     data = dict(locals())
     data["map_image_b64"] = await generate_map_image(float(lat), float(lon))
     pdf_bytes = generate_flood_certificate_pdf(data)
-    filename = f"flood_certificate_{loan_id}.pdf".replace(" ", "_")
+    filename = _cert_filename(flood_zone, property_address)
     return Response(content=pdf_bytes, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
@@ -1106,7 +1117,7 @@ async def history_download_certificate(record_id: int):
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
     pdf_bytes = generate_flood_certificate_pdf(record)
-    filename = f"flood_certificate_{record['loan_id']}.pdf".replace(" ", "_")
+    filename = _cert_filename(record.get("flood_zone", ""), record.get("property_address", ""))
     return Response(content=pdf_bytes, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
