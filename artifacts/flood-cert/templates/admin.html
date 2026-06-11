@@ -271,7 +271,7 @@
                   {% endif %}
                   {% if not u.is_admin %}
                   <form method="POST" action="/admin/users/{{ u.id }}/delete"
-                        onsubmit="return confirm('Permanently delete user {{ u.display_name | replace(\"'\",\"\\'\")|replace('\"','&quot;') }}?')">
+                        onsubmit="return confirm('Permanently delete user ' + {{ u.display_name | tojson }} + '?')">
                     <button class="btn-sm btn-delete">Delete</button>
                   </form>
                   {% endif %}
@@ -552,7 +552,7 @@
                     <button class="btn-sm btn-reject">Deactivate</button>
                   </form>
                   <form method="POST" action="/admin/users/{{ u.id }}/delete"
-                        onsubmit="return confirm('Permanently delete user {{ u.display_name | replace(\"'\",\"\\'\")|replace('\"','&quot;') }}?')">
+                        onsubmit="return confirm('Permanently delete user ' + {{ u.display_name | tojson }} + '?')">
                     <button class="btn-sm btn-delete">Delete</button>
                   </form>
                 </div>
@@ -590,7 +590,7 @@
                   <button class="btn-sm btn-activate">Re-activate</button>
                 </form>
                 <form method="POST" action="/admin/users/{{ u.id }}/delete"
-                      onsubmit="return confirm('Permanently delete {{ u.display_name | replace(\"'\",\"\\'\")|replace('\"','&quot;') }}?')">
+                      onsubmit="return confirm('Permanently delete ' + {{ u.display_name | tojson }} + '?')">
                   <button class="btn-sm btn-delete">Delete</button>
                 </form>
               </div>
