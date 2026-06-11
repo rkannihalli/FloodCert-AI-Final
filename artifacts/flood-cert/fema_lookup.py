@@ -2,8 +2,12 @@ import re
 import httpx
 from typing import Optional
 
-CENSUS_GEO_URL = "https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress"
-CENSUS_LOC_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
+CENSUS_GEO_URL  = "https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress"
+CENSUS_LOC_URL  = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
+ARCGIS_GEO_URL  = (
+    "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer"
+    "/findAddressCandidates"
+)
 NOMINATIM_URL  = "https://nominatim.openstreetmap.org/search"
 PHOTON_URL     = "https://photon.komoot.io/api/"
 
@@ -254,7 +258,56 @@ async def geocode_address(address: str) -> Optional[dict]:
     except Exception as e:
         print(f"Geocoding (locations) error: {e}")
 
-    # ── Attempt 3: Photon — OSM building-polygon centroids (rooftop precision) ─
+    # ── Attempt 3: ArcGIS World Geocoder (free, no API key, score-gated) ────────
+    # Covers addresses that Census TIGER and OSM both miss — private roads,
+    # new developments, township addresses where the mailing city ≠ jurisdiction.
+    # "forStorage=false" keeps it free per Esri's terms.
+    # Only accept candidates with score ≥ 85 and a rooftop-level addr_type.
+    try:
+        params = {
+            "SingleLine": geocode_q,
+            "f": "json",
+            "outFields": "Addr_type,Match_addr,RegionAbbr,Subregion,City",
+            "maxLocations": "3",
+            "forStorage": "false",
+        }
+        headers = {"User-Agent": "FEMA-FloodCert-Generator/1.0"}
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(ARCGIS_GEO_URL, params=params, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+
+        _ARCGIS_PRECISE = {"PointAddress", "Subaddress", "BuildingName", "StreetAddress"}
+        best_a = None
+        for c in data.get("candidates", []):
+            score     = c.get("score", 0)
+            addr_type = (c.get("attributes") or {}).get("Addr_type", "")
+            if score >= 85 and addr_type in _ARCGIS_PRECISE:
+                best_a = c
+                break
+
+        if best_a:
+            loc      = best_a.get("location", {})
+            lat_a    = float(loc.get("y", 0))
+            lon_a    = float(loc.get("x", 0))
+            attrs_a  = best_a.get("attributes") or {}
+            result = {
+                "lat": lat_a,
+                "lon": lon_a,
+                "matched_address": best_a.get("address", geocode_q),
+                "city": (attrs_a.get("City") or "").title(),
+                "state_abbr": (attrs_a.get("RegionAbbr") or "").upper(),
+                "state_fips": "",
+                "county_fips": "",
+                "county_name": (attrs_a.get("Subregion") or "").replace(" County", "").strip(),
+            }
+            if _geocode_plausible(geocode_q, result["matched_address"]):
+                return result
+            print(f"Geocoding (ArcGIS) plausibility rejected: {result['matched_address']!r}")
+    except Exception as e:
+        print(f"Geocoding (ArcGIS) error: {e}")
+
+    # ── Attempt 4: Photon — OSM building-polygon centroids (rooftop precision) ─
     # Free public API, no key required.  Returns building-level OSM objects
     # rather than interpolated street points, fixing zone boundary edge cases.
     #
