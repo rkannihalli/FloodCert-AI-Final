@@ -191,6 +191,9 @@
     <button class="tab-btn {% if tab == 'users' %}active{% endif %}" onclick="goTab('users')">
       👥 User Management
     </button>
+    <button class="tab-btn {% if tab == 'test' %}active{% endif %}" onclick="goTab('test')">
+      🧪 Live Test
+    </button>
   </div>
 
   <!-- ═══════════════════════════════════════════════════════
@@ -638,6 +641,66 @@
     </div>
   </div>
 
+  <!-- ═══════════════════════════════════════════════════════
+       TAB 5: LIVE TEST
+       ═══════════════════════════════════════════════════════ -->
+  <div id="pane-test" class="tab-pane" style="{{ 'display:block' if tab == 'test' else 'display:none' }}">
+
+    <div class="admin-section">
+      <div class="section-hdr" style="justify-content:space-between;">
+        <span>🧪 Live Geocoding &amp; NFHL Test</span>
+        <button id="runAllBtn" onclick="runAllTests()"
+          style="background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.4);
+                 border-radius:5px;padding:5px 13px;font-size:.75rem;font-weight:600;cursor:pointer;">
+          ▶ Run All
+        </button>
+      </div>
+
+      <div style="padding:12px 16px 4px;font-size:.82rem;color:#5a6470;line-height:1.6;">
+        Runs each address through the full server-side pipeline (geocoding → NFHL → panel).
+        No certificate is generated and nothing is saved.
+        Panel &amp; Community fields may be blank when <code>hazards.fema.gov</code> is network-blocked;
+        those are filled by browser JS on the real certificate page.
+      </div>
+
+      <table class="admin-table" id="testTable">
+        <thead>
+          <tr>
+            <th style="width:28%">Address</th>
+            <th style="width:8%">Action</th>
+            <th style="width:10%">Status</th>
+            <th style="width:20%">Geocoded Match</th>
+            <th style="width:8%">Lat / Lon</th>
+            <th style="width:8%">Zone</th>
+            <th style="width:9%">Panel</th>
+            <th style="width:9%">Community</th>
+          </tr>
+        </thead>
+        <tbody id="testRows">
+          <!-- rows injected by JS -->
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Custom address tester -->
+    <div class="admin-section">
+      <div class="section-hdr">🔍 Test Any Address</div>
+      <div style="padding:14px 16px;display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;">
+        <input id="customAddr" type="text" placeholder="123 Main St, City, ST 00000"
+          style="flex:1;min-width:260px;padding:9px 12px;border:1px solid #d0d5dd;
+                 border-radius:6px;font-size:.88rem;outline:none;"
+          onkeydown="if(event.key==='Enter') runCustomTest()" />
+        <button onclick="runCustomTest()"
+          style="background:var(--navy);color:#fff;border:none;border-radius:6px;
+                 padding:9px 18px;font-size:.85rem;font-weight:600;cursor:pointer;white-space:nowrap;">
+          Test Address
+        </button>
+      </div>
+      <div id="customResult" style="padding:0 16px 16px;display:none;"></div>
+    </div>
+
+  </div>
+
 </div><!-- /.admin-wrap -->
 
 <script>
@@ -676,6 +739,149 @@ function confirmBulkDelete() {
   if (count === 0) { alert('No records selected.'); return false; }
   return confirm('Are you sure you want to permanently delete ' + count + ' record(s)? This cannot be undone.');
 }
+
+/* ── Live Test ─────────────────────────────────────────────────────────── */
+const TEST_CASES = [
+  { address: '4248 Duck Dr, Ann Arbor, MI 48103',           note: 'Problematic: geocoders return wrong street → expect UNDETERMINED' },
+  { address: '301 Satinwood Drive, Santa Rosa Beach, FL 32459', note: 'Coastal FL — expect Zone AE or X' },
+  { address: '500 Canal St, New Orleans, LA 70130',          note: 'NOLA downtown — expect SFHA (AE)' },
+  { address: '200 E Colfax Ave, Denver, CO 80203',           note: 'Denver state capitol — expect Zone X' },
+  { address: '1600 Pennsylvania Ave NW, Washington DC 20500', note: 'White House — geocoding sanity check' },
+];
+
+function buildTestRows() {
+  const tbody = document.getElementById('testRows');
+  if (!tbody) return;
+  tbody.innerHTML = TEST_CASES.map((tc, i) => `
+    <tr id="tr-${i}">
+      <td style="font-size:.82rem;font-weight:600;">${tc.address}<br/>
+        <span style="font-weight:400;color:#9aa3ad;font-size:.75rem;">${tc.note}</span></td>
+      <td><button class="btn-sm btn-approve" onclick="runTest(${i})" id="btn-${i}">▶ Run</button></td>
+      <td id="st-${i}"><span style="color:#9aa3ad;font-size:.78rem;">—</span></td>
+      <td id="geo-${i}" style="font-size:.78rem;color:#5a6470;">—</td>
+      <td id="ll-${i}"  style="font-size:.78rem;color:#5a6470;">—</td>
+      <td id="zone-${i}">—</td>
+      <td id="pan-${i}" style="font-size:.78rem;">—</td>
+      <td id="com-${i}" style="font-size:.78rem;">—</td>
+    </tr>`).join('');
+}
+
+async function runTest(i) {
+  const tc  = TEST_CASES[i];
+  const btn = document.getElementById(`btn-${i}`);
+  setCell(`st-${i}`,   '<span style="color:#9aa3ad;">⏳ running…</span>');
+  setCell(`geo-${i}`,  '—'); setCell(`ll-${i}`, '—');
+  setCell(`zone-${i}`, '—'); setCell(`pan-${i}`, '—'); setCell(`com-${i}`, '—');
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+
+  try {
+    const res  = await fetch('/admin/live-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address: tc.address }),
+    });
+    const data = await res.json();
+    renderTestResult(i, data);
+  } catch (e) {
+    setCell(`st-${i}`, '<span style="color:var(--red);">⚠ fetch error</span>');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '▶ Run'; }
+  }
+}
+
+async function runAllTests() {
+  const btn = document.getElementById('runAllBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Running…'; }
+  await Promise.all(TEST_CASES.map((_, i) => runTest(i)));
+  if (btn) { btn.disabled = false; btn.textContent = '▶ Run All'; }
+}
+
+async function runCustomTest() {
+  const input  = document.getElementById('customAddr');
+  const output = document.getElementById('customResult');
+  const addr   = (input?.value || '').trim();
+  if (!addr) { input?.focus(); return; }
+
+  output.style.display = 'block';
+  output.innerHTML = '<span style="color:#9aa3ad;font-size:.83rem;">⏳ Running test…</span>';
+
+  try {
+    const res  = await fetch('/admin/live-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address: addr }),
+    });
+    const data = await res.json();
+    output.innerHTML = renderResultCard(data);
+  } catch (e) {
+    output.innerHTML = `<span style="color:var(--red);font-size:.83rem;">⚠ ${e.message}</span>`;
+  }
+}
+
+function renderTestResult(i, d) {
+  if (d.status === 'undetermined') {
+    setCell(`st-${i}`, '<span style="background:#fff3cd;color:#856404;padding:2px 7px;border-radius:4px;font-size:.75rem;font-weight:700;">UNDETERMINED</span>');
+    setCell(`geo-${i}`, `<span style="color:#856404;font-size:.77rem;">${d.note || 'Geocoding failed'}</span>`);
+  } else if (d.status === 'error') {
+    setCell(`st-${i}`, '<span style="background:#fde8e8;color:var(--red);padding:2px 7px;border-radius:4px;font-size:.75rem;font-weight:700;">ERROR</span>');
+    setCell(`geo-${i}`, `<span style="color:var(--red);font-size:.77rem;">${d.error || ''}</span>`);
+  } else {
+    const sfha  = d.in_sfha;
+    const badge = sfha
+      ? '<span style="background:#fde8e8;color:var(--red);padding:2px 7px;border-radius:4px;font-size:.73rem;font-weight:700;">SFHA</span>'
+      : '<span style="background:#e8f5e9;color:#2e7d32;padding:2px 7px;border-radius:4px;font-size:.73rem;font-weight:700;">Non-SFHA</span>';
+    setCell(`st-${i}`, badge);
+    setCell(`geo-${i}`, d.geocoded_address || '—');
+    setCell(`ll-${i}`,  d.lat && d.lon ? `${d.lat},<br/>${d.lon}` : '—');
+    const zColor = sfha ? 'color:var(--red);font-weight:700;' : 'color:var(--green);font-weight:700;';
+    setCell(`zone-${i}`, `<span style="${zColor}">${d.flood_zone || '—'}</span>`);
+    setCell(`pan-${i}`,  d.firm_panel   || '<span style="color:#9aa3ad">—</span>');
+    setCell(`com-${i}`,  d.community_id ? `${d.community_id}<br/><span style="color:#9aa3ad;font-size:.72rem;">${d.community_name || ''}</span>` : '<span style="color:#9aa3ad">—</span>');
+  }
+}
+
+function renderResultCard(d) {
+  if (d.status === 'undetermined') {
+    return `<div style="background:#fff3cd;border-radius:6px;padding:12px 16px;font-size:.83rem;color:#856404;">
+      <strong>UNDETERMINED</strong> — ${d.note || 'Geocoding returned no plausible match.'}
+    </div>`;
+  }
+  if (d.status === 'error') {
+    return `<div style="background:#fde8e8;border-radius:6px;padding:12px 16px;font-size:.83rem;color:var(--red);">
+      <strong>ERROR</strong> — ${d.error || 'Unknown error'}
+    </div>`;
+  }
+  const sfha  = d.in_sfha;
+  const color = sfha ? 'var(--red)' : 'var(--green)';
+  const rows  = [
+    ['Geocoded address', d.geocoded_address || '—'],
+    ['Coordinates',      d.lat ? `${d.lat}, ${d.lon}` : '—'],
+    ['County',           d.county || '—'],
+    ['Flood Zone',       `<strong style="color:${color}">${d.flood_zone || '—'}</strong> — ${d.zone_label || ''}`],
+    ['SFHA',             sfha ? '<strong style="color:var(--red)">Yes</strong>' : '<strong style="color:var(--green)">No</strong>'],
+    ['FIRM Panel',       d.firm_panel    || '—'],
+    ['Community (CID)',  d.community_id  ? `${d.community_id} — ${d.community_name || ''}` : '—'],
+    ['Zone Subtype',     d.zone_subtype  || '—'],
+  ];
+  return `<div style="background:#f5f7fa;border-radius:6px;padding:12px 16px;font-size:.83rem;">
+    <table style="width:100%;border-collapse:collapse;">
+      ${rows.map(([k,v]) => `<tr>
+        <td style="padding:4px 12px 4px 0;color:#5a6470;white-space:nowrap;vertical-align:top;font-size:.78rem;">${k}</td>
+        <td style="padding:4px 0;">${v}</td>
+      </tr>`).join('')}
+    </table>
+  </div>`;
+}
+
+function setCell(id, html) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = html;
+}
+
+// Build test rows when page loads and the test tab is active
+document.addEventListener('DOMContentLoaded', () => {
+  buildTestRows();
+});
 </script>
 </body>
 </html>

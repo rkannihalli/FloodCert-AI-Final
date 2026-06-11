@@ -724,6 +724,64 @@ async def admin_run_lol_check(request: Request):
     return RedirectResponse("/admin?tab=lol", status_code=303)
 
 
+@app.post("/admin/live-test")
+async def admin_live_test(request: Request):
+    """Run a single address through the full geocoding + NFHL pipeline.
+
+    Used by the admin Live Test panel to verify the stack end-to-end before
+    publishing.  Returns JSON — never saves to the DB.
+    """
+    _require_admin(request)
+    body = await request.json()
+    address = (body.get("address") or "").strip()
+    if not address:
+        return JSONResponse({"error": "address required"}, status_code=400)
+
+    try:
+        geo = await geocode_address(address)
+        if not geo:
+            return JSONResponse({
+                "address": address,
+                "status": "undetermined",
+                "note": "All geocoders failed or returned implausible results for this address.",
+            })
+
+        lat, lon = float(geo["lat"]), float(geo["lon"])
+
+        nfhl, panel_data, community_data = await asyncio.gather(
+            query_fema_nfhl(lat, lon),
+            query_firm_panel(lat, lon),
+            query_nfip_community(lat, lon),
+        )
+
+        from fema_lookup import _classify_x_zone, ZONE_DISPLAY_NAMES
+        raw_zone = (nfhl.get("flood_zone") or "X").upper().strip()
+        sub = nfhl.get("zone_subtype") or ""
+        flood_zone = _classify_x_zone(raw_zone, sub) if raw_zone == "X" else raw_zone
+
+        return JSONResponse({
+            "address": address,
+            "status": "ok",
+            "geocoded_address": geo.get("matched_address", ""),
+            "lat": round(lat, 5),
+            "lon": round(lon, 5),
+            "county": geo.get("county_name", ""),
+            "flood_zone": flood_zone,
+            "zone_label": ZONE_DISPLAY_NAMES.get(flood_zone, flood_zone),
+            "in_sfha": nfhl.get("in_sfha", False),
+            "zone_subtype": sub,
+            "firm_panel": panel_data.get("firm_panel_l3", ""),
+            "eff_date": panel_data.get("eff_date", ""),
+            "community_id": community_data.get("community_id", ""),
+            "community_name": community_data.get("community_name", ""),
+        })
+    except Exception as exc:
+        return JSONResponse(
+            {"address": address, "status": "error", "error": str(exc)},
+            status_code=500,
+        )
+
+
 # ── App routes ────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
