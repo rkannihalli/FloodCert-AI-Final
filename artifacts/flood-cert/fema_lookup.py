@@ -1,9 +1,28 @@
+import re
 import httpx
 from typing import Optional
 
 CENSUS_GEO_URL = "https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress"
 CENSUS_LOC_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
 NOMINATIM_URL  = "https://nominatim.openstreetmap.org/search"
+PHOTON_URL     = "https://photon.komoot.io/api/"
+
+# Strip subdivision lot / parcel designations before geocoding.
+# Geocoders can't resolve "Lot 1" / "Parcel 3B" and fall back to street-level
+# interpolation, placing the point 30–100 m from the actual structure.
+# Only strip Lot/Parcel/Tract — NOT Unit/Apt/Suite which are legitimate address parts.
+_LOT_PATTERN = re.compile(
+    r",?\s+(?:Lot|Parcel|Tract)\s*[\w-]+\b",
+    re.IGNORECASE,
+)
+
+# Street-type suffixes to strip when retrying Nominatim with a simplified address.
+_STREET_TYPE_RE = re.compile(
+    r"\b(Drive|Dr|Street|St|Avenue|Ave|Boulevard|Blvd|Road|Rd|Lane|Ln|"
+    r"Court|Ct|Circle|Cir|Place|Pl|Way|Terrace|Ter|Trail|Trl|"
+    r"Parkway|Pkwy|Highway|Hwy)\b\.?",
+    re.IGNORECASE,
+)
 
 ESRI_FLOOD_ZONE_URL = (
     "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services"
@@ -89,17 +108,27 @@ TIGERWEB_COUNTY_URL = (
 
 
 async def geocode_address(address: str) -> Optional[dict]:
-    """Geocode a US address.
+    """Geocode a US address to lat/lon + county FIPS.
 
-    Strategy:
-    1. Census geographies endpoint → lat/lon + county FIPS + county name.
-    2. Census locations endpoint fallback (no county FIPS).
-    3. Nominatim (OSM) final fallback for addresses the Census geocoder misses.
+    Pre-processing: strips subdivision lot designations (Lot 1, Parcel 3B, Tract A)
+    which geocoders cannot resolve and which cause street-level interpolation,
+    placing the point 30–100 m from the actual structure.
+
+    Fallback chain (most → least authoritative):
+    1. Census geographies — lat/lon + county FIPS + county name (most authoritative)
+    2. Census locations  — lat/lon only (no FIPS)
+    3. Photon (komoot)  — OSM building polygon centroids; rooftop-level precision; free, no key
+    4. Nominatim (OSM)  — street-level interpolation fallback
+    5. Nominatim (stripped street type) — last resort for unusual street names
     """
+    # ── Pre-processing: strip lot/parcel designations that confuse geocoders ──
+    # "301 Satinwood Drive Lot 1, City, FL" → "301 Satinwood Drive, City, FL"
+    geocode_q = re.sub(r"\s{2,}", " ", _LOT_PATTERN.sub("", address)).strip()
+
     # ── Attempt 1: Census geographies (county FIPS + county name) ─────────────
     try:
         params = {
-            "address": address,
+            "address": geocode_q,
             "benchmark": "Public_AR_Current",
             "vintage": "Census2020",
             "layers": "Counties",
@@ -136,7 +165,7 @@ async def geocode_address(address: str) -> Optional[dict]:
     # ── Attempt 2: Census locations endpoint (no county FIPS) ─────────────────
     try:
         params = {
-            "address": address,
+            "address": geocode_q,
             "benchmark": "Public_AR_Current",
             "format": "json",
         }
@@ -163,10 +192,65 @@ async def geocode_address(address: str) -> Optional[dict]:
     except Exception as e:
         print(f"Geocoding (locations) error: {e}")
 
-    # ── Attempt 3: Nominatim / OSM fallback ───────────────────────────────────
+    # ── Attempt 3: Photon — OSM building-polygon centroids (rooftop precision) ─
+    # Free public API, no key required.  Returns building-level OSM objects
+    # rather than interpolated street points, fixing zone boundary edge cases.
     try:
         params = {
-            "q": address,
+            "q": geocode_q,
+            "limit": "5",
+            "countrycode": "us",
+            "lang": "en",
+        }
+        headers = {"User-Agent": "FEMA-FloodCert-Generator/1.0"}
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            resp = await client.get(PHOTON_URL, params=params, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+
+        features = data.get("features", [])
+        # Prefer building/house-level results over road interpolations
+        best = None
+        for f in features:
+            osm_value = (f.get("properties", {}).get("osm_value") or "").lower()
+            if osm_value in ("house", "residential", "detached", "apartments"):
+                best = f
+                break
+        if best is None and features:
+            best = features[0]
+
+        if best:
+            props = best.get("properties", {})
+            coords_p = best.get("geometry", {}).get("coordinates", [])
+            if len(coords_p) >= 2:
+                lon_p, lat_p = float(coords_p[0]), float(coords_p[1])
+                city_p = (
+                    props.get("city") or props.get("locality") or props.get("village") or ""
+                ).title()
+                state_p = props.get("state_code") or props.get("state") or ""
+                state_abbr_p = (state_p[:2] if len(state_p) >= 2 else state_p).upper()
+                county_p = props.get("county", "").replace(" County", "").strip()
+                hn = props.get("housenumber", "")
+                st = props.get("street", "")
+                pc = props.get("postcode", "")
+                matched_p = f"{hn} {st}, {city_p}, {state_abbr_p} {pc}".strip(", ")
+                return {
+                    "lat": lat_p,
+                    "lon": lon_p,
+                    "matched_address": matched_p or address,
+                    "city": city_p,
+                    "state_abbr": state_abbr_p,
+                    "state_fips": "",
+                    "county_fips": "",
+                    "county_name": county_p,
+                }
+    except Exception as e:
+        print(f"Geocoding (Photon) error: {e}")
+
+    # ── Attempt 4: Nominatim / OSM street interpolation ───────────────────────
+    try:
+        params = {
+            "q": geocode_q,
             "format": "json",
             "limit": "1",
             "countrycodes": "us",
@@ -204,16 +288,10 @@ async def geocode_address(address: str) -> Optional[dict]:
     except Exception as e:
         print(f"Geocoding (Nominatim) error: {e}")
 
-    # ── Attempt 4: Nominatim with street-type stripped (helps "4248 Duck Dr" → "4248 Duck") ──
-    import re as _re
-    _STREET_TYPE = _re.compile(
-        r"\b(Drive|Dr|Street|St|Avenue|Ave|Boulevard|Blvd|Road|Rd|Lane|Ln|"
-        r"Court|Ct|Circle|Cir|Place|Pl|Way|Terrace|Ter|Trail|Trl|"
-        r"Parkway|Pkwy|Highway|Hwy)\b\.?",
-        _re.IGNORECASE,
-    )
-    simplified = _re.sub(r"\s{2,}", " ", _STREET_TYPE.sub("", address)).strip()
-    if simplified and simplified.lower() != address.lower():
+    # ── Attempt 5: Nominatim with street-type stripped ─────────────────────────
+    # Helps unusual street names like "4248 Duck Dr" → retry as "4248 Duck".
+    simplified = re.sub(r"\s{2,}", " ", _STREET_TYPE_RE.sub("", geocode_q)).strip()
+    if simplified and simplified.lower() != geocode_q.lower():
         try:
             params = {
                 "q": simplified,
