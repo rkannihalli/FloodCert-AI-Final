@@ -54,14 +54,18 @@ except ImportError:
     _scheduler = None
 
 def _cert_filename(flood_zone: str, property_address: str) -> str:
-    """Build a clean PDF filename: Flood Cert - {zone} - {address}.pdf"""
+    """Build a clean PDF filename: Flood Cert - Zone {zone} - {street}.pdf
+    Only the street part (before the first comma) is used so the filename stays short.
+    """
     zone = (flood_zone or "Unknown").strip()
     addr = (property_address or "Unknown").strip()
-    addr_clean = re.sub(r'[\\/:*?"<>|]', "", addr)
-    addr_clean = re.sub(r"\s+", " ", addr_clean).strip()
-    if len(addr_clean) > 80:
-        addr_clean = addr_clean[:80].rstrip()
-    return f"Flood Cert - {zone} - {addr_clean}.pdf"
+    # Keep only the street portion — drop city, state, zip after the first comma
+    street = addr.split(",")[0].strip() if addr else "Unknown"
+    street_clean = re.sub(r'[\\/:*?"<>|]', "", street)
+    street_clean = re.sub(r"\s+", " ", street_clean).strip()
+    if len(street_clean) > 80:
+        street_clean = street_clean[:80].rstrip()
+    return f"Flood Cert - Zone {zone} - {street_clean}.pdf"
 
 
 US_STATES = {
