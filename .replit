@@ -4,19 +4,11 @@ modules = ["nodejs-24", "python-3.11", "python3"]
 router = "application"
 deploymentTarget = "autoscale"
 
+run = ["sh", "-c", "cd /home/runner/workspace/artifacts/flood-cert && python -m uvicorn main:app --host 0.0.0.0 --port 8000"]
+
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]
 env = { "CI" = "true" }
-
-[workflows]
-
-[agent]
-stack = "PNPM_WORKSPACE"
-expertMode = true
-
-[postMerge]
-path = "scripts/post-merge.sh"
-timeoutMs = 20000
 
 [[ports]]
 localPort = 8000
@@ -26,13 +18,8 @@ externalPort = 8000
 localPort = 8080
 externalPort = 80
 
-[[ports]]
-localPort = 8081
-externalPort = 8081
-
-[[ports]]
-localPort = 8082
-externalPort = 3000
-
 [nix]
 channel = "stable-25_05"
+
+[agent]
+expertMode = true
