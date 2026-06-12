@@ -1,11 +1,7 @@
 import os, io
 from jinja2 import Environment, FileSystemLoader
 
-try:
-    from weasyprint import HTML, CSS
-    PDF_ENGINE = "weasyprint"
-except Exception:
-    PDF_ENGINE = "none"
+PDF_ENGINE = "none"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
@@ -22,8 +18,6 @@ def _render_pdf(template_name: str, data: dict) -> bytes:
     template = jinja_env.get_template(template_name)
     html_content = template.render(**data)
     css_path = os.path.join(STATIC_DIR, "css", "pdf.css")
-    if PDF_ENGINE == "weasyprint":
-        return HTML(string=html_content, base_url=BASE_DIR).write_pdf(stylesheets=[CSS(filename=css_path)])
     return html_content.encode("utf-8")
 
 def generate_flood_certificate_pdf(data: dict) -> bytes:
