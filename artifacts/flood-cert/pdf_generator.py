@@ -32,3 +32,4 @@ def generate_batch_report_pdf(results: list, batch_date: str) -> bytes:
     undetermined_count = sum(1 for r in results if not r.get("error") and r.get("flood_zone") == "UNDETERMINED")
     error_count = sum(1 for r in results if r.get("error"))
     return _render_pdf("batch_report_pdf.html", {"results": results, "batch_date": batch_date, "total": len(results), "sfha_count": sfha_count, "non_sfha_count": non_sfha_count, "undetermined_count": undetermined_count, "error_count": error_count})
+# cache-bust Fri Jun 12 09:24:31 PM UTC 2026
