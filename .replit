@@ -10,6 +10,10 @@ deploymentTarget = "autoscale"
 localPort = 8000
 externalPort = 80
 
+[[ports]]
+localPort = 8001
+externalPort = 3000
+
 [nix]
 channel = "stable-25_05"
 
