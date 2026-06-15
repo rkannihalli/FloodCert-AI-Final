@@ -1,3 +1,4 @@
+import os
 import re
 import httpx
 from typing import Optional
@@ -205,6 +206,57 @@ async def geocode_address(address: str) -> Optional[dict]:
     # ── Pre-processing: strip lot/parcel designations that confuse geocoders ──
     # "301 Satinwood Drive Lot 1, City, FL" → "301 Satinwood Drive, City, FL"
     geocode_q = re.sub(r"\s{2,}", " ", _LOT_PATTERN.sub("", address)).strip()
+
+    # ── Attempt 0: Geocodio (rooftop precision, free 2500/day) ─────────────────
+    geocodio_key = os.environ.get("GEOCODIO_API_KEY", "")
+    if geocodio_key:
+        try:
+            geocode_q_geo = re.sub(r"\s{2,}", " ", _LOT_PATTERN.sub("", address)).strip()
+            params = {"q": geocode_q_geo, "api_key": geocodio_key, "limit": "1"}
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    "https://api.geocod.io/v1.7/geocode", params=params
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            results = data.get("results", [])
+            if results:
+                r = results[0]
+                loc = r.get("location", {})
+                components = r.get("address_components", {})
+                accuracy_type = r.get("accuracy_type", "")
+                accuracy = r.get("accuracy", 0)
+                GOOD_ACCURACY = {"rooftop", "point", "range_interpolation", "nearest_rooftop_match", "street_center"}
+                if accuracy_type in GOOD_ACCURACY and accuracy >= 0.7:
+                    lat_g = loc.get("lat")
+                    lon_g = loc.get("lng")
+                    city_g = components.get("city", "").title()
+                    state_g = components.get("state", "").upper()
+                    county_g = components.get("county", "").replace(" County","").strip()
+                    state_fips_g = ""
+                    county_fips_g = ""
+                    try:
+                        fcc_params = {"latitude": lat_g, "longitude": lon_g, "format": "json"}
+                        async with httpx.AsyncClient(timeout=8.0) as fc:
+                            fr = await fc.get("https://geo.fcc.gov/api/census/block/find", params=fcc_params)
+                            fr.raise_for_status()
+                            fcc_data = fr.json()
+                        state_fips_g  = (fcc_data.get("State", {}).get("FIPS") or "")[:2]
+                        county_fips_g = (fcc_data.get("County", {}).get("FIPS") or "")[2:5]
+                    except Exception as fe:
+                        print(f"FCC FIPS lookup error: {fe}")
+                    result = {
+                        "lat": lat_g, "lon": lon_g,
+                        "matched_address": r.get("formatted_address", address),
+                        "city": city_g, "state_abbr": state_g,
+                        "state_fips": state_fips_g, "county_fips": county_fips_g,
+                        "county_name": county_g,
+                    }
+                    if _geocode_plausible(geocode_q_geo, result["matched_address"]):
+                        print(f"Geocodio ({accuracy_type}, score={accuracy}): {result['matched_address']}")
+                        return result
+        except Exception as e:
+            print(f"Geocodio geocoding error: {e}")
 
     # ── Attempt 1: Census geographies (county FIPS + county name) ─────────────
     try:
