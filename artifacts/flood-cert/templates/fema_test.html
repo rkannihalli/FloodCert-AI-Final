@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head><title>FEMA Connectivity Test</title></head>
+<body>
+<h2>FEMA Layer 22 Browser Test — Ann Arbor MI</h2>
+<pre id="result">Testing...</pre>
+<script>
+fetch('https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/22/query?geometry=-83.81241491242,42.276902488562&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=CID,POL_NAME1&returnGeometry=false&f=json')
+  .then(r => r.json())
+  .then(data => {
+    var feats = data.features || [];
+    if (feats.length) {
+      document.getElementById('result').textContent =
+        'SUCCESS!\nCID: ' + feats[0].attributes.CID +
+        '\nName: ' + feats[0].attributes.POL_NAME1;
+    } else {
+      document.getElementById('result').textContent = 'No features returned';
+    }
+  })
+  .catch(e => {
+    document.getElementById('result').textContent = 'FAILED: ' + e;
+  });
+</script>
+</body>
+</html>

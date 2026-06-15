@@ -15,7 +15,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from pdf_generator import generate_flood_certificate_pdf, generate_borrower_notice_pdf, generate_batch_report_pdf
 from fema_lookup import (
     geocode_address, query_fema_nfhl, query_nfip_community, query_firm_panel,
-    query_county_name, query_nfip_community_csb, determine_flood_info, nfip_community_info,
+    query_county_name, query_nfip_community_csb, query_tigerweb_fips,
+    determine_flood_info, nfip_community_info,
     ZONE_DISPLAY_NAMES,
 )
 from map_utils import generate_map_image
@@ -881,6 +882,21 @@ async def generate(
                     "lender_email": lender_email,
                 }
             })
+        # Universal FIPS fix: if Census geocoder returned no FIPS (400 error),
+        # use TIGERweb spatial reverse lookup to get authoritative county FIPS.
+        # TIGERweb uses actual geographic boundaries — correct for border cities
+        # like Summerville SC that span multiple counties.
+        if not geo_result.get("state_fips") or not geo_result.get("county_fips"):
+            tiger_fips = await query_tigerweb_fips(
+                geo_result["lat"], geo_result["lon"]
+            )
+            if tiger_fips.get("state_fips"):
+                geo_result["state_fips"]  = tiger_fips["state_fips"]
+                geo_result["county_fips"] = tiger_fips["county_fips"]
+                if not geo_result.get("county_name"):
+                    geo_result["county_name"] = tiger_fips.get("county_name", "")
+                print(f"TIGERweb FIPS resolved: {tiger_fips}")
+
         zone_data, community_data, firm_data, county_data, csb_data = await asyncio.gather(
             query_fema_nfhl(geo_result["lat"], geo_result["lon"]),
             query_nfip_community(geo_result["lat"], geo_result["lon"]),
@@ -1489,6 +1505,10 @@ async def batch_email_all(batch_id: str):
     await asyncio.gather(*[bounded(rid) for rid in record_ids])
     return JSONResponse({"sent": sent, "skipped": skipped, "failed": failed, "details": details})
 
+
+@app.get("/fema-test")
+async def fema_test(request: Request):
+    return templates.TemplateResponse("fema_test.html", {"request": request})
 
 @app.get("/batch/download/{batch_id}")
 async def batch_download(batch_id: str):

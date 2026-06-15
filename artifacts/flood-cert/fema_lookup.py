@@ -697,6 +697,45 @@ async def query_firm_panel(lat: float, lon: float) -> dict:
     return {}
 
 
+async def query_tigerweb_fips(lat: float, lon: float) -> dict:
+    """Reverse-geocode lat/lon to county FIPS using TIGERweb spatial query.
+    
+    Returns authoritative state_fips + county_fips based on actual location,
+    not mailing address. This is critical for border cities where Census
+    geocoder assigns wrong county (e.g. Summerville SC spans two counties).
+    Used as universal fallback whenever Census geocoder returns 400.
+    """
+    params = {
+        "geometry": f"{lon},{lat}",
+        "geometryType": "esriGeometryPoint",
+        "inSR": "4326",
+        "spatialRel": "esriSpatialRelIntersects",
+        "outFields": "STATE,COUNTY,NAME",
+        "returnGeometry": "false",
+        "f": "json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(TIGERWEB_COUNTY_URL, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+        features = data.get("features", [])
+        if not features:
+            return {}
+        attrs = features[0]["attributes"]
+        state_fips  = str(attrs.get("STATE",  "")).zfill(2)
+        county_fips = str(attrs.get("COUNTY", "")).zfill(3)
+        county_name = (attrs.get("NAME") or "").strip()
+        return {
+            "state_fips":  state_fips,
+            "county_fips": county_fips,
+            "county_name": county_name,
+        }
+    except Exception as e:
+        print(f"TIGERweb FIPS reverse lookup error: {e}")
+        return {}
+
+
 async def query_county_name(lat: float, lon: float) -> dict:
     """TIGERweb county name — fallback only; Census geocoder geography is preferred."""
     params = {
@@ -985,17 +1024,21 @@ def determine_flood_info(merged: dict) -> dict:
     # 4. "Not Available"
     has_full_l3_panel = len(firm_panel_l3.replace(" ", "")) > 6
 
+    # NFIP Map Number (Community-Panel Number)
+    # Only Layer 3 returns the complete panel number with suffix (e.g. "26161C 0243E").
+    # DFIRM_ID from Esri Living Atlas gives the county prefix only (e.g. "26161C").
+    # Showing prefix-only is misleading — it looks complete but the suffix
+    # determines the exact FIRM map panel and effective date.
+    # Browser JS enrichment fills the complete panel at render time from Layer 3.
     if has_full_l3_panel:
-        # Layer 3 returned a real panel number — trust it completely
+        # Layer 3 returned complete panel — fully authoritative
         map_number = firm_panel_l3
     elif esri_dfirm and len(esri_dfirm) >= 5:
-        # DFIRM_ID = state(2) + county(3) FIPS from spatial intersection.
-        # Construct standard community-panel prefix: SSCCCС → e.g. "48091C".
+        # Only county prefix available — browser JS will complete this
+        # Store prefix so browser can validate/replace with full panel
         map_number = f"{esri_dfirm[:5]}C"
-    elif state_fips and len(county_fips) == 3:
-        # Construct prefix from Census geocoder county FIPS (fallback only)
-        map_number = f"{state_fips}{county_fips}C"
     else:
+        # No spatial data available — browser JS will fill entirely
         map_number = "Not Available"
 
     # ── NFIP Community Number (CID) ───────────────────────────────────────────
@@ -1005,22 +1048,20 @@ def determine_flood_info(merged: dict) -> dict:
     #    (e.g. "060302" for City of Stockton CA, rather than county placeholder "06077C")
     # 3. County-level approximation: state(2) + county(3) + "0" — county jurisdictions only
     # 4. Fallback to map number prefix
+    # NFIP Community Number (CID) — only use authoritative sources
+    # Never construct from county FIPS — that produces wrong numbers
+    # that look real but don't match FEMA's actual community assignments.
+    # Layer 22 and CSB API are the only authoritative sources.
+    # Browser JS will fill this from Layer 22 when server-side is blocked.
     if community_id:
+        # Layer 22 — most authoritative (exact NFIP-assigned 6-digit CID)
         panel_number = community_id
     elif csb_community_id:
+        # FEMA CSB API — authoritative municipal community ID
         panel_number = csb_community_id
-    elif state_fips and len(county_fips) == 3:
-        # County-level NFIP CID approximation — may differ for incorporated municipalities
-        panel_number = f"{state_fips}{county_fips}0"
-    elif esri_dfirm and len(esri_dfirm) >= 5:
-        # Use DFIRM_ID directly as 5-digit state+county prefix for CID
-        # Append "0" for county-level community (never "C" — that's map number only)
-        panel_number = f"{esri_dfirm[:5]}0"
-    elif map_number and map_number != "Not Available":
-        # Strip "C" suffix from map number to get community number prefix
-        raw_panel = map_number.replace(" ", "")
-        panel_number = raw_panel[:5] + "0" if raw_panel.endswith("C") else raw_panel[:6]
     else:
+        # No authoritative source available — do NOT guess from county FIPS
+        # Browser JS enrichment will populate this from Layer 22 at render time
         panel_number = "Not Available"
 
     # ── NFIP Community Name ───────────────────────────────────────────────────
