@@ -754,7 +754,7 @@ async def admin_live_test(request: Request):
 
         nfhl, panel_data, community_data = await asyncio.gather(
             query_fema_nfhl(lat, lon),
-            query_firm_panel(lat, lon),
+            query_firm_panel(lat, lon, county_fips=geo_result.get("state_fips","") + geo_result.get("county_fips","")),
             query_nfip_community(lat, lon),
         )
 
@@ -904,7 +904,7 @@ async def generate(
         zone_data, community_data, firm_data, county_data, csb_data = await asyncio.gather(
             query_fema_nfhl(geo_result["lat"], geo_result["lon"]),
             query_nfip_community(geo_result["lat"], geo_result["lon"]),
-            query_firm_panel(geo_result["lat"], geo_result["lon"]),
+            query_firm_panel(geo_result["lat"], geo_result["lon"], county_fips=geo_result.get("state_fips","") + geo_result.get("county_fips","")),
             query_county_name(geo_result["lat"], geo_result["lon"]),
             query_nfip_community_csb(
                 geo_result.get("state_fips", ""),
@@ -1355,7 +1355,7 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str, company_id=N
     zone_data, community_data, firm_data, county_data, csb_data = await asyncio.gather(
         query_fema_nfhl(geo["lat"], geo["lon"]),
         query_nfip_community(geo["lat"], geo["lon"]),
-        query_firm_panel(geo["lat"], geo["lon"]),
+        query_firm_panel(geo["lat"], geo["lon"], county_fips=geo.get("state_fips","") + geo.get("county_fips","")),
         query_county_name(geo["lat"], geo["lon"]),
         query_nfip_community_csb(
             geo.get("state_fips", ""),

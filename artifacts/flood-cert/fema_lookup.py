@@ -697,20 +697,28 @@ async def query_nfip_community(lat: float, lon: float) -> dict:
         return {}
 
 
-async def query_firm_panel(lat: float, lon: float) -> dict:
+async def query_firm_panel(lat: float, lon: float, county_fips: str = "") -> dict:
     """Query NFHL Layer 3 (FIRM Panels) for full panel number and effective date.
 
     hazards.fema.gov is network-blocked server-side on Replit (connection reset).
     We try anyway; the browser-side JS enrichment is the reliable fallback.
     Returns the full FIRM_PAN (e.g. "48091C 0215F") and EFF_DATE when reachable.
+    
+    county_fips: full 5-digit FIPS (e.g. "45035"). Used to validate panel prefix.
     """
-    queries = [
-        {"geometry": f"{lon},{lat}", "geometryType": "esriGeometryPoint"},
-        {
-            "geometry": f"{lon - 0.002},{lat - 0.002},{lon + 0.002},{lat + 0.002}",
+    # Build envelope sizes to try - start small, expand if needed
+    envelope_sizes = [0.002, 0.005, 0.01]
+    queries = [{"geometry": f"{lon},{lat}", "geometryType": "esriGeometryPoint"}]
+    for size in envelope_sizes:
+        queries.append({
+            "geometry": f"{lon - size},{lat - size},{lon + size},{lat + size}",
             "geometryType": "esriGeometryEnvelope",
-        },
-    ]
+        })
+
+    # Expected panel prefix from county FIPS (e.g. "45035" -> "45035C")
+    expected_prefix = county_fips.upper() if county_fips else ""
+
+    best_result = None
 
     for q in queries:
         params = {
@@ -719,7 +727,7 @@ async def query_firm_panel(lat: float, lon: float) -> dict:
             "spatialRel": "esriSpatialRelIntersects",
             "outFields": "FIRM_PAN,EFF_DATE,DFIRM_ID,PANEL_TYP",
             "returnGeometry": "false",
-            "resultRecordCount": "10",
+            "resultRecordCount": "20",
             "f": "json",
         }
         try:
@@ -730,23 +738,50 @@ async def query_firm_panel(lat: float, lon: float) -> dict:
             features = data.get("features", [])
             if not features:
                 continue
-            attrs = None
+
+            # Try to find a feature matching expected county prefix first
+            matched_attrs = None
+            fallback_attrs = None
+
             for f in features:
-                if "Panel Printed" in (f["attributes"].get("PANEL_TYP") or ""):
-                    attrs = f["attributes"]
-                    break
+                raw = (f["attributes"].get("FIRM_PAN") or "").strip()
+                panel_prefix = raw[:5] if len(raw) >= 5 else ""
+                is_printed = "Panel Printed" in (f["attributes"].get("PANEL_TYP") or "")
+
+                # Check if panel prefix matches expected county FIPS
+                if expected_prefix and panel_prefix == expected_prefix:
+                    if is_printed or matched_attrs is None:
+                        matched_attrs = f["attributes"]
+                elif fallback_attrs is None:
+                    if is_printed:
+                        fallback_attrs = f["attributes"]
+
+            # Prefer county-matched result
+            attrs = matched_attrs or fallback_attrs
             if attrs is None:
                 attrs = features[0]["attributes"]
+
             raw = (attrs.get("FIRM_PAN") or "").strip()
             firm_pan = f"{raw[:6]} {raw[6:]}" if len(raw) >= 7 else raw
-            return {
+
+            result = {
                 "firm_panel_l3": firm_pan or (attrs.get("DFIRM_ID") or ""),
                 "eff_date": attrs.get("EFF_DATE"),
             }
+
+            # If we got a county-matched result return immediately
+            if matched_attrs is not None:
+                print(f"FIRM panel matched county {expected_prefix}: {firm_pan}")
+                return result
+
+            # Otherwise save as best result and keep trying wider envelopes
+            if best_result is None:
+                best_result = result
+
         except Exception as e:
             print(f"FIRM panel query (Layer 3, {q['geometryType']}) error: {e}")
 
-    return {}
+    return best_result or {}
 
 
 async def query_tigerweb_fips(lat: float, lon: float) -> dict:
