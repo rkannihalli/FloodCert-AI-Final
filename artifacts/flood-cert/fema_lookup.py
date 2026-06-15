@@ -245,6 +245,11 @@ async def geocode_address(address: str) -> Optional[dict]:
                         county_fips_g = (fcc_data.get("County", {}).get("FIPS") or "")[2:5]
                     except Exception as fe:
                         print(f"FCC FIPS lookup error: {fe}")
+                    # Fix CT planning region → county name
+                    if state_g == "CT":
+                        county_g = CT_PLANNING_REGION_TO_COUNTY.get(
+                            county_g.lower().strip(), county_g
+                        )
                     result = {
                         "lat": lat_g, "lon": lon_g,
                         "matched_address": r.get("formatted_address", address),
