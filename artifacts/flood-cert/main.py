@@ -300,6 +300,10 @@ async def shutdown():
 
 # ── Auth routes ───────────────────────────────────────────────────────────────
 
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_get(request: Request):
     if get_session_user(request):
