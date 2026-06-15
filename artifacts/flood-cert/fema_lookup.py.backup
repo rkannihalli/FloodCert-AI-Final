@@ -46,7 +46,6 @@ CT_PLANNING_REGION_TO_COUNTY: dict[str, str] = {
     "northeastern connecticut planning region":      "Windham County",
     "northwest hills planning region":               "Litchfield County",
     "south central connecticut planning region":     "New Haven County",
-    "south central connecticut":                     "New Haven County",
     "southeastern connecticut planning region":      "New London County",
     "western connecticut planning region":           "Fairfield County",
 }
@@ -71,10 +70,6 @@ _X500_SUBTYPES = frozenset({
     "0.2 PERCENT ANNUAL CHANCE FLOOD HAZARD",
     "AREA OF 500-YEAR FLOOD HAZARD",
     "500-YEAR FLOOD HAZARD",
-    "500 YEAR FLOOD HAZARD",
-    "SHADED ZONE X",
-    "0.2 PCT ANNUAL CHANCE",
-    "0.2 PERCENT ANNUAL CHANCE",
     # Levee-reduced-risk labels (Esri Living Atlas / NFHL) — also shaded X = X500
     "AREA WITH REDUCED FLOOD RISK DUE TO LEVEE",
     "REDUCED FLOOD RISK DUE TO LEVEE",
@@ -128,13 +123,14 @@ TIGERWEB_COUNTY_URL = (
 def _geocode_plausible(input_address: str, matched_address: str) -> bool:
     """Return False when matched_address is clearly wrong for input_address.
 
-    Checks house number, primary street name, and ZIP code as signals.
-    Accepts a match when:
-    - house number matches AND (street OR zip matches), OR
-    - all three signals are absent (nothing to compare)
+    Requires that BOTH the house number AND the primary street name from
+    input_address appear in matched_address.  If either is absent the geocoder
+    found an unrelated location and the result must be discarded.
 
-    This relaxed logic handles short/ambiguous street names like "Duck Dr"
-    that geocoders may match to a different street in the same ZIP.
+    Example failure (both signals missing → reject):
+      input:   "4248 Duck Dr, Ann Arbor, MI 48103"
+      matched: "Oak Valley Drive, Pittsfield Charter Township, MI 48103"
+               ↳ "4248" absent  AND  "DUCK" absent → False
     """
     if not matched_address:
         return True  # nothing to compare; pass through
@@ -147,6 +143,7 @@ def _geocode_plausible(input_address: str, matched_address: str) -> bool:
     house_num = num_m.group(1) if num_m else ""
 
     # ── Primary street word ───────────────────────────────────────────────────
+    # Strip leading house number, then pick the first word that isn't a suffix.
     street_part = re.sub(r"^\s*\d+\s*", "", inp.split(",")[0])
     _STOP = {
         "DR", "ST", "AVE", "BLVD", "RD", "LN", "CT", "CIR", "PL", "WAY",
@@ -157,29 +154,11 @@ def _geocode_plausible(input_address: str, matched_address: str) -> bool:
     sig_words = [w for w in re.findall(r"\b[A-Z]{2,}\b", street_part) if w not in _STOP]
     primary_word = sig_words[0] if sig_words else ""
 
-    # ── ZIP code ──────────────────────────────────────────────────────────────
-    zip_m = re.search(r"\b(\d{5})\b", inp)
-    zip_code = zip_m.group(1) if zip_m else ""
-
-    house_ok  = bool(house_num)   and house_num   in mat
+    house_ok  = bool(house_num)    and house_num    in mat
     street_ok = bool(primary_word) and primary_word in mat
-    zip_ok    = bool(zip_code)    and zip_code    in mat
 
-    # Accept if house number matches plus at least one other signal
-    if house_ok and (street_ok or zip_ok):
-        return True
-    # Accept if street name matches (handles addresses without house numbers)
-    if street_ok:
-        return True
-    # If no signals present at all, pass through
-    if not house_num and not primary_word and not zip_code:
-        return True
-    # Reject only when house number is present but missing from match
-    # AND street name is also missing — clearly wrong location
-    if house_num and not house_ok and not street_ok:
-        return False
-    # Default: accept
-    return True
+    # Both signals absent → almost certainly the wrong location
+    return house_ok or street_ok
 
 
 # Photon OSM keys that represent actual buildings or streets.
@@ -216,14 +195,8 @@ async def geocode_address(address: str) -> Optional[dict]:
             "format": "json",
         }
         async with httpx.AsyncClient(timeout=18.0, verify=False) as client:
-            try:
-                resp = await client.get(CENSUS_GEO_URL, params=params)
-                resp.raise_for_status()
-            except Exception:
-                # Fallback to Census2010 vintage for addresses Census2020 rejects
-                params["vintage"] = "Census2010"
-                resp = await client.get(CENSUS_GEO_URL, params=params)
-                resp.raise_for_status()
+            resp = await client.get(CENSUS_GEO_URL, params=params)
+            resp.raise_for_status()
             data = resp.json()
 
         matches = data.get("result", {}).get("addressMatches", [])
@@ -496,57 +469,6 @@ async def geocode_address(address: str) -> Optional[dict]:
         except Exception as e:
             print(f"Geocoding (Nominatim normalized) error: {e}")
 
-    # ── Attempt 6: Minimal query — house number + city + state + ZIP ──────────
-    # Last resort for addresses where all geocoders fail the plausibility check.
-    # Strips street name entirely and queries by number + city + state + ZIP.
-    # This ensures we get coordinates in the right area even if street is wrong.
-    try:
-        num_m2 = re.match(r"\s*(\d+)", geocode_q)
-        parts  = [p.strip() for p in geocode_q.split(",")]
-        if num_m2 and len(parts) >= 2:
-            city_state_zip = ", ".join(parts[1:])
-            minimal_q = f"{num_m2.group(1)} {city_state_zip}"
-            params = {
-                "q": minimal_q,
-                "format": "json",
-                "limit": "1",
-                "countrycodes": "us",
-                "addressdetails": "1",
-            }
-            headers = {"User-Agent": "FEMA-FloodCert-Generator/1.0"}
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.get(NOMINATIM_URL, params=params, headers=headers)
-                resp.raise_for_status()
-                results = resp.json()
-            if results:
-                r = results[0]
-                addr_detail = r.get("address", {})
-                city = (
-                    addr_detail.get("city")
-                    or addr_detail.get("town")
-                    or addr_detail.get("village")
-                    or ""
-                ).title()
-                state_abbr = addr_detail.get("state_code", "").upper()
-                county_raw = addr_detail.get("county", "").replace(" County", "").strip()
-                zip_r = addr_detail.get("postcode", "")
-                result = {
-                    "lat": float(r["lat"]),
-                    "lon": float(r["lon"]),
-                    "matched_address": address,  # use original address as matched
-                    "city": city,
-                    "state_abbr": state_abbr,
-                    "state_fips": "",
-                    "county_fips": "",
-                    "county_name": county_raw,
-                }
-                # Accept if ZIP matches — we're in the right area
-                if zip_r and zip_r in geocode_q:
-                    print(f"Geocoding (minimal ZIP fallback) accepted for: {address!r}")
-                    return result
-    except Exception as e:
-        print(f"Geocoding (minimal ZIP fallback) error: {e}")
-
     return None
 
 
@@ -564,7 +486,7 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
             "geometryType": "esriGeometryPoint",
         },
         {
-            "geometry": f"{lon - 0.0005},{lat - 0.0005},{lon + 0.0005},{lat + 0.0005}",
+            "geometry": f"{lon - 0.001},{lat - 0.001},{lon + 0.001},{lat + 0.001}",
             "geometryType": "esriGeometryEnvelope",
         },
     ]
@@ -748,34 +670,7 @@ async def query_nfip_community_csb(
         _, sa = STATE_FIPS.get(state_fips, ("", ""))
     if not sa:
         return empty
-    # Allow lookup with just state+city even without county_fips
-    # by using a broader filter when county_fips is unknown
     if not county_fips or len(county_fips) != 3:
-        # Try state-only lookup and filter by city
-        if sa and city:
-            try:
-                params_state = {
-                    "$filter": f"stateAbbreviation eq '{sa}'",
-                    "$select": "communityNumber,communityName,countyName,countyFips",
-                    "$top": "500",
-                }
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    resp = await client.get(FEMA_CSB_URL, params=params_state)
-                    resp.raise_for_status()
-                    data = resp.json()
-                communities_all = data.get("fimaNfipCommunities", [])
-                city_n = city.lower().strip()
-                for c in communities_all:
-                    c_name = (c.get("communityName") or "").lower()
-                    if (c_name == city_n
-                            or c_name.startswith(city_n + ",")
-                            or city_n in c_name):
-                        return {
-                            "csb_community_id": c.get("communityNumber", ""),
-                            "csb_community_name": c.get("communityName", ""),
-                        }
-            except Exception as e:
-                print(f"FEMA CSB state-only lookup error: {e}")
         return empty
 
     params = {
@@ -1012,14 +907,8 @@ def determine_flood_info(merged: dict) -> dict:
     elif state_fips and len(county_fips) == 3:
         # County-level NFIP CID approximation — may differ for incorporated municipalities
         panel_number = f"{state_fips}{county_fips}0"
-    elif esri_dfirm and len(esri_dfirm) >= 5:
-        # Use DFIRM_ID directly as 5-digit state+county prefix for CID
-        # Append "0" for county-level community (never "C" — that's map number only)
-        panel_number = f"{esri_dfirm[:5]}0"
     elif map_number and map_number != "Not Available":
-        # Strip "C" suffix from map number to get community number prefix
-        raw_panel = map_number.replace(" ", "")
-        panel_number = raw_panel[:5] + "0" if raw_panel.endswith("C") else raw_panel[:6]
+        panel_number = map_number.replace(" ", "")[:6]
     else:
         panel_number = "Not Available"
 

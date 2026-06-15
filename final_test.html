@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flood Determination Result — TEST-2026</title>
+  <link rel="stylesheet" href="/static/css/main.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <div class="header-seal">🌊</div>
+    <div class="header-text">
+      <h1>FEMA Flood Certificate Generator</h1>
+      <p>Standard Flood Hazard Determination — National Flood Hazard Layer</p>
+    </div>
+    <a href="/batch" class="header-history-link">⚡ Batch</a>
+    <a href="/history" class="header-history-link">📂 History</a>
+    
+    <a href="/admin" class="header-history-link" style="background:rgba(255,200,0,0.15);border:1px solid rgba(255,200,0,0.4);">⚙ Admin</a>
+    
+    <form method="POST" action="/logout" style="margin:0;">
+      <button type="submit" class="header-history-link" style="background:none;border:none;cursor:pointer;color:#fff;font-size:inherit;">⎋ Sign Out</button>
+    </form>
+  </div>
+</header>
+
+<main class="main">
+
+  
+  
+  
+
+  
+
+  <div class="result-header">
+    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;">
+      <h2>Flood Hazard Determination Result</h2>
+      
+      <a href="/history/23" class="saved-badge">✅ Saved — Record #23</a>
+      
+    </div>
+    <p>Determined on June 15, 2026 &nbsp;|&nbsp; Loan ID: <strong>TEST-2026</strong></p>
+  </div>
+
+  
+  
+
+  <div id="zoneBanner" class="zone-banner non-sfha">
+    
+    <div id="zoneBadge" class="zone-badge">Zone X</div>
+    <div class="zone-info">
+      <h3 id="zoneTitle">
+        Non-Special Flood Hazard Area
+        
+      </h3>
+      <p id="zoneDescP">Minimal Flood Hazard — Zone X (area outside 500-year floodplain; no base flood elevation determined)</p>
+    </div>
+    <div id="insTag" class="insurance-tag not-required">
+      Not Required
+      
+    </div>
+  </div>
+
+  <div class="detail-grid">
+
+    <div class="detail-card">
+      <div class="detail-card-header">Property &amp; Loan Information</div>
+      <div class="detail-card-body">
+        <div class="detail-row">
+          <span class="detail-label">Borrower</span>
+          <span class="detail-value">Test Borrower</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Lender</span>
+          <span class="detail-value">Test Bank</span>
+        </div>
+        
+        <div class="detail-row">
+          <span class="detail-label">Lender Address</span>
+          <span class="detail-value">100 Bank St Ann Arbor MI 48104</span>
+        </div>
+        
+        
+        <div class="detail-row">
+          <span class="detail-label">Lender Email</span>
+          <span class="detail-value"><a href="mailto:lender@testbank.com" style="color:var(--blue);">lender@testbank.com</a></span>
+        </div>
+        
+        <div class="detail-row">
+          <span class="detail-label">Loan ID</span>
+          <span class="detail-value">TEST-2026</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Address Entered</span>
+          <span class="detail-value">4250 Duck Dr Ann Arbor MI 48103</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Matched Address</span>
+          <span class="detail-value">4250 Duck Dr, Ann Arbor, Michigan, 48103</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Coordinates</span>
+          <span class="detail-value">42.27690, -83.81263</span>
+        </div>
+        
+        <div class="detail-row">
+          <span class="detail-label">County</span>
+          <span class="detail-value">Washtenaw</span>
+        </div>
+        
+      </div>
+    </div>
+
+    <div class="detail-card">
+      <div class="detail-card-header">FIRM &amp; Community Data</div>
+      <div class="detail-card-body">
+        <div class="detail-row">
+          <span class="detail-label">Flood Zone</span>
+          <span id="zoneDetailVal" class="detail-value">Zone X</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">SFHA Status</span>
+          <span id="sfhaDetailVal" class="detail-value">No</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Insurance Required</span>
+          <span id="insDetailVal" class="detail-value">No — Flood insurance is not federally required</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">NFIP Community Name</span>
+          <span class="detail-value" id="commNameDisplay">Ann Arbor</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">NFIP Community Number</span>
+          <span class="detail-value" id="cidDisplay">Not Available</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">NFIP Map Number (Community-Panel Number)</span>
+          <span class="detail-value" id="firmPanelDisplay">Not Available</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">NFIP Map Panel Effective/Revised Date</span>
+          <span class="detail-value" id="firmDateDisplay">See FEMA Map Service Center</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Determination Date</span>
+          <span class="detail-value">June 15, 2026</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- NFIP Community Participation Status -->
+  <div class="comm-card">
+    <div class="comm-card-header">
+      🏛 NFIP Community Participation Status
+    </div>
+    <div class="comm-card-body">
+      <div class="comm-row">
+        <span class="comm-badge comm-regular">✓ FIRM Coverage Area</span>
+        
+      </div>
+
+      <div class="comm-details">
+        <div class="comm-detail-row">
+          <span class="comm-detail-label">DFIRM Community ID</span>
+          <span>Not Available</span>
+        </div>
+        
+        <div class="comm-detail-row">
+          <span class="comm-detail-label">FIRM Panel Reference</span>
+          <span>Not Available</span>
+        </div>
+        <div class="comm-detail-row">
+          <span class="comm-detail-label">Study Type</span>
+          <span id="studyTypeSpan">Minimal Flood Hazard — Zone X (area outs…</span>
+        </div>
+      </div>
+
+      <div class="comm-alert-bar comm-alert-good" style="margin-top:12px;">
+        For official NFIP participation status, flood insurance availability, and suspension history,
+        consult the <strong>FEMA Community Status Book</strong> — the authoritative FEMA reference used
+        by lenders and servicers for mandatory purchase compliance.
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;">
+        <a href="https://www.fema.gov/flood-insurance/work-with-nfip/community-status" target="_blank" rel="noopener" class="comm-ext-btn">
+          📋 Community Status Book
+        </a>
+        <a href="https://msc.fema.gov/portal/search#lonlat=-83.812626387837,42.276899806353" target="_blank" rel="noopener" class="comm-ext-btn">
+          🗺 FEMA Map Service Center
+        </a>
+        <a href="https://www.fema.gov/flood-insurance/work-with-nfip/community-status" target="_blank" rel="noopener" class="comm-ext-btn">
+          🏛 NFIP Program Info
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Map -->
+  <div class="map-card">
+    <div class="map-card-header">
+      <span>📍 Property Location</span>
+      <span class="map-coords">42.27690, -83.81263</span>
+    </div>
+    <div id="propertyMap" class="map-container"></div>
+    <div class="map-footer">
+      Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors &nbsp;|&nbsp;
+      Flood zone layer: FEMA National Flood Hazard Layer via ArcGIS Online
+    </div>
+  </div>
+
+  <!-- Download section — uses two separate forms with all fields as hidden inputs -->
+  <div class="downloads-section">
+    <h3>Download Documents</h3>
+    <p>Generate and download the official flood determination certificate and borrower notice as PDF documents.</p>
+
+    <div class="download-buttons">
+
+      <form method="POST" action="/download/certificate" target="_blank">
+        <input type="hidden" name="property_address"      value="4250 Duck Dr Ann Arbor MI 48103" />
+        <input type="hidden" name="matched_address"       value="4250 Duck Dr, Ann Arbor, Michigan, 48103" />
+        <input type="hidden" name="loan_id"               value="TEST-2026" />
+        <input type="hidden" name="borrower_name"         value="Test Borrower" />
+        <input type="hidden" name="lender_name"           value="Test Bank" />
+        <input type="hidden" name="lender_address"        value="100 Bank St Ann Arbor MI 48104" />
+        <input type="hidden" name="lender_email"          value="lender@testbank.com" />
+        <input type="hidden" name="lat"                   value="42.276899806353" />
+        <input type="hidden" name="lon"                   value="-83.812626387837" />
+        <input type="hidden" name="flood_zone"            id="certZone"     value="X" />
+        <input type="hidden" name="flood_zone_description" id="certZoneDesc" value="Minimal Flood Hazard — Zone X (area outside 500-year floodplain; no base flood elevation determined)" />
+        <input type="hidden" name="sfha_status"           id="certSfha"     value="No" />
+        <input type="hidden" name="insurance_required"    id="certIns"      value="No — Flood insurance is not federally required" />
+        <input type="hidden" name="panel_number"          id="certCid"         value="Not Available" />
+        <input type="hidden" name="panel_effective_date"  id="certPanelDate"   value="See FEMA Map Service Center" />
+        <input type="hidden" name="community_number"      id="certPanelNumber" value="Not Available" />
+        <input type="hidden" name="community_name"        id="certCommName"    value="Ann Arbor" />
+        <input type="hidden" name="county"                value="Washtenaw" />
+        <input type="hidden" name="determination_date"    value="June 15, 2026" />
+        <input type="hidden" name="determination_date_iso" value="2026-06-15" />
+        <button type="submit" class="btn-download">📄 Download Flood Certificate (PDF)</button>
+      </form>
+
+      <form method="POST" action="/download/notice" target="_blank">
+        <input type="hidden" name="property_address"      value="4250 Duck Dr Ann Arbor MI 48103" />
+        <input type="hidden" name="matched_address"       value="4250 Duck Dr, Ann Arbor, Michigan, 48103" />
+        <input type="hidden" name="loan_id"               value="TEST-2026" />
+        <input type="hidden" name="borrower_name"         value="Test Borrower" />
+        <input type="hidden" name="lender_name"           value="Test Bank" />
+        <input type="hidden" name="lender_address"        value="100 Bank St Ann Arbor MI 48104" />
+        <input type="hidden" name="lender_email"          value="lender@testbank.com" />
+        <input type="hidden" name="lat"                   value="42.276899806353" />
+        <input type="hidden" name="lon"                   value="-83.812626387837" />
+        <input type="hidden" name="flood_zone"            id="noticeZone"     value="X" />
+        <input type="hidden" name="flood_zone_description" id="noticeZoneDesc" value="Minimal Flood Hazard — Zone X (area outside 500-year floodplain; no base flood elevation determined)" />
+        <input type="hidden" name="sfha_status"           id="noticeSfha"     value="No" />
+        <input type="hidden" name="insurance_required"    id="noticeIns"      value="No — Flood insurance is not federally required" />
+        <input type="hidden" name="panel_number"          id="noticeCid"         value="Not Available" />
+        <input type="hidden" name="panel_effective_date"  id="noticePanelDate"   value="See FEMA Map Service Center" />
+        <input type="hidden" name="community_number"      id="noticePanelNumber" value="Not Available" />
+        <input type="hidden" name="community_name"        id="noticeCommName"    value="Ann Arbor" />
+        <input type="hidden" name="county"                value="Washtenaw" />
+        <input type="hidden" name="determination_date"    value="June 15, 2026" />
+        <input type="hidden" name="determination_date_iso" value="2026-06-15" />
+        <button type="submit" class="btn-download secondary">📋 Download Borrower Notice (PDF)</button>
+      </form>
+
+      
+      <form method="POST" action="/history/23/send-email">
+        <button type="submit" class="btn-download email"
+                onclick="return confirm('Send flood certificate PDF to lender@testbank.com?')">
+          ✉ Email to Lender
+        </button>
+      </form>
+      
+
+    </div>
+  </div>
+
+  <!-- Compliance summary card -->
+  <div class="compliance-card">
+    <div class="compliance-card-header">Compliance &amp; Documentation Summary</div>
+    <div class="compliance-card-body">
+      <div class="compliance-pillar">
+        <span class="compliance-check">✅</span>
+        <div>
+          <div class="compliance-pillar-title">FEMA-Compliant Determination</div>
+          <div class="compliance-pillar-desc">Flood zone determined from the live FEMA NFHL via ArcGIS REST and mapped to the SFHDF standard — satisfying the Flood Disaster Protection Act of 1973 and the National Flood Insurance Reform Act of 1994.</div>
+        </div>
+      </div>
+      <div class="compliance-pillar">
+        <span class="compliance-check">🔔</span>
+        <div>
+          <div class="compliance-pillar-title">Life-of-Loan Tracking Available</div>
+          <div class="compliance-pillar-desc">Enable the monitoring toggle below to track FIRM panel changes for the life of this loan — satisfying lender and investor requirements for re-determination upon map revision.</div>
+        </div>
+      </div>
+      <div class="compliance-pillar">
+        <span class="compliance-check">🛡</span>
+        <div>
+          <div class="compliance-pillar-title">Source-Cited Accuracy</div>
+          <div class="compliance-pillar-desc">Coordinates, NFIP community number, map panel number, and effective date are recorded verbatim from official government sources: US Census Geocoder + FEMA NFHL Layer 3 &amp; Layer 22.</div>
+        </div>
+      </div>
+      <div class="compliance-pillar">
+        <span class="compliance-check">📁</span>
+        <div>
+          <div class="compliance-pillar-title">Audit &amp; Investor Documentation</div>
+          <div class="compliance-pillar-desc">The SFHDF Certificate PDF and Borrower Notice PDF above are the standard documentation package required for secondary-market delivery (Fannie Mae, Freddie Mac), investor review, and regulatory audit files.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  
+  <div class="lol-card">
+    <div class="lol-card-header">
+      🔔 Life-of-Loan Monitoring
+      <span class="lol-header-note">Required when lender or investor mandates re-determination on map revision</span>
+    </div>
+    <div class="lol-card-body">
+      <div class="lol-status lol-off"
+           id="lolStatus">
+        
+          Enable monitoring to be alerted when FIRM panel data changes for this property.
+        
+      </div>
+      <div class="lol-actions">
+        <button class="btn-lol-toggle "
+                id="lolToggleBtn"
+                data-on="0"
+                onclick="lolToggle(23, this)">
+          🔕 Enable Monitoring
+        </button>
+        <button class="btn-lol-check" id="lolCheckBtn" onclick="lolCheck(23, this)">
+          🔍 Check Now
+        </button>
+      </div>
+    </div>
+  </div>
+  
+
+  <div class="disclaimer">
+    <strong>Disclaimer:</strong> This determination is based on publicly available FEMA National Flood Hazard Layer (NFHL) data and the US Census Geocoder. Results are for informational purposes and should be verified against the official FEMA Flood Insurance Rate Map (FIRM) for the subject property. This tool is not affiliated with FEMA. Lenders and loan officers should confirm determinations using a certified flood determination service for regulatory compliance.
+  </div>
+
+  <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;">
+    <a href="/" class="btn-secondary">← New Determination</a>
+    <a href="/history" class="btn-secondary">📂 View History</a>
+  </div>
+
+</main>
+
+<script>
+async function lolToggle(id, btn) {
+  const isOn = btn.dataset.on === '1';
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/history/' + id + '/monitor', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enable: !isOn})
+    });
+    const data = await resp.json();
+    const nowOn = data.life_of_loan === 1;
+    btn.dataset.on = nowOn ? '1' : '0';
+    btn.textContent = nowOn ? '🔔 Monitoring On' : '🔕 Enable Monitoring';
+    btn.classList.toggle('lol-active', nowOn);
+    const st = document.getElementById('lolStatus');
+    if (nowOn) {
+      st.className = 'lol-status';
+      st.textContent = 'Monitoring is active — click "Check Now" to query FEMA for FIRM changes.';
+    } else {
+      st.className = 'lol-status lol-off';
+      st.textContent = 'Monitoring disabled. Enable monitoring to track FIRM panel changes.';
+    }
+  } catch(e) { }
+  btn.disabled = false;
+}
+
+async function lolCheck(id, btn) {
+  btn.textContent = '⏳ Checking…';
+  btn.disabled = true;
+  const st = document.getElementById('lolStatus');
+  st.className = 'lol-status';
+  st.textContent = 'Querying FEMA National Flood Hazard Layer…';
+  try {
+    const resp = await fetch('/history/' + id + '/check', {method: 'POST'});
+    const data = await resp.json();
+    btn.textContent = '🔍 Check Now';
+    btn.disabled = false;
+    if (data.error) {
+      st.className = 'lol-status lol-changed';
+      st.textContent = '⚠ Check failed: ' + data.error;
+    } else if (data.changed) {
+      st.className = 'lol-status lol-changed';
+      st.innerHTML = '⚠ <strong>FIRM data has changed since the original determination.</strong><br>' +
+        'Zone: <strong>' + data.old_zone + '</strong> → <strong>' + data.new_zone + '</strong> | ' +
+        'Panel effective date: ' + (data.old_panel || '—') + ' → ' + (data.new_panel || '—') + '<br>' +
+        'A new flood determination is recommended. Run a new determination for this property.';
+    } else {
+      st.className = 'lol-status lol-current';
+      st.textContent = '✓ No FIRM changes detected — determination is current as of ' + data.checked_date + '.';
+    }
+  } catch(e) {
+    btn.textContent = '🔍 Check Now';
+    btn.disabled = false;
+    st.className = 'lol-status lol-changed';
+    st.textContent = '⚠ Network error. Please try again.';
+  }
+}
+</script>
+
+<script>
+/* ── Client-side NFHL enrichment (Layer 3 + Layer 22) ───────────────────────
+   hazards.fema.gov is network-blocked on Replit server-side but IS reachable
+   from the user's browser.  Two parallel queries run here:
+     • Layer 3  (S_FIRM_PAN)   → FIRM_PAN (map number) + EFF_DATE
+     • Layer 22 (S_POL_AR)     → CID (community number) + POL_NAME1 (community name)
+   Values are only overwritten when the new value is strictly better.
+─────────────────────────────────────────────────────────────────────────── */
+(function enrichNFHL() {
+  var lat = 42.276899806353;
+  var lon = -83.812626387837;
+  var NFHL = 'https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/';
+
+  var pointGeom  = 'geometry=' + lon + ',' + lat + '&geometryType=esriGeometryPoint';
+  var envGeom    = 'geometry=' + (lon-0.003) + ',' + (lat-0.003) + ','
+                 + (lon+0.003) + ',' + (lat+0.003) + '&geometryType=esriGeometryEnvelope';
+  var spatialQS  = '&inSR=4326&spatialRel=esriSpatialRelIntersects&returnGeometry=false&f=json';
+
+  function formatDate(ms) {
+    if (!ms) return null;
+    var d = new Date(ms);
+    var m   = (d.getUTCMonth() + 1).toString().padStart(2, '0');
+    var day = d.getUTCDate().toString().padStart(2, '0');
+    return m + '/' + day + '/' + d.getUTCFullYear();
+  }
+  function formatPanel(raw) {
+    raw = (raw || '').trim();
+    return raw.length >= 7 ? raw.slice(0, 6) + ' ' + raw.slice(6) : raw;
+  }
+  function setText(id, val) {
+    var el = document.getElementById(id);
+    if (el && val) el.textContent = val;
+  }
+  function setVal(id, val) {
+    var el = document.getElementById(id);
+    if (el && val) el.value = val;
+  }
+
+  async function queryLayer(layerNum, geomQS, outFields, recordCount) {
+    var url = NFHL + layerNum + '/query?' + geomQS + spatialQS
+            + '&outFields=' + outFields + '&resultRecordCount=' + (recordCount || 10);
+    var resp = await fetch(url);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var data = await resp.json();
+    return data.features || [];
+  }
+
+  /* ── Layer 3: FIRM panel + effective date ──────────────────────────────── */
+  (async function enrichL3() {
+    var geoms = [pointGeom, envGeom];
+    for (var i = 0; i < geoms.length; i++) {
+      try {
+        var features = await queryLayer(3, geoms[i], 'FIRM_PAN,EFF_DATE,PANEL_TYP', 10);
+        if (!features.length) continue;
+
+        var attrs = null;
+        for (var j = 0; j < features.length; j++) {
+          if ((features[j].attributes.PANEL_TYP || '').indexOf('Panel Printed') !== -1) {
+            attrs = features[j].attributes; break;
+          }
+        }
+        if (!attrs) attrs = features[0].attributes;
+
+        var firmPan = formatPanel(attrs.FIRM_PAN);
+        var effDate = formatDate(attrs.EFF_DATE);
+
+        // Map number: only update if new value is longer (more complete)
+        var panelEl = document.getElementById('firmPanelDisplay');
+        if (firmPan && panelEl && firmPan.length > panelEl.textContent.trim().length) {
+          setText('firmPanelDisplay', firmPan);
+          setVal('certPanelNumber', firmPan);
+          setVal('noticePanelNumber', firmPan);
+        }
+
+        // Effective date: only update if current is placeholder
+        var dateEl = document.getElementById('firmDateDisplay');
+        if (effDate && dateEl && dateEl.textContent.trim() === 'See FEMA Map Service Center') {
+          setText('firmDateDisplay', effDate);
+          setVal('certPanelDate', effDate);
+          setVal('noticePanelDate', effDate);
+        }
+        return;
+      } catch(e) { /* try next geometry */ }
+    }
+  })();
+
+  /* ── Layer 22: Community ID (CID) + community name ─────────────────────── */
+  (async function enrichL22() {
+    var geoms = [pointGeom, envGeom];
+    for (var i = 0; i < geoms.length; i++) {
+      try {
+        var features = await queryLayer(22, geoms[i], 'CID,POL_NAME1', 5);
+        if (!features.length) continue;
+
+        var attrs = features[0].attributes;
+        var cid     = (attrs.CID       || '').trim();
+        var polName = (attrs.POL_NAME1 || '').trim();
+
+        // CID: only replace if it looks like a proper 6-digit NFIP code
+        if (cid && /^\d{6}$/.test(cid)) {
+          var cidEl = document.getElementById('cidDisplay');
+          // Only update if current value is not already a proper 6-digit CID
+          if (cidEl && !/^\d{6}$/.test(cidEl.textContent.trim())) {
+            setText('cidDisplay', cid);
+            setVal('certCid', cid);
+            setVal('noticeCid', cid);
+          }
+        }
+
+        // Community name: only update if new value is longer / more specific
+        if (polName) {
+          var nameEl = document.getElementById('commNameDisplay');
+          if (nameEl && polName.length > nameEl.textContent.trim().length) {
+            setText('commNameDisplay', polName);
+            setVal('certCommName', polName);
+            setVal('noticeCommName', polName);
+          }
+        }
+        return;
+      } catch(e) { /* try next geometry */ }
+    }
+  })();
+})();
+</script>
+
+<script>
+(function () {
+  var lat  = 42.276899806353;
+  var lon  = -83.812626387837;
+  var zone = "X";
+  var sfha = false;
+  var addr = "4250 Duck Dr, Ann Arbor, Michigan, 48103";
+  var desc = "Minimal Flood Hazard \u2014 Zone X (area outside 500-year floodplain; no base flood elevation determined)";
+  var ins  = "No \u2014 Flood insurance is not federally required";
+
+  var map = L.map('propertyMap', { zoomControl: true, scrollWheelZoom: false })
+              .setView([lat, lon], 15);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
+
+  // Color-coded circle marker
+  var color = sfha ? '#c0392b' : (zone === 'UNDETERMINED' ? '#e67e22' : '#1a7a4a');
+  var marker = L.circleMarker([lat, lon], {
+    radius: 10,
+    fillColor: color,
+    color: '#fff',
+    weight: 2,
+    opacity: 1,
+    fillOpacity: 0.9
+  }).addTo(map);
+  window._floodMarker = marker;
+
+  marker.bindPopup(
+    '<div style="font-family:sans-serif;min-width:200px;">' +
+    '<strong style="color:#003366;font-size:0.95rem;">' + addr + '</strong><br/>' +
+    '<div style="margin-top:6px;">' +
+    '<span style="background:' + color + ';color:#fff;padding:2px 8px;border-radius:10px;font-size:0.8rem;font-weight:700;">' +
+      'Zone ' + zone +
+    '</span>' +
+    '</div>' +
+    '<div style="margin-top:6px;font-size:0.8rem;color:#5a6470;">' + desc + '</div>' +
+    '<div style="margin-top:5px;font-size:0.78rem;font-weight:600;color:' + color + ';">' + ins + '</div>' +
+    '</div>',
+    { maxWidth: 280 }
+  ).openPopup();
+
+  // FEMA NFHL WMS overlay
+  L.tileLayer.wms('https://hazards.fema.gov/arcgis/services/public/NFHL/MapServer/WMSServer', {
+    layers: '28',
+    format: 'image/png',
+    transparent: true,
+    opacity: 0.45,
+    attribution: 'FEMA NFHL',
+    errorTileUrl: ''
+  }).addTo(map);
+})();
+</script>
+
+<script>
+/*
+ * Browser-side FEMA NFHL Layer 28 zone enrichment.
+ * hazards.fema.gov is blocked server-side on Replit but accessible from the browser.
+ * This corrects X vs X500 (shaded) vs X-LEVEE cases that the Esri Living Atlas
+ * "Reduced Set" layer may not return ZONE_SUBTY for.
+ */
+(function enrichZoneFromNFHL() {
+  var lat = 42.276899806353;
+  var lon = -83.812626387837;
+
+  var SFHA_ZONES = ["A","AE","AH","AO","AR","A99","V","VE"];
+
+  var ZONE_DESCS = {
+    "X":       "Minimal Flood Hazard \u2014 Zone X (area outside 500-year floodplain; no base flood elevation determined)",
+    "X500":    "Moderate Flood Hazard \u2014 Zone X (Shaded) \u2014 0.2% annual chance flood; property lies within the 500-year floodplain",
+    "X-LEVEE": "Moderate Flood Hazard \u2014 Zone X (Protected by Levee) \u2014 area protected from 1% annual chance flood by a USACE-certified levee system; may be within the 500-year floodplain",
+    "A":   "Special Flood Hazard Area \u2014 Zone A (1% annual chance flood, no BFE determined)",
+    "AE":  "Special Flood Hazard Area \u2014 Zone AE (1% annual chance flood, BFE determined)",
+    "AH":  "Special Flood Hazard Area \u2014 Zone AH (1% annual chance shallow flooding, ponding)",
+    "AO":  "Special Flood Hazard Area \u2014 Zone AO (1% annual chance shallow flooding, sheet flow)",
+    "AR":  "Special Flood Hazard Area \u2014 Zone AR (being restored to BFE via flood control system)",
+    "A99": "Special Flood Hazard Area \u2014 Zone A99 (protected by federal flood control system under construction)",
+    "V":   "Special Flood Hazard Area \u2014 Zone V (coastal flood with velocity/wave action hazard)",
+    "VE":  "Special Flood Hazard Area \u2014 Zone VE (coastal flood with velocity hazard, BFE determined)",
+    "B":   "Moderate Flood Hazard \u2014 Zone B (0.2% annual chance flood; between 100-year and 500-year floodplain)",
+    "C":   "Minimal Flood Hazard \u2014 Zone C (area outside 500-year floodplain)",
+    "D":   "Undetermined Flood Hazard \u2014 Zone D (possible but undetermined flood hazard)",
+  };
+
+  function classifyX(fldZone, zoneSub) {
+    if (fldZone === "X500" || fldZone === "B") return "X500";
+    if (fldZone !== "X") return fldZone;
+    var sub = (zoneSub || "").toUpperCase().trim();
+    if (!sub) return "X";
+    if (sub.indexOf("0.2") >= 0) return "X500";
+    if (sub.indexOf("500") >= 0 && (sub.indexOf("ANNUAL") >= 0 || sub.indexOf("YEAR") >= 0 || sub.indexOf("CHANCE") >= 0)) return "X500";
+    if (sub === "0.2 PCT ANNUAL CHANCE FLOOD HAZARD" || sub === "AREA OF 500-YEAR FLOOD HAZARD" || sub === "500-YEAR FLOOD HAZARD") return "X500";
+    // Levee-reduced-risk subtypes ("Area With Reduced Flood Risk Due To Levee",
+    // "Protected by Levee", etc.) are shaded Zone X on the FIRM = X500 on SFHDF.
+    if (sub.indexOf("LEVEE") >= 0) return "X500";
+    return "X";
+  }
+
+  function setEl(id, prop, val) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (prop === "text") el.textContent = val;
+    else if (prop === "html") el.innerHTML = val;
+    else if (prop === "class") el.className = val;
+    else if (prop === "value") el.value = val;
+  }
+
+  var layer28 = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28/query";
+  var qs = "?geometry=" + encodeURIComponent(lon + "," + lat) +
+           "&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects" +
+           "&outFields=FLD_ZONE,ZONE_SUBTY,SFHA_TF&returnGeometry=false&resultRecordCount=10&f=json";
+
+  fetch(layer28 + qs, { mode: "cors" })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var features = (data.features || []);
+      if (!features.length) return;
+
+      // Prefer any SFHA zone over X
+      var best = null;
+      for (var i = 0; i < features.length; i++) {
+        var fz = ((features[i].attributes.FLD_ZONE) || "").toUpperCase().trim();
+        if (SFHA_ZONES.indexOf(fz) >= 0) { best = features[i].attributes; break; }
+      }
+      if (!best) best = features[0].attributes;
+
+      var rawZone = (best.FLD_ZONE || "X").toUpperCase().trim();
+      var rawSub  = (best.ZONE_SUBTY || "").trim();
+      var classified = classifyX(rawZone, rawSub);
+
+      // Human-readable display labels matching ZONE_DISPLAY_NAMES in fema_lookup.py
+      var ZONE_LABELS = {
+        "X": "Zone X", "X500": "Zone X (Shaded)", "X-LEVEE": "Zone X Levee",
+        "A": "Zone A", "AE": "Zone AE", "AH": "Zone AH", "AO": "Zone AO",
+        "AR": "Zone AR", "A99": "Zone A99", "V": "Zone V", "VE": "Zone VE",
+        "B": "Zone B", "C": "Zone C", "D": "Zone D", "UNDETERMINED": "Undetermined",
+      };
+
+      var dispZone = ZONE_LABELS[classified] || classified;
+
+      // Skip update if the badge already shows the correct label
+      var currentBadge = ((document.getElementById("zoneBadge") || {}).textContent || "").trim();
+      if (currentBadge === dispZone) return;
+
+      var isSFHA   = SFHA_ZONES.indexOf(classified) >= 0;
+      var newDesc  = ZONE_DESCS[classified] || ("Flood Zone " + dispZone + " \u2014 See FIRM panel for details");
+      var newSfha  = isSFHA ? "Yes" : "No";
+      var newIns   = isSFHA
+        ? "Yes \u2014 Federal mandatory purchase requirement applies"
+        : "No \u2014 Flood insurance is not federally required";
+
+      // Zone banner
+      setEl("zoneBanner", "class", "zone-banner " + (isSFHA ? "sfha" : "non-sfha"));
+      setEl("zoneBadge",  "text", dispZone);
+      setEl("zoneTitle",  "text", isSFHA ? "Special Flood Hazard Area (SFHA)" : "Non-Special Flood Hazard Area");
+      setEl("zoneDescP",  "text", newDesc);
+      setEl("insTag", "class", "insurance-tag " + (isSFHA ? "required" : "not-required"));
+      setEl("insTag", "text", isSFHA ? "Insurance Required" : "Not Required");
+
+      // Detail card
+      setEl("zoneDetailVal", "text", dispZone);
+      setEl("sfhaDetailVal", "text", newSfha);
+      setEl("insDetailVal",  "text", newIns);
+
+      // Study type snippet
+      var el = document.getElementById("studyTypeSpan");
+      if (el) el.textContent = newDesc.substring(0, 40) + "\u2026";
+
+      // Hidden form inputs (so downloaded PDFs reflect the corrected zone)
+      ["certZone", "noticeZone"].forEach(function(id)     { setEl(id, "value", dispZone); });
+      ["certZoneDesc","noticeZoneDesc"].forEach(function(id) { setEl(id, "value", newDesc); });
+      ["certSfha", "noticeSfha"].forEach(function(id)     { setEl(id, "value", newSfha); });
+      ["certIns",  "noticeIns"].forEach(function(id)      { setEl(id, "value", newIns); });
+
+      // Update map marker color & popup
+      try {
+        var mAddr = "4250 Duck Dr, Ann Arbor, Michigan, 48103";
+        var mColor = isSFHA ? "#c0392b" : "#1a7a4a";
+        var m = window._floodMarker;
+        if (m) {
+          m.setStyle({ fillColor: mColor });
+          m.setPopupContent(
+            '<div style="font-family:sans-serif;min-width:200px;">' +
+            '<strong style="color:#003366;font-size:0.95rem;">' + mAddr + '</strong><br/>' +
+            '<div style="margin-top:6px;"><span style="background:' + mColor +
+            ';color:#fff;padding:2px 8px;border-radius:10px;font-size:0.8rem;font-weight:700;">Zone ' + dispZone + '</span></div>' +
+            '<div style="margin-top:6px;font-size:0.8rem;color:#5a6470;">' + newDesc + '</div>' +
+            '<div style="margin-top:5px;font-size:0.78rem;font-weight:600;color:' + mColor + ';">' + newIns + '</div>' +
+            '</div>', { maxWidth: 280 }
+          );
+        }
+      } catch(e) { /* map update non-critical */ }
+    })
+    .catch(function() { /* hazards.fema.gov unreachable — server-side determination stands */ });
+})();
+</script>
+</body>
+</html>
