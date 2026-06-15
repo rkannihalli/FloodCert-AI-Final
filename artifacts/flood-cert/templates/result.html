@@ -518,6 +518,7 @@ async function lolCheck(id, btn) {
         var panelEl = document.getElementById('firmPanelDisplay');
         if (firmPan && panelEl && firmPan.length > panelEl.textContent.trim().length) {
           setText('firmPanelDisplay', firmPan);
+          // Also update hidden PDF form fields with full panel number
           setVal('certPanelNumber', firmPan);
           setVal('noticePanelNumber', firmPan);
         }
