@@ -18,20 +18,14 @@ def _render_pdf(template_name: str, data: dict) -> bytes:
     template = jinja_env.get_template(template_name)
     html_content = template.render(**data)
     css_path = os.path.join(STATIC_DIR, "css", "pdf.css")
-    try:
-        import weasyprint
-        base_url = f"file://{STATIC_DIR}/"
-        css = weasyprint.CSS(filename=css_path) if os.path.exists(css_path) else None
-        stylesheets = [css] if css else []
-        pdf_bytes = weasyprint.HTML(
-            string=html_content,
-            base_url=base_url
-        ).write_pdf(stylesheets=stylesheets)
-        return pdf_bytes
-    except Exception as e:
-        print(f"WeasyPrint error: {e}")
-        # Fallback: return HTML with PDF content-type hint
-        return html_content.encode("utf-8")
+    import weasyprint
+    base_url = f"file://{STATIC_DIR}/"
+    css = weasyprint.CSS(filename=css_path) if os.path.exists(css_path) else None
+    stylesheets = [css] if css else []
+    return weasyprint.HTML(
+        string=html_content,
+        base_url=base_url
+    ).write_pdf(stylesheets=stylesheets)
 
 def generate_flood_certificate_pdf(data: dict) -> bytes:
     return _render_pdf("certificate_pdf.html", data)
