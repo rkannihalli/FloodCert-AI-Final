@@ -303,7 +303,7 @@ async def shutdown():
 async def login_get(request: Request):
     if get_session_user(request):
         return RedirectResponse("/", status_code=303)
-    return templates.TemplateResponse("login.html", {"request": request})
+    return templates.TemplateResponse(request, "login.html")
 
 
 @app.post("/login", response_class=HTMLResponse)
@@ -315,23 +315,23 @@ async def login_post(
     user = get_user_by_email(email)
     if not user:
         return templates.TemplateResponse(
-            "login.html",
-            {"request": request, "error": "Invalid email or password.", "email": email},
+            request, "login.html",
+            {"error": "Invalid email or password.", "email": email},
         )
     if user["status"] == "pending":
         return templates.TemplateResponse(
-            "login.html",
-            {"request": request, "error": "Your access request is pending approval.", "email": email},
+            request, "login.html",
+            {"error": "Your access request is pending approval.", "email": email},
         )
     if user["status"] in ("rejected", "inactive"):
         return templates.TemplateResponse(
-            "login.html",
-            {"request": request, "error": "Your account has been deactivated. Contact the administrator.", "email": email},
+            request, "login.html",
+            {"error": "Your account has been deactivated. Contact the administrator.", "email": email},
         )
     if not user.get("password_hash") or not verify_password(password, user["password_hash"]):
         return templates.TemplateResponse(
-            "login.html",
-            {"request": request, "error": "Invalid email or password.", "email": email},
+            request, "login.html",
+            {"error": "Invalid email or password.", "email": email},
         )
 
     company_id = user.get("company_id")
@@ -362,7 +362,7 @@ async def logout(request: Request):
 
 @app.get("/request-access", response_class=HTMLResponse)
 async def request_access_get(request: Request):
-    return templates.TemplateResponse("request_access.html", {"request": request})
+    return templates.TemplateResponse(request, "request_access.html")
 
 
 @app.post("/request-access", response_class=HTMLResponse)
@@ -406,18 +406,18 @@ async def request_access_post(
 
     if errors:
         return templates.TemplateResponse(
-            "request_access.html",
-            {"request": request, "errors": errors, "form": form_data},
+            request, "request_access.html",
+            {"errors": errors, "form": form_data},
         )
 
     existing = get_user_by_email(email)
     if existing:
         if existing["status"] == "active":
             return templates.TemplateResponse(
-                "request_access.html",
-                {"request": request, "errors": ["An account with this email already exists. Please sign in."], "form": form_data},
+                request, "request_access.html",
+                {"errors": ["An account with this email already exists. Please sign in."], "form": form_data},
             )
-        return templates.TemplateResponse("request_access.html", {"request": request, "submitted": True})
+        return templates.TemplateResponse(request, "request_access.html", {"submitted": True})
 
     create_user(
         email=email,
@@ -444,7 +444,7 @@ async def request_access_post(
     except Exception as e:
         print(f"[REQUEST-ACCESS] Admin notification email failed: {e}")
 
-    return templates.TemplateResponse("request_access.html", {"request": request, "submitted": True})
+    return templates.TemplateResponse(request, "request_access.html", {"submitted": True})
 
 
 # ── Admin routes ──────────────────────────────────────────────────────────────
@@ -514,8 +514,7 @@ async def admin_panel(
         "failed_alerts": count_failed_lol_alerts(),
     }
 
-    return templates.TemplateResponse("admin.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "admin.html", {
         "tab": tab,
         "pending": pending, "active": active, "inactive": inactive,
         "stats": stats, "flash": flash,
@@ -788,8 +787,7 @@ async def admin_live_test(request: Request):
 async def index(request: Request):
     user = get_session_user(request)
     pending_count = count_pending_users() if user and user.get("is_admin") else 0
-    return templates.TemplateResponse("index.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "index.html", {
         "current_user": user,
         "pending_count": pending_count,
     })
@@ -850,8 +848,8 @@ async def generate(
     session_user = get_session_user(request)
 
     if errors:
-        return templates.TemplateResponse("index.html", {
-            "request": request, "errors": errors,
+        return templates.TemplateResponse(request, "index.html", {
+            "errors": errors,
             "current_user": session_user, "pending_count": 0,
             "form": {
                 "property_address": property_address, "loan_id": loan_id,
@@ -875,8 +873,7 @@ async def generate(
     else:
         geo_result = await geocode_address(property_address)
         if not geo_result:
-            return templates.TemplateResponse("index.html", {
-                "request": request,
+            return templates.TemplateResponse(request, "index.html", {
                 "errors": ["Could not geocode the provided address. Please check the address and try again."],
                 "form": {
                     "property_address": property_address, "loan_id": loan_id,
@@ -946,8 +943,7 @@ async def generate(
         lon=certificate_data["lon"],
     )
 
-    return templates.TemplateResponse("result.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "result.html", {
         "data": certificate_data,
         "record_id": record_id,
         "comm": comm_info,
@@ -1027,8 +1023,7 @@ async def history(request: Request, q: str = ""):
         records = search_determinations(q.strip(), company_id=company_id)
     else:
         records = list_determinations(100, company_id=company_id)
-    return templates.TemplateResponse("history.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "history.html", {
         "records": records,
         "query": q,
         "flagged_count": count_flagged(),
@@ -1171,8 +1166,8 @@ async def history_detail(request: Request, record_id: int):
         lat=record.get("lat", 0.0),
         lon=record.get("lon", 0.0),
     )
-    return templates.TemplateResponse("result.html", {
-        "request": request, "data": record, "record_id": record_id,
+    return templates.TemplateResponse(request, "result.html", {
+        "data": record, "record_id": record_id,
         "from_history": True, "comm": comm_info, "current_user": user,
     })
 
@@ -1260,8 +1255,7 @@ async def lol_monitoring_page(request: Request):
     company_id = None if user.get("is_admin") else user.get("company_id")
     records = list_lol_monitoring(company_id=company_id)
     companies = list_companies() if user.get("is_admin") else []
-    return templates.TemplateResponse("lol_monitoring.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "lol_monitoring.html", {
         "records": records,
         "current_user": user,
         "companies": companies,
@@ -1288,7 +1282,7 @@ async def close_lol_record(request: Request, monitoring_id: int):
 
 @app.get("/batch", response_class=HTMLResponse)
 async def batch_page(request: Request):
-    return templates.TemplateResponse("batch.html", {"request": request, "current_user": get_session_user(request)})
+    return templates.TemplateResponse(request, "batch.html", {"current_user": get_session_user(request)})
 
 
 @app.get("/batch/template")
@@ -1387,7 +1381,7 @@ async def batch_process(request: Request, csv_file: UploadFile = File(...)):
     errors = []
     if not csv_file.filename.lower().endswith(".csv"):
         errors.append("File must be a .csv file.")
-        return templates.TemplateResponse("batch.html", {"request": request, "errors": errors})
+        return templates.TemplateResponse(request, "batch.html", {"errors": errors})
 
     raw = await csv_file.read()
     try:
@@ -1397,7 +1391,7 @@ async def batch_process(request: Request, csv_file: UploadFile = File(...)):
             text = raw.decode("latin-1").strip()
         except Exception:
             errors.append("Could not decode the CSV file. Please save it as UTF-8.")
-            return templates.TemplateResponse("batch.html", {"request": request, "errors": errors})
+            return templates.TemplateResponse(request, "batch.html", {"errors": errors})
 
     reader = csv.DictReader(io.StringIO(text))
     required_cols = {"property_address", "loan_id", "borrower_name", "lender_name"}
@@ -1406,15 +1400,15 @@ async def batch_process(request: Request, csv_file: UploadFile = File(...)):
             f"CSV must contain these columns: {', '.join(sorted(required_cols))}. "
             f"Found: {', '.join(reader.fieldnames or [])}."
         )
-        return templates.TemplateResponse("batch.html", {"request": request, "errors": errors})
+        return templates.TemplateResponse(request, "batch.html", {"errors": errors})
 
     rows = list(reader)
     if len(rows) == 0:
         errors.append("The CSV file contains no data rows.")
-        return templates.TemplateResponse("batch.html", {"request": request, "errors": errors})
+        return templates.TemplateResponse(request, "batch.html", {"errors": errors})
     if len(rows) > 100:
         errors.append(f"Maximum 100 rows per batch. Your file contains {len(rows)} rows.")
-        return templates.TemplateResponse("batch.html", {"request": request, "errors": errors})
+        return templates.TemplateResponse(request, "batch.html", {"errors": errors})
 
     normalised_rows = [{k.strip().lower(): v for k, v in r.items()} for r in rows]
     det_date = date.today().strftime("%B %d, %Y")
@@ -1452,8 +1446,8 @@ async def batch_process(request: Request, csv_file: UploadFile = File(...)):
     _batch_record_ids[batch_id] = [r["record_id"] for r in results if r.get("record_id")]
     _batch_full_results[batch_id] = list(results)
 
-    return templates.TemplateResponse("batch_results.html", {
-        "request": request, "results": results,
+    return templates.TemplateResponse(request, "batch_results.html", {
+        "results": results,
         "batch_id": batch_id, "determination_date": det_date,
     })
 
