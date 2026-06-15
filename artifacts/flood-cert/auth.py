@@ -13,7 +13,7 @@ PUBLIC_PATHS = {"/login", "/request-access"}
 
 
 def is_public(path: str) -> bool:
-    return path in PUBLIC_PATHS or path.startswith("/static") or path == "/favicon.ico"
+    return path in PUBLIC_PATHS or path.startswith("/static") or path == "/favicon.ico" or path == "/health"
 
 
 def hash_password(password: str) -> str:
