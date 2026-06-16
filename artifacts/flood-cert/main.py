@@ -1561,13 +1561,16 @@ async def profile_page(request: Request):
         return RedirectResponse("/login", status_code=303)
     from db import get_determinations
     all_records = get_determinations(user_id=user["id"])
-    return templates.TemplateResponse("profile.html", {
-        "request":      request,
-        "user":         user,
-        "record_count": len(all_records) if all_records else 0,
-        "success":      request.session.pop("profile_success", None),
-        "error":        request.session.pop("profile_error",   None),
-    })
+    return templates.TemplateResponse(
+        request,
+        "profile.html",
+        {
+            "user":         user,
+            "record_count": len(all_records) if all_records else 0,
+            "success":      request.session.pop("profile_success", None),
+            "error":        request.session.pop("profile_error",   None),
+        }
+    )
 
 
 @app.post("/profile/change-password")
