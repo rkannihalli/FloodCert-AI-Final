@@ -1,119 +1,117 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>My Profile — FloodCert AI</title>
-  <link rel="stylesheet" href="/static/css/main.css">
-  <style>
-    body { background:#f3f4f6; min-height:100vh; font-family: system-ui, sans-serif; }
-    .profile-container { max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
-    .profile-card { background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 2rem; margin-bottom: 1.5rem; }
-    .profile-card h2 { font-size: 1.2rem; font-weight: 600; margin-bottom: 1.5rem; padding-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; }
-    .form-group { margin-bottom: 1.2rem; }
-    .form-group label { display: block; font-size: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 0.4rem; }
-    .form-group input { width: 100%; padding: 0.6rem 0.875rem; border: 1px solid #d1d5db; border-radius: 8px; font-size: 0.9rem; box-sizing: border-box; }
-    .btn-primary { background: #2563eb; color: #fff; padding: 0.6rem 1.5rem; border: none; border-radius: 8px; font-size: 0.9rem; cursor: pointer; }
-    .btn-primary:hover { background: #1d4ed8; }
-    .alert { padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.9rem; }
-    .alert-success { background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
-    .alert-error { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
-    .history-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
-    .history-table th { background: #f9fafb; padding: 0.75rem 1rem; text-align: left; font-weight: 600; border-bottom: 1px solid #e5e7eb; }
-    .history-table td { padding: 0.75rem 1rem; border-bottom: 1px solid #f3f4f6; }
-    .history-table tr:hover td { background: #f9fafb; }
-    .badge-x { background: #d1fae5; color: #065f46; padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
-    .badge-sfha { background: #fee2e2; color: #991b1b; padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
-    .info-row { display: flex; justify-content: space-between; padding: 0.6rem 0; border-bottom: 1px solid #f3f4f6; font-size: 0.9rem; }
-    .info-label { color: #6b7280; }
-    .info-value { font-weight: 500; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Profile — FloodCert AI</title>
+<link rel="stylesheet" href="/static/css/main.css">
+<style>
+body{background:#f3f4f6;font-family:system-ui,sans-serif;margin:0}
+.wrap{max-width:900px;margin:2rem auto;padding:0 1rem}
+.card{background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.07);padding:2rem;margin-bottom:1.5rem}
+.card h2{font-size:1.05rem;font-weight:600;margin:0 0 1.4rem;padding-bottom:.75rem;border-bottom:1px solid #e5e7eb;color:#1e3a5f}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+.fg{margin-bottom:1rem}
+.fg label{display:block;font-size:.8rem;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;margin-bottom:.3rem}
+.fg input{width:100%;padding:.55rem .85rem;border:1px solid #d1d5db;border-radius:8px;font-size:.9rem;box-sizing:border-box;background:#fff}
+.fg input:disabled{background:#f9fafb;color:#374151;cursor:default}
+.btn{background:#2563eb;color:#fff;padding:.55rem 1.4rem;border:none;border-radius:8px;font-size:.9rem;cursor:pointer;font-weight:500}
+.btn:hover{background:#1d4ed8}
+.btn-sm{background:#f3f4f6;color:#374151;padding:.4rem 1rem;border:1px solid #d1d5db;border-radius:6px;font-size:.8rem;cursor:pointer}
+.btn-sm:hover{background:#e5e7eb}
+.alert{padding:.7rem 1rem;border-radius:8px;margin-bottom:1.2rem;font-size:.875rem}
+.ok{background:#d1fae5;color:#065f46;border:1px solid #a7f3d0}
+.err{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}
+table{width:100%;border-collapse:collapse;font-size:.85rem}
+th{background:#f9fafb;padding:.6rem 1rem;text-align:left;font-weight:600;border-bottom:1px solid #e5e7eb;color:#374151}
+td{padding:.6rem 1rem;border-bottom:1px solid #f3f4f6;color:#374151}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#fafafa}
+.badge{padding:.15rem .55rem;border-radius:20px;font-size:.72rem;font-weight:700}
+.zx{background:#d1fae5;color:#065f46}
+.zs{background:#fee2e2;color:#991b1b}
+.empty{color:#9ca3af;font-size:.9rem;padding:1.5rem 0;text-align:center}
+@media(max-width:600px){.row2{grid-template-columns:1fr}}
+</style>
 </head>
 <body>
-<header style="background:#1e3a5f; color:#fff; padding:1rem 2rem; display:flex; justify-content:space-between; align-items:center;">
-  <div style="font-weight:700; font-size:1.1rem;">🌊 FEMA Flood Certificate Generator</div>
-  <nav style="display:flex; align-items:center; gap:1.5rem;">
-    <a href="/" style="color:#93c5fd; text-decoration:none; font-size:0.9rem;">New Search</a>
-    <a href="/history" style="color:#93c5fd; text-decoration:none; font-size:0.9rem;">History</a>
-    <a href="/profile" style="color:#fff; text-decoration:none; font-size:0.9rem; font-weight:600;">My Profile</a>
-    <form method="POST" action="/logout" style="margin:0;">
-      <button type="submit" style="background:none;border:none;cursor:pointer;color:#93c5fd;font-size:0.9rem;">Sign Out</button>
+<header style="background:#1e3a5f;color:#fff;padding:1rem 2rem;display:flex;justify-content:space-between;align-items:center">
+  <div style="font-weight:700;font-size:1.1rem">🌊 FloodCert AI</div>
+  <nav style="display:flex;align-items:center;gap:1.5rem;font-size:.875rem">
+    <a href="/" style="color:#93c5fd;text-decoration:none">New Search</a>
+    <a href="/history" style="color:#93c5fd;text-decoration:none">History</a>
+    <a href="/profile" style="color:#fff;font-weight:600;text-decoration:none">My Profile</a>
+    <form method="POST" action="/logout" style="margin:0">
+      <button type="submit" style="background:none;border:none;cursor:pointer;color:#93c5fd;font-size:.875rem">Sign Out</button>
     </form>
   </nav>
 </header>
 
-<div class="profile-container">
-  <h1 style="font-size:1.5rem; font-weight:700; margin-bottom:1.5rem; margin-top:2rem;">My Profile</h1>
+<div class="wrap">
+  {% if success %}<div class="alert ok">{{ success }}</div>{% endif %}
+  {% if error %}<div class="alert err">{{ error }}</div>{% endif %}
 
-  {% if success %}
-  <div class="alert alert-success">✅ {{ success }}</div>
-  {% endif %}
-  {% if error %}
-  <div class="alert alert-error">⚠️ {{ error }}</div>
-  {% endif %}
-
-  <div class="profile-card">
+  <div class="card">
     <h2>Account Information</h2>
-    <div class="info-row"><span class="info-label">Full Name</span><span class="info-value">{{ user.name }}</span></div>
-    <div class="info-row"><span class="info-label">Email</span><span class="info-value">{{ user.email }}</span></div>
-    <div class="info-row"><span class="info-label">Company</span><span class="info-value">{{ user.company_name or "—" }}</span></div>
-    <div class="info-row"><span class="info-label">Role</span><span class="info-value">{{ "Administrator" if user.is_admin else "User" }}</span></div>
+    <div class="row2">
+      <div class="fg"><label>First Name</label><input disabled value="{{ user.first_name or user.name or '—' }}"></div>
+      <div class="fg"><label>Last Name</label><input disabled value="{{ user.last_name or '—' }}"></div>
+    </div>
+    <div class="row2">
+      <div class="fg"><label>Email</label><input disabled value="{{ user.email or '—' }}"></div>
+      <div class="fg"><label>Contact Number</label><input disabled value="{{ user.contact_number or '—' }}"></div>
+    </div>
+    <div class="row2">
+      <div class="fg"><label>Company</label><input disabled value="{{ user.company_name or '—' }}"></div>
+      <div class="fg"><label>Role</label><input disabled value="{{ 'Administrator' if user.is_admin else 'User' }}"></div>
+    </div>
+    <div class="fg"><label>Company Address</label><input disabled value="{{ user.company_address or '—' }}"></div>
   </div>
 
-  <div class="profile-card">
+  <div class="card">
     <h2>Change Password</h2>
-    <form method="post" action="/profile/change-password">
-      <div class="form-group">
-        <label>Current Password</label>
-        <input type="password" name="current_password" required placeholder="Enter current password">
+    <form method="POST" action="/profile/change-password">
+      <div class="row2">
+        <div class="fg"><label>Current Password</label><input type="password" name="current_password" required placeholder="Enter current password"></div>
+        <div class="fg"></div>
       </div>
-      <div class="form-group">
-        <label>New Password</label>
-        <input type="password" name="new_password" required placeholder="Enter new password (min 8 chars)">
+      <div class="row2">
+        <div class="fg"><label>New Password</label><input type="password" name="new_password" required minlength="8" placeholder="Min 8 characters"></div>
+        <div class="fg"><label>Confirm New Password</label><input type="password" name="confirm_password" required minlength="8" placeholder="Repeat new password"></div>
       </div>
-      <div class="form-group">
-        <label>Confirm New Password</label>
-        <input type="password" name="confirm_password" required placeholder="Confirm new password">
-      </div>
-      <button type="submit" class="btn-primary">Update Password</button>
+      <button class="btn" type="submit">Update Password</button>
     </form>
   </div>
 
-  <div class="profile-card">
-    <h2>My Loan History ({{ records|length }} records)</h2>
+  <div class="card">
+    <h2>My Determination History ({{ records|length }} record{{ 's' if records|length != 1 else '' }})</h2>
     {% if records %}
-    <table class="history-table">
+    <div style="overflow-x:auto">
+    <table>
       <thead>
         <tr>
-          <th>Date</th>
-          <th>Loan ID</th>
-          <th>Property Address</th>
-          <th>Zone</th>
-          <th>SFHA</th>
-          <th>PDF</th>
+          <th>Date</th><th>Property Address</th><th>Zone</th>
+          <th>Loan ID</th><th>Borrower</th><th style="text-align:center">PDF</th>
         </tr>
       </thead>
       <tbody>
-        {% for r in records %}
-        <tr>
-          <td>{{ r.determination_date or (r.created_at or "")[:10] }}</td>
-          <td>{{ r.loan_id }}</td>
-          <td>{{ r.property_address }}</td>
-          <td>
-            {% if r.sfha_status == "Yes" %}
-            <span class="badge-sfha">{{ r.flood_zone }}</span>
-            {% else %}
-            <span class="badge-x">{{ r.flood_zone }}</span>
-            {% endif %}
-          </td>
-          <td>{{ r.sfha_status }}</td>
-          <td><a href="/history/{{ r.id }}/download/certificate" style="color:#2563eb; font-size:0.8rem; text-decoration:none;">⬇ Download</a></td>
-        </tr>
-        {% endfor %}
+      {% for r in records %}
+      <tr>
+        <td style="white-space:nowrap">{{ r.determination_date or r.created_at[:10] if r.created_at else '—' }}</td>
+        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ r.property_address }}">{{ r.property_address }}</td>
+        <td><span class="badge {{ 'zs' if r.sfha_status == 'Yes' else 'zx' }}">{{ r.flood_zone }}</span></td>
+        <td>{{ r.loan_id or '—' }}</td>
+        <td>{{ r.borrower_name or '—' }}</td>
+        <td style="text-align:center">
+          <a href="/history/{{ r.id }}/download/certificate" style="color:#2563eb;font-size:.8rem;white-space:nowrap">⬇ Cert</a>
+        </td>
+      </tr>
+      {% endfor %}
       </tbody>
     </table>
+    </div>
     {% else %}
-    <p style="color:#6b7280; font-size:0.9rem;">No loan history yet.</p>
+    <p class="empty">No flood determinations yet. Run a search to get started.</p>
     {% endif %}
   </div>
 </div>

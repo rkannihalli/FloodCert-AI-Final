@@ -29,6 +29,7 @@ from db import (
     list_users_by_status, list_users_by_company,
     approve_user, reject_user, update_user_password, set_user_status, delete_user,
     count_pending_users, set_user_company,
+    get_user_by_reset_token, set_reset_token, clear_reset_token,
     init_companies, get_or_create_company, get_company_by_id, list_companies,
     init_audit_tables, log_admin_deletion, list_admin_deletion_log,
     init_lol_tables, upsert_lol_monitoring, get_lol_monitoring,
@@ -41,6 +42,7 @@ from email_sender import (
     send_certificate_email, send_redetermination_notification,
     send_access_request_confirmation, send_admin_access_notification,
     send_welcome_email, send_rejection_email, send_lol_alert_email,
+    send_password_reset_email,
 )
 from auth import (
     SUPER_ADMIN_EMAIL, SECRET_KEY, is_public,
@@ -1592,3 +1594,145 @@ async def change_password(
     request.session["profile_success"] = "Password updated successfully!"
     return RedirectResponse("/profile", status_code=303)
 
+
+
+# ── User Profile & Password Management ───────────────────────────────────────
+
+@app.get("/profile", response_class=HTMLResponse)
+async def profile_page(request: Request):
+    user = get_session_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    from db import get_determinations, get_user_by_id
+    db_user = get_user_by_id(user["id"])
+    records = get_determinations(user_id=user["id"])
+    return templates.TemplateResponse("profile.html", {
+        "request": request,
+        "user": db_user or user,
+        "records": records,
+        "success": request.session.pop("profile_success", None),
+        "error":   request.session.pop("profile_error",   None),
+    })
+
+
+@app.post("/profile/change-password")
+async def change_password_post(
+    request: Request,
+    current_password: str = Form(...),
+    new_password:     str = Form(...),
+    confirm_password: str = Form(...),
+):
+    user = get_session_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    db_user = get_user_by_email(user["email"])
+    if not db_user or not verify_password(current_password, db_user["password_hash"]):
+        request.session["profile_error"] = "Current password is incorrect."
+        return RedirectResponse("/profile", status_code=303)
+    if new_password != confirm_password:
+        request.session["profile_error"] = "New passwords do not match."
+        return RedirectResponse("/profile", status_code=303)
+    if len(new_password) < 8:
+        request.session["profile_error"] = "Password must be at least 8 characters."
+        return RedirectResponse("/profile", status_code=303)
+    update_user_password(db_user["id"], hash_password(new_password))
+    request.session["profile_success"] = "Password updated successfully."
+    return RedirectResponse("/profile", status_code=303)
+
+
+@app.get("/forgot-password", response_class=HTMLResponse)
+async def forgot_password_get(request: Request):
+    return templates.TemplateResponse("forgot_password.html", {
+        "request": request,
+        "sent": False,
+        "error": None,
+    })
+
+
+@app.post("/forgot-password", response_class=HTMLResponse)
+async def forgot_password_post(request: Request, email: str = Form(...)):
+    from db import set_reset_token
+    import secrets
+    from datetime import datetime, timedelta
+    db_user = get_user_by_email(email.strip().lower())
+    # Always show success to avoid email enumeration
+    if db_user and db_user.get("status") == "active":
+        token  = secrets.token_urlsafe(32)
+        expiry = (datetime.utcnow() + timedelta(hours=1)).isoformat()
+        set_reset_token(db_user["id"], token, expiry)
+        base   = str(request.base_url).rstrip("/")
+        reset_url = f"{base}/reset-password?token={token}"
+        try:
+            send_password_reset_email(db_user["email"], db_user.get("name",""), reset_url)
+        except Exception as e:
+            print(f"[FORGOT-PW] email failed: {e}")
+    return templates.TemplateResponse("forgot_password.html", {
+        "request": request,
+        "sent": True,
+        "error": None,
+    })
+
+
+@app.get("/reset-password", response_class=HTMLResponse)
+async def reset_password_get(request: Request, token: str = ""):
+    from db import get_user_by_reset_token
+    from datetime import datetime
+    db_user = get_user_by_reset_token(token)
+    expired = False
+    if db_user:
+        expiry = db_user.get("password_reset_expiry") or ""
+        if expiry and datetime.utcnow().isoformat() > expiry:
+            expired = True
+            db_user = None
+    return templates.TemplateResponse("reset_password.html", {
+        "request": request,
+        "token": token,
+        "valid": db_user is not None,
+        "expired": expired,
+        "success": False,
+        "error": None,
+    })
+
+
+@app.post("/reset-password", response_class=HTMLResponse)
+async def reset_password_post(
+    request: Request,
+    token:            str = Form(...),
+    new_password:     str = Form(...),
+    confirm_password: str = Form(...),
+):
+    from db import get_user_by_reset_token, clear_reset_token
+    from datetime import datetime
+    db_user = get_user_by_reset_token(token)
+    if not db_user:
+        return templates.TemplateResponse("reset_password.html", {
+            "request": request, "token": token,
+            "valid": False, "expired": False,
+            "success": False, "error": "Invalid or expired link.",
+        })
+    expiry = db_user.get("password_reset_expiry") or ""
+    if expiry and datetime.utcnow().isoformat() > expiry:
+        return templates.TemplateResponse("reset_password.html", {
+            "request": request, "token": token,
+            "valid": False, "expired": True,
+            "success": False, "error": "Link has expired. Please request a new one.",
+        })
+    if new_password != confirm_password:
+        return templates.TemplateResponse("reset_password.html", {
+            "request": request, "token": token,
+            "valid": True, "expired": False,
+            "success": False, "error": "Passwords do not match.",
+        })
+    if len(new_password) < 8:
+        return templates.TemplateResponse("reset_password.html", {
+            "request": request, "token": token,
+            "valid": True, "expired": False,
+            "success": False, "error": "Password must be at least 8 characters.",
+        })
+    update_user_password(db_user["id"], hash_password(new_password))
+    clear_reset_token(db_user["id"])
+    return templates.TemplateResponse("reset_password.html", {
+        "request": request, "token": "",
+        "valid": True, "expired": False,
+        "success": True, "error": None,
+    })

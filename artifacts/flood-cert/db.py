@@ -601,6 +601,8 @@ def init_auth_tables():
         "ALTER TABLE users ADD COLUMN company_address TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE users ADD COLUMN contact_number TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE users ADD COLUMN company_id INTEGER",
+        "ALTER TABLE users ADD COLUMN password_reset_token TEXT",
+        "ALTER TABLE users ADD COLUMN password_reset_expiry TEXT",
     ])
     conn.close()
 
@@ -703,6 +705,35 @@ def update_user_password(user_id: int, password_hash: str) -> None:
     conn = get_conn()
     conn.execute(
         "UPDATE users SET password_hash=? WHERE id=?", (password_hash, user_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_user_by_reset_token(token: str) -> Optional[dict]:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM users WHERE password_reset_token = ?", (token,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def set_reset_token(user_id: int, token: str, expiry: str) -> None:
+    conn = get_conn()
+    conn.execute(
+        "UPDATE users SET password_reset_token=?, password_reset_expiry=? WHERE id=?",
+        (token, expiry, user_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def clear_reset_token(user_id: int) -> None:
+    conn = get_conn()
+    conn.execute(
+        "UPDATE users SET password_reset_token=NULL, password_reset_expiry=NULL WHERE id=?",
+        (user_id,)
     )
     conn.commit()
     conn.close()

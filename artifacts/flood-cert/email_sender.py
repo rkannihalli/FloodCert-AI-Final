@@ -295,3 +295,27 @@ FEMA Flood Certificate Generator | Life-of-Loan Monitoring Service
 """
     msg.attach(MIMEText(body, "plain"))
     _send(msg)
+
+
+def send_password_reset_email(to_email: str, name: str, reset_url: str) -> None:
+    """Password reset link email."""
+    _, _, _, _, from_addr = _smtp_config()
+    msg = MIMEMultipart()
+    msg["From"]    = from_addr
+    msg["To"]      = to_email
+    msg["Subject"] = "Reset Your FloodCert AI Password"
+    body = f"""Hello {name},
+
+We received a request to reset your FloodCert AI password.
+
+Click the link below to set a new password (valid for 1 hour):
+
+{reset_url}
+
+If you did not request a password reset, please ignore this email.
+
+—
+FloodCert AI | Automated Notification
+"""
+    msg.attach(MIMEText(body, "plain"))
+    _send(msg)
