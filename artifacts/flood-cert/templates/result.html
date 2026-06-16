@@ -515,18 +515,17 @@ async function lolCheck(id, btn) {
         var firmPan = formatPanel(attrs.FIRM_PAN);
         var effDate = formatDate(attrs.EFF_DATE);
 
-        // Map number: only update if new value is longer (more complete)
+        // Map number: always update from authoritative FEMA source
         var panelEl = document.getElementById('firmPanelDisplay');
-        if (firmPan && panelEl && firmPan.length > panelEl.textContent.trim().length) {
+        if (firmPan) {
           setText('firmPanelDisplay', firmPan);
-          // Also update hidden PDF form fields with full panel number
           setVal('certPanelNumber', firmPan);
           setVal('noticePanelNumber', firmPan);
         }
 
-        // Effective date: only update if current is placeholder
+        // Effective date: always update from authoritative FEMA source
         var dateEl = document.getElementById('firmDateDisplay');
-        if (effDate && dateEl && dateEl.textContent.trim() === 'See FEMA Map Service Center') {
+        if (effDate) {
           setText('firmDateDisplay', effDate);
           setVal('certPanelDate', effDate);
           setVal('noticePanelDate', effDate);
@@ -548,25 +547,18 @@ async function lolCheck(id, btn) {
         var cid     = (attrs.CID       || '').trim();
         var polName = (attrs.POL_NAME1 || '').trim();
 
-        // CID: only replace if it looks like a proper 6-digit NFIP code
+        // CID: always update from authoritative FEMA Layer 22 source
         if (cid && /^\d{6}$/.test(cid)) {
-          var cidEl = document.getElementById('cidDisplay');
-          // Only update if current value is not already a proper 6-digit CID
-          if (cidEl && !/^\d{6}$/.test(cidEl.textContent.trim())) {
-            setText('cidDisplay', cid);
-            setVal('certCid', cid);
-            setVal('noticeCid', cid);
-          }
+          setText('cidDisplay', cid);
+          setVal('certCid', cid);
+          setVal('noticeCid', cid);
         }
 
-        // Community name: only update if new value is longer / more specific
+        // Community name: always update from authoritative FEMA Layer 22 source
         if (polName) {
-          var nameEl = document.getElementById('commNameDisplay');
-          if (nameEl && polName.length > nameEl.textContent.trim().length) {
-            setText('commNameDisplay', polName);
-            setVal('certCommName', polName);
-            setVal('noticeCommName', polName);
-          }
+          setText('commNameDisplay', polName);
+          setVal('certCommName', polName);
+          setVal('noticeCommName', polName);
         }
         return;
       } catch(e) { /* try next geometry */ }
