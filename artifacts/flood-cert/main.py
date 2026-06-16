@@ -146,10 +146,10 @@ def _session_company_id(request: Request) -> int | None:
 
 _LOL_CHECKS = [
     # (lol_monitoring baseline key, human label, determine_flood_info result key)
-    ("baseline_panel_number",     "NFIP Map Panel Number",         "community_number"),
+    ("baseline_panel_number",     "NFIP Map Panel Number",         "panel_number"),
     ("baseline_effective_date",   "FIRM Panel Effective Date",     "panel_effective_date"),
     ("baseline_flood_zone",       "Flood Zone",                    "flood_zone"),
-    ("baseline_community_number", "NFIP Community Number (CID)",   "panel_number"),
+    ("baseline_community_number", "NFIP Community Number (CID)",   "community_number"),
 ]
 
 
@@ -1548,3 +1548,48 @@ async def batch_report_pdf(batch_id: str):
     filename = f"batch_flood_report_{date.today().isoformat()}.pdf"
     return Response(content=pdf_bytes, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+# ── User Profile ──────────────────────────────────────────────────────────────
+
+@app.get("/profile", response_class=HTMLResponse)
+async def profile_page(request: Request):
+    user = get_session_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    from db import get_determinations
+    all_records = get_determinations(user_id=user["id"])
+    return templates.TemplateResponse("profile.html", {
+        "request": request,
+        "user": user,
+        "records": all_records,
+        "success": request.session.pop("profile_success", None),
+        "error": request.session.pop("profile_error", None),
+    })
+
+
+@app.post("/profile/change-password")
+async def change_password(
+    request: Request,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+):
+    user = get_session_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    from db import get_user_by_email
+    db_user = get_user_by_email(user["email"])
+    if not db_user or not verify_password(current_password, db_user["password_hash"]):
+        request.session["profile_error"] = "Current password is incorrect."
+        return RedirectResponse("/profile", status_code=303)
+    if new_password != confirm_password:
+        request.session["profile_error"] = "New passwords do not match."
+        return RedirectResponse("/profile", status_code=303)
+    if len(new_password) < 8:
+        request.session["profile_error"] = "Password must be at least 8 characters."
+        return RedirectResponse("/profile", status_code=303)
+    update_user_password(db_user["id"], hash_password(new_password))
+    request.session["profile_success"] = "Password updated successfully!"
+    return RedirectResponse("/profile", status_code=303)
+
