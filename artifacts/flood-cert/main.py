@@ -756,7 +756,7 @@ async def admin_live_test(request: Request):
 
         nfhl, panel_data, community_data = await asyncio.gather(
             query_fema_nfhl(lat, lon),
-            query_firm_panel(lat, lon, county_fips=geo_result.get("state_fips","") + geo_result.get("county_fips","")),
+            query_firm_panel(lat, lon, county_fips=geo.get("state_fips","") + geo.get("county_fips","")),
             query_nfip_community(lat, lon),
         )
 

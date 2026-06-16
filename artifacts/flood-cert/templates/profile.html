@@ -50,7 +50,6 @@ tr:hover td{background:#fafafa}
 <div class="wrap">
   {% set _s = success or profile_success %}{% if _s %}<div class="alert ok">{{ _s }}</div>{% endif %}
   {% set _e = error or profile_error %}{% if _e %}<div class="alert err">{{ _e }}</div>{% endif %}
-  {% if false %}
 
   <div class="card">
     <h2>Account Information</h2>
@@ -90,7 +89,6 @@ tr:hover td{background:#fafafa}
     <p style="margin:0 0 1rem"><a href="/history" style="color:#2563eb">View all {{ record_count }} determination{{ 's' if record_count != 1 else '' }} in History →</a></p>
     {% else %}
     <p class="empty">No flood determinations yet. <a href="/" style="color:#2563eb">Run a search to get started.</a></p>
-    {% endif %}
   </div>
 </div>
 {% endif %}
