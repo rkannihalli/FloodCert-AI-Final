@@ -1562,11 +1562,11 @@ async def profile_page(request: Request):
     from db import get_determinations
     all_records = get_determinations(user_id=user["id"])
     return templates.TemplateResponse("profile.html", {
-        "request": request,
-        "user": user,
-        "records": all_records,
-        "success": request.session.pop("profile_success", None),
-        "error": request.session.pop("profile_error", None),
+        "request":      request,
+        "user":         user,
+        "record_count": len(all_records) if all_records else 0,
+        "success":      request.session.pop("profile_success", None),
+        "error":        request.session.pop("profile_error",   None),
     })
 
 
@@ -1597,33 +1597,6 @@ async def change_password(
 
 
 # ── User Profile & Password Management ───────────────────────────────────────
-
-@app.get("/profile", response_class=HTMLResponse)
-async def profile_page(request: Request):
-    user = get_session_user(request)
-    if not user:
-        return RedirectResponse("/login", status_code=303)
-    try:
-        db_user = get_user_by_id(user["id"])
-    except Exception:
-        db_user = None
-    try:
-        records = get_determinations(user_id=user["id"])
-    except Exception:
-        records = []
-    merged = dict(user)
-    if db_user:
-        merged.update(db_user)
-    return templates.TemplateResponse("profile.html", {
-        "request": request,
-        "user": merged,
-        "records": records,
-        "success": request.session.pop("profile_success", None),
-        "error":   request.session.pop("profile_error",   None),
-        "profile_success": None,
-        "profile_error": None,
-    })
-
 
 @app.post("/profile/change-password")
 async def change_password_post(
