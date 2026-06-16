@@ -17,19 +17,9 @@ body{background:#f3f4f6;font-family:system-ui,sans-serif;margin:0}
 .fg input:disabled{background:#f9fafb;color:#374151;cursor:default}
 .btn{background:#2563eb;color:#fff;padding:.55rem 1.4rem;border:none;border-radius:8px;font-size:.9rem;cursor:pointer;font-weight:500}
 .btn:hover{background:#1d4ed8}
-.btn-sm{background:#f3f4f6;color:#374151;padding:.4rem 1rem;border:1px solid #d1d5db;border-radius:6px;font-size:.8rem;cursor:pointer}
-.btn-sm:hover{background:#e5e7eb}
 .alert{padding:.7rem 1rem;border-radius:8px;margin-bottom:1.2rem;font-size:.875rem}
 .ok{background:#d1fae5;color:#065f46;border:1px solid #a7f3d0}
 .err{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}
-table{width:100%;border-collapse:collapse;font-size:.85rem}
-th{background:#f9fafb;padding:.6rem 1rem;text-align:left;font-weight:600;border-bottom:1px solid #e5e7eb;color:#374151}
-td{padding:.6rem 1rem;border-bottom:1px solid #f3f4f6;color:#374151}
-tr:last-child td{border-bottom:none}
-tr:hover td{background:#fafafa}
-.badge{padding:.15rem .55rem;border-radius:20px;font-size:.72rem;font-weight:700}
-.zx{background:#d1fae5;color:#065f46}
-.zs{background:#fee2e2;color:#991b1b}
 .empty{color:#9ca3af;font-size:.9rem;padding:1.5rem 0;text-align:center}
 @media(max-width:600px){.row2{grid-template-columns:1fr}}
 </style>
@@ -48,8 +38,9 @@ tr:hover td{background:#fafafa}
 </header>
 
 <div class="wrap">
-  {% set _s = success or profile_success %}{% if _s %}<div class="alert ok">{{ _s }}</div>{% endif %}
-  {% set _e = error or profile_error %}{% if _e %}<div class="alert err">{{ _e }}</div>{% endif %}
+
+  {% if success %}<div class="alert ok">{{ success }}</div>{% endif %}
+  {% if error %}<div class="alert err">{{ error }}</div>{% endif %}
 
   <div class="card">
     <h2>Account Information</h2>
@@ -62,10 +53,9 @@ tr:hover td{background:#fafafa}
       <div class="fg"><label>Contact Number</label><input disabled value="{{ user.contact_number or '—' }}"></div>
     </div>
     <div class="row2">
-      <div class="fg"><label>Company</label><input disabled value="{{ user.company_name or '—' }}"></div>
+      <div class="fg"><label>Company</label><input disabled value="{{ user.company_name or 'N/A' }}"></div>
       <div class="fg"><label>Role</label><input disabled value="{{ 'Administrator' if user.is_admin else 'User' }}"></div>
     </div>
-    <div class="fg"><label>Company Address</label><input disabled value="{{ user.company_address or '—' }}"></div>
   </div>
 
   <div class="card">
@@ -84,13 +74,14 @@ tr:hover td{background:#fafafa}
   </div>
 
   <div class="card">
-    <h2>My Determination History ({{ record_count }} record{{ 's' if record_count != 1 else '' }})</h2>
+    <h2>My Determination History</h2>
     {% if record_count > 0 %}
-    <p style="margin:0 0 1rem"><a href="/history" style="color:#2563eb">View all {{ record_count }} determination{{ 's' if record_count != 1 else '' }} in History →</a></p>
+    <p style="margin:0"><a href="/history" style="color:#2563eb">View all {{ record_count }} determination{{ 's' if record_count != 1 else '' }} in History &#x2192;</a></p>
     {% else %}
     <p class="empty">No flood determinations yet. <a href="/" style="color:#2563eb">Run a search to get started.</a></p>
+    {% endif %}
   </div>
+
 </div>
-{% endif %}
 </body>
 </html>
