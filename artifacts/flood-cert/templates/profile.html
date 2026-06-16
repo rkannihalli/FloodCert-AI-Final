@@ -85,34 +85,11 @@ tr:hover td{background:#fafafa}
   </div>
 
   <div class="card">
-    <h2>My Determination History ({{ records|length }} record{{ 's' if records|length != 1 else '' }})</h2>
-    {% if records %}
-    <div style="overflow-x:auto">
-    <table>
-      <thead>
-        <tr>
-          <th>Date</th><th>Property Address</th><th>Zone</th>
-          <th>Loan ID</th><th>Borrower</th><th style="text-align:center">PDF</th>
-        </tr>
-      </thead>
-      <tbody>
-      {% for r in records %}
-      <tr>
-        <td style="white-space:nowrap">{{ r.determination_date or r.created_at[:10] if r.created_at else '—' }}</td>
-        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ r.property_address }}">{{ r.property_address }}</td>
-        <td><span class="badge {{ 'zs' if r.sfha_status == 'Yes' else 'zx' }}">{{ r.flood_zone }}</span></td>
-        <td>{{ r.loan_id or '—' }}</td>
-        <td>{{ r.borrower_name or '—' }}</td>
-        <td style="text-align:center">
-          <a href="/history/{{ r.id }}/download/certificate" style="color:#2563eb;font-size:.8rem;white-space:nowrap">⬇ Cert</a>
-        </td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    </div>
+    <h2>My Determination History ({{ record_count }} record{{ 's' if record_count != 1 else '' }})</h2>
+    {% if record_count > 0 %}
+    <p style="margin:0 0 1rem"><a href="/history" style="color:#2563eb">View all {{ record_count }} determination{{ 's' if record_count != 1 else '' }} in History →</a></p>
     {% else %}
-    <p class="empty">No flood determinations yet. Run a search to get started.</p>
+    <p class="empty">No flood determinations yet. <a href="/" style="color:#2563eb">Run a search to get started.</a></p>
     {% endif %}
   </div>
 </div>
