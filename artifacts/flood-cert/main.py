@@ -1603,15 +1603,25 @@ async def profile_page(request: Request):
     user = get_session_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
-    from db import get_determinations, get_user_by_id
-    db_user = get_user_by_id(user["id"])
-    records = get_determinations(user_id=user["id"])
+    try:
+        db_user = get_user_by_id(user["id"])
+    except Exception:
+        db_user = None
+    try:
+        records = get_determinations(user_id=user["id"])
+    except Exception:
+        records = []
+    merged = dict(user)
+    if db_user:
+        merged.update(db_user)
     return templates.TemplateResponse("profile.html", {
         "request": request,
-        "user": db_user or user,
+        "user": merged,
         "records": records,
         "success": request.session.pop("profile_success", None),
         "error":   request.session.pop("profile_error",   None),
+        "profile_success": None,
+        "profile_error": None,
     })
 
 
@@ -1625,7 +1635,10 @@ async def change_password_post(
     user = get_session_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
-    db_user = get_user_by_email(user["email"])
+    try:
+        db_user = get_user_by_email(user["email"])
+    except Exception:
+        db_user = None
     if not db_user or not verify_password(current_password, db_user["password_hash"]):
         request.session["profile_error"] = "Current password is incorrect."
         return RedirectResponse("/profile", status_code=303)
