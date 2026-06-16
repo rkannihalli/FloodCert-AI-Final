@@ -1578,7 +1578,6 @@ async def change_password(
     user = get_session_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
-    from db import get_user_by_email
     db_user = get_user_by_email(user["email"])
     if not db_user or not verify_password(current_password, db_user["password_hash"]):
         request.session["profile_error"] = "Current password is incorrect."
