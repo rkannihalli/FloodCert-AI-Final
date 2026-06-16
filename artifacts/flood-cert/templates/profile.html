@@ -48,8 +48,9 @@ tr:hover td{background:#fafafa}
 </header>
 
 <div class="wrap">
-  {% if success %}<div class="alert ok">{{ success }}</div>{% endif %}
-  {% if error %}<div class="alert err">{{ error }}</div>{% endif %}
+  {% set _s = success or profile_success %}{% if _s %}<div class="alert ok">{{ _s }}</div>{% endif %}
+  {% set _e = error or profile_error %}{% if _e %}<div class="alert err">{{ _e }}</div>{% endif %}
+  {% if false %}
 
   <div class="card">
     <h2>Account Information</h2>

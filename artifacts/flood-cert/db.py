@@ -173,6 +173,32 @@ def get_determination(record_id: int) -> Optional[dict]:
     return dict(row) if row else None
 
 
+
+def get_determinations(
+    company_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    limit: int = 500,
+    search: str = "",
+) -> list:
+    """Alias for filtered determination listing used by profile and history pages."""
+    conn = get_conn()
+    clauses, params = [], []
+    if company_id is not None:
+        clauses.append("company_id = ?"); params.append(company_id)
+    if user_id is not None:
+        clauses.append("user_id = ?"); params.append(user_id)
+    if search:
+        like = f"%{search}%"
+        clauses.append("(loan_id LIKE ? OR borrower_name LIKE ? OR property_address LIKE ?)")
+        params.extend([like, like, like])
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    rows = conn.execute(
+        f"SELECT * FROM determinations {where} ORDER BY created_at DESC LIMIT ?",
+        params + [limit]
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
 def search_determinations(query: str, company_id: Optional[int] = None) -> list:
     conn = get_conn()
     like = f"%{query}%"
