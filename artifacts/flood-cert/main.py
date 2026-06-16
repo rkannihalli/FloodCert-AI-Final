@@ -995,8 +995,17 @@ async def download_certificate(
     determination_date_iso: str = Form(...),
 ):
     data = dict(locals())
-    data["map_image_b64"] = await generate_map_image(float(lat), float(lon))
-    pdf_bytes = generate_flood_certificate_pdf(data)
+    try:
+        data["map_image_b64"] = await generate_map_image(float(lat), float(lon))
+    except Exception as e:
+        print(f"Map image error (non-fatal): {e}")
+        data["map_image_b64"] = None
+    try:
+        pdf_bytes = generate_flood_certificate_pdf(data)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {str(e)}")
     filename = _cert_filename(flood_zone, property_address)
     return Response(content=pdf_bytes, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})

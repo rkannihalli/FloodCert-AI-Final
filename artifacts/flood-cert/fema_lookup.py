@@ -671,35 +671,47 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
 async def query_nfip_community(lat: float, lon: float) -> dict:
     """Query NFHL Layer 22 (Political Jurisdictions) for NFIP community name and CID.
 
-    hazards.fema.gov is network-blocked server-side on Replit (connection reset).
-    We try anyway (in case network rules change); the browser-side JS enrichment
-    fetches this independently from Layer 22 and overrides stale values.
+    Tries point query first, then progressively wider envelopes for consistency.
     """
-    params = {
-        "geometry": f"{lon},{lat}",
-        "geometryType": "esriGeometryPoint",
-        "inSR": "4326",
-        "spatialRel": "esriSpatialRelIntersects",
-        "outFields": "POL_NAME1,CID",
-        "returnGeometry": "false",
-        "f": "json",
-    }
-    try:
-        async with httpx.AsyncClient(timeout=12.0, verify=False) as client:
-            resp = await client.get(f"{NFHL_BASE}/22/query", params=params)
-            resp.raise_for_status()
-            data = resp.json()
-        features = data.get("features", [])
-        if not features:
-            return {}
-        attrs = features[0]["attributes"]
-        return {
-            "community_id": (attrs.get("CID") or "").strip(),
-            "community_name": (attrs.get("POL_NAME1") or "").strip(),
+    queries = [
+        {"geometry": f"{lon},{lat}", "geometryType": "esriGeometryPoint"},
+        {"geometry": f"{lon-0.001},{lat-0.001},{lon+0.001},{lat+0.001}", "geometryType": "esriGeometryEnvelope"},
+        {"geometry": f"{lon-0.005},{lat-0.005},{lon+0.005},{lat+0.005}", "geometryType": "esriGeometryEnvelope"},
+    ]
+    for q in queries:
+        params = {
+            **q,
+            "inSR": "4326",
+            "spatialRel": "esriSpatialRelIntersects",
+            "outFields": "POL_NAME1,CID",
+            "returnGeometry": "false",
+            "resultRecordCount": "10",
+            "f": "json",
         }
-    except Exception as e:
-        print(f"NFIP community query (Layer 22) error: {e}")
-        return {}
+        try:
+            async with httpx.AsyncClient(timeout=12.0, verify=False) as client:
+                resp = await client.get(f"{NFHL_BASE}/22/query", params=params)
+                resp.raise_for_status()
+                data = resp.json()
+            features = data.get("features", [])
+            if not features:
+                continue
+            # Prefer feature with valid CID
+            best = None
+            for f in features:
+                cid = (f["attributes"].get("CID") or "").strip()
+                if cid and cid != "0":
+                    best = f["attributes"]
+                    break
+            if best is None:
+                best = features[0]["attributes"]
+            cid = (best.get("CID") or "").strip()
+            name = (best.get("POL_NAME1") or "").strip()
+            if cid or name:
+                return {"community_id": cid, "community_name": name}
+        except Exception as e:
+            print(f"NFIP community query (Layer 22) error: {e}")
+    return {}
 
 
 async def query_firm_panel(lat: float, lon: float, county_fips: str = "") -> dict:
