@@ -16,9 +16,9 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy from artifacts/flood-cert (Docker build context = repo root)
+# Copy from artifacts/flood-cert (build context = repo root)
 COPY artifacts/flood-cert/requirements.txt .
-# CACHE_BUST=20260617_FINAL
+# CACHE_BUST=20260617_V3
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY artifacts/flood-cert/ .
