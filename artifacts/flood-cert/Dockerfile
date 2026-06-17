@@ -15,9 +15,12 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY requirements.txt .
-# CACHE_BUST=20260617190213
+
+# Copy from artifacts/flood-cert (Docker build context = repo root)
+COPY artifacts/flood-cert/requirements.txt .
+# CACHE_BUST=20260617_FINAL
 RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
+
+COPY artifacts/flood-cert/ .
 
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
