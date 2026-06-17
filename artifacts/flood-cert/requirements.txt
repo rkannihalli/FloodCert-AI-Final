@@ -14,3 +14,4 @@ python-jose==3.3.0
 Pillow==11.1.0
 python-dotenv==1.0.1
 resend==2.4.0
+itsdangerous==2.2.0
