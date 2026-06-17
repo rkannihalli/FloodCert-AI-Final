@@ -1,4 +1,12 @@
 import os
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+from typing import Optional
+import os
 import csv
 import io
 import asyncio
@@ -460,8 +468,8 @@ async def request_access_post(
 async def admin_panel(
     request: Request,
     tab: str = "requests",
-    cid: int = 0,
-    uid: int = 0,
+    cid: Optional[int] = None,
+    uid: Optional[int] = None,
     dfrom: str = "",
     dto: str = "",
     hq: str = "",
