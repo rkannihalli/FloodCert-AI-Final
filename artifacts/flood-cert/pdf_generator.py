@@ -1,3 +1,4 @@
+# BUILD_SYNC - weasyprint 57.x compatible
 import os
 from jinja2 import Environment, FileSystemLoader
 

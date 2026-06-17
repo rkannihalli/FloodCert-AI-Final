@@ -1,5 +1,6 @@
 FROM python:3.11-slim
 
+# BUILD_ID=1781726508
 RUN apt-get update && apt-get install -y \
     libpango-1.0-0 \
     libpangoft2-1.0-0 \
@@ -16,9 +17,7 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Build context = repo root, so paths are relative to repo root
 COPY artifacts/flood-cert/requirements.txt .
-# CACHE_BUST=20260617_V4_FINAL
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY artifacts/flood-cert/ .
