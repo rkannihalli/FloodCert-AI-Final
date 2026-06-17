@@ -16,9 +16,9 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy from artifacts/flood-cert (build context = repo root)
+# Build context = repo root, so paths are relative to repo root
 COPY artifacts/flood-cert/requirements.txt .
-# CACHE_BUST=20260617_V3
+# CACHE_BUST=20260617_V4_FINAL
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY artifacts/flood-cert/ .
