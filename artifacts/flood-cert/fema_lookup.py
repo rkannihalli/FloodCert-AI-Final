@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import httpx
@@ -1180,6 +1181,75 @@ ZONE_DISPLAY_NAMES: dict[str, str] = {
 }
 
 
+
+
+def _load_nfip_db() -> dict:
+    """Load bundled NFIP community database (downloaded at deploy time)."""
+    db_path = os.path.join(os.path.dirname(__file__), "nfip_communities_db.json")
+    try:
+        with open(db_path) as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"NFIP DB load error: {e}")
+        return {}
+
+# Cache the database in memory
+_NFIP_DB: dict = {}
+
+def lookup_community_from_db(state_abbr: str, county_fips: str, city: str) -> dict:
+    """Look up NFIP community from bundled static database.
+    
+    This is the primary community lookup — works without any API calls.
+    Falls back gracefully when community not found.
+    
+    Args:
+        state_abbr: 2-letter state code (e.g. "TN")
+        county_fips: 3-digit county FIPS (e.g. "037")
+        city: city name for matching (e.g. "Nashville")
+    
+    Returns:
+        dict with community_id and community_name, or empty dict
+    """
+    global _NFIP_DB
+    if not _NFIP_DB:
+        _NFIP_DB = _load_nfip_db()
+    
+    if not _NFIP_DB:
+        return {}
+    
+    sa = state_abbr.upper().strip()
+    cf = county_fips.strip().zfill(3)
+    key = f"{sa}_{cf}"
+    
+    communities = _NFIP_DB.get(key, [])
+    if not communities:
+        return {}
+    
+    city_n = city.lower().strip()
+    
+    # 1. Exact city match
+    if city_n:
+        for c in communities:
+            nm = (c.get("name") or "").lower()
+            if nm == city_n or nm.startswith(city_n + ",") or nm.startswith(city_n + " "):
+                return {"community_id": c["cid"], "community_name": c["name"]}
+    
+    # 2. City substring match
+    if city_n:
+        for c in communities:
+            nm = (c.get("name") or "").lower()
+            if city_n in nm:
+                return {"community_id": c["cid"], "community_name": c["name"]}
+    
+    # 3. Prefer non-county/unincorporated (municipal community)
+    for c in communities:
+        nm = (c.get("name") or "").lower()
+        if "county" not in nm and "unincorporated" not in nm:
+            return {"community_id": c["cid"], "community_name": c["name"]}
+    
+    # 4. Fall back to first result
+    return {"community_id": communities[0]["cid"], "community_name": communities[0]["name"]}
+
 def determine_flood_info(merged: dict) -> dict:
     """Derive flood zone details from merged NFHL query results.
 
@@ -1261,20 +1331,32 @@ def determine_flood_info(merged: dict) -> dict:
     # that look real but don't match FEMA's actual community assignments.
     # Layer 22 and CSB API are the only authoritative sources.
     # Browser JS will fill this from Layer 22 when server-side is blocked.
+    # Try local NFIP database lookup (works without any API calls)
+    db_result = lookup_community_from_db(
+        merged.get("state_abbr", "") or 
+        (STATE_FIPS.get(state_fips, ("",""))[1] if state_fips else ""),
+        county_fips,
+        geocoded_city,
+    )
+    db_community_id   = db_result.get("community_id", "")
+    db_community_name = db_result.get("community_name", "")
+
     if community_id:
         # Layer 22 — most authoritative (exact NFIP-assigned 6-digit CID)
         panel_number = community_id
     elif csb_community_id:
         # FEMA CSB API — authoritative municipal community ID
         panel_number = csb_community_id
+    elif db_community_id:
+        # Local bundled NFIP database — works without API calls
+        panel_number = db_community_id
     else:
-        # No authoritative source available — do NOT guess from county FIPS
-        # Browser JS enrichment will populate this from Layer 22 at render time
+        # No source available — browser JS will fill from Layer 22
         panel_number = "Not Available"
 
     # ── NFIP Community Name ───────────────────────────────────────────────────
     # Priority: Layer 22 POL_NAME1 → FEMA CSB official name → geocoded city
-    community_name_out = community_nm or csb_community_name or geocoded_city or "Not Available"
+    community_name_out = community_nm or csb_community_name or db_community_name or geocoded_city or "Not Available"
 
     # ── County name ───────────────────────────────────────────────────────────
     # Priority: Census geocoder geography → TIGERweb fallback
