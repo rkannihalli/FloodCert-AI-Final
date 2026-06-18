@@ -926,9 +926,7 @@ async def generate(
             ),
         )
         flood_info = determine_flood_info({
-            **zone_data, **community_data, **firm_data, **fcc_data, **msc_data,
-            "fcc_state_fips": fcc_data.get("state_fips",""),
-            "fcc_county_fips": fcc_data.get("county_fips",""), **county_data, **csb_data,
+            **zone_data, **community_data, **firm_data, **county_data, **csb_data,
             "geocoded_city": geo_result.get("city", ""),
             "state_fips": geo_result.get("state_fips", ""),
             "county_fips": geo_result.get("county_fips", ""),
