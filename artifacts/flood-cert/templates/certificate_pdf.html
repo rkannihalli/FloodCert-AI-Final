@@ -131,6 +131,62 @@
 <!-- Section C: Federal Flood Insurance Availability -->
 <div class="section sfhdf-section-c">
   <div class="sfhdf-section-hdr">C. FEDERAL FLOOD INSURANCE AVAILABILITY <span style="font-weight:normal;">(Check all that apply.)</span></div>
+
+<div class="section sfhdf-section-d">
+  <div class="sfhdf-section-hdr">D. DETERMINATION</div>
+  <table class="sfhdf-table">
+    <tr>
+      <td class="sfhdf-det-q">
+        <strong>IS BUILDING/MOBILE HOME IN SPECIAL FLOOD HAZARD AREA (ZONES CONTAINING THE LETTERS "A" OR "V") ?</strong>
+      </td>
+      <td class="sfhdf-det-ans">
+        <span class="sfhdf-chk">{% if is_sfha %}&#10005;{% endif %}</span> <strong>YES</strong>
+        &nbsp;&nbsp;
+        <span class="sfhdf-chk">{% if not is_sfha %}&#10005;{% endif %}</span> <strong>NO</strong>
+      </td>
+    </tr>
+    <tr>
+      <td colspan="2" class="sfhdf-det-note">
+        If yes, flood insurance is required by the Flood Disaster Protection Act of 1973.<br />
+        If no, flood insurance is not required by the Flood Disaster Protection Act of 1973. Please note, the risk of flooding in this area is only reduced, not removed.
+      </td>
+    </tr>
+    <tr>
+      <td colspan="2" class="sfhdf-det-note" style="border-top:0.5pt solid #b0b8c4;">
+        This determination is based on examining the NFIP map, any Federal Emergency Management Agency revisions to it, and any other information needed to locate the building/mobile home on the NFIP map.
+      </td>
+    </tr>
+  </table>
+</div>
+
+<div class="section sfhdf-section-e">
+  <div class="sfhdf-section-hdr">E. COMMENTS <span style="font-weight:normal;">(Optional)</span></div>
+  <div class="sfhdf-comments">
+    THIS FLOOD DETERMINATION IS PROVIDED TO THE LENDER PURSUANT TO THE FLOOD DISASTER PROTECTION ACT.&nbsp; IT SHOULD NOT BE USED FOR ANY OTHER PURPOSE.
+  </div>
+</div>
+
+<div class="section sfhdf-section-f">
+  <div class="sfhdf-section-hdr">F. CERTIFICATE NUMBER AND DETERMINATION VALIDITY</div>
+  <table class="data-table">
+    <tr>
+      <td class="label" style="width:35%;">Certificate Number</td>
+      <td class="value highlight" style="font-weight:700;letter-spacing:0.05em;">{{ cert_number if cert_number else 'FC-' ~ determination_date|replace(' ','') ~ '-' ~ (loan_id|string)[-6:] }}</td>
+    </tr>
+    <tr>
+      <td class="label">Determination Validity</td>
+      <td class="value" style="font-weight:700;color:#003366;font-size:1.05em;">&#9632; LIFE OF LOAN</td>
+    </tr>
+    <tr>
+      <td class="label">Determination Date</td>
+      <td class="value">{{ determination_date }}</td>
+    </tr>
+    <tr>
+      <td class="label">Basis</td>
+      <td class="value">Standard Flood Hazard Determination — National Flood Hazard Layer (NFHL). This determination is valid for the life of the loan as required under the Flood Disaster Protection Act.</td>
+    </tr>
+  </table>
+</div>
   <table class="sfhdf-table">
     <tr>
       <td class="sfhdf-num">1.</td>
@@ -162,63 +218,13 @@
 </div>
 
 
-<div class="section sfhdf-section-f">
-  <div class="sfhdf-section-hdr">F. CERTIFICATE NUMBER AND DETERMINATION VALIDITY</div>
-  <table class="data-table">
-    <tr>
-      <td class="label" style="width:35%;">Certificate Number</td>
-      <td class="value highlight" style="font-weight:700;letter-spacing:0.05em;">{{ cert_number if cert_number else 'FC-' ~ determination_date|replace(' ','') ~ '-' ~ (loan_id|string)[-6:] }}</td>
-    </tr>
-    <tr>
-      <td class="label">Determination Validity</td>
-      <td class="value" style="font-weight:700;color:#003366;font-size:1.05em;">&#9632; LIFE OF LOAN</td>
-    </tr>
-    <tr>
-      <td class="label">Determination Date</td>
-      <td class="value">{{ determination_date }}</td>
-    </tr>
-    <tr>
-      <td class="label">Basis</td>
-      <td class="value">Standard Flood Hazard Determination — National Flood Hazard Layer (NFHL). This determination is valid for the life of the loan as required under the Flood Disaster Protection Act.</td>
-    </tr>
-  </table>
-</div>
+
 
 <!-- Section D: Determination -->
-<div class="section sfhdf-section-d">
-  <div class="sfhdf-section-hdr">D. DETERMINATION</div>
-  <table class="sfhdf-table">
-    <tr>
-      <td class="sfhdf-det-q">
-        <strong>IS BUILDING/MOBILE HOME IN SPECIAL FLOOD HAZARD AREA (ZONES CONTAINING THE LETTERS "A" OR "V") ?</strong>
-      </td>
-      <td class="sfhdf-det-ans">
-        <span class="sfhdf-chk">{% if is_sfha %}&#10005;{% endif %}</span> <strong>YES</strong>
-        &nbsp;&nbsp;
-        <span class="sfhdf-chk">{% if not is_sfha %}&#10005;{% endif %}</span> <strong>NO</strong>
-      </td>
-    </tr>
-    <tr>
-      <td colspan="2" class="sfhdf-det-note">
-        If yes, flood insurance is required by the Flood Disaster Protection Act of 1973.<br />
-        If no, flood insurance is not required by the Flood Disaster Protection Act of 1973. Please note, the risk of flooding in this area is only reduced, not removed.
-      </td>
-    </tr>
-    <tr>
-      <td colspan="2" class="sfhdf-det-note" style="border-top:0.5pt solid #b0b8c4;">
-        This determination is based on examining the NFIP map, any Federal Emergency Management Agency revisions to it, and any other information needed to locate the building/mobile home on the NFIP map.
-      </td>
-    </tr>
-  </table>
-</div>
+
 
 <!-- Section E: Comments -->
-<div class="section sfhdf-section-e">
-  <div class="sfhdf-section-hdr">E. COMMENTS <span style="font-weight:normal;">(Optional)</span></div>
-  <div class="sfhdf-comments">
-    THIS FLOOD DETERMINATION IS PROVIDED TO THE LENDER PURSUANT TO THE FLOOD DISASTER PROTECTION ACT.&nbsp; IT SHOULD NOT BE USED FOR ANY OTHER PURPOSE.
-  </div>
-</div>
+
 
 <!-- Signature area -->
 <div class="sig-area">
