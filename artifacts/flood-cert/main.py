@@ -550,38 +550,48 @@ async def admin_panel(
 
 @app.post("/admin/rebuild-nfip-db")
 async def rebuild_nfip_db(request: Request):
-    """One-time admin endpoint to rebuild nfip_communities_db.json from FEMA API.
-    Only callable by admins. Run once after deploy to get city-level CIDs."""
+    """Rebuild nfip_communities_db.json from FEMA API for city-level CIDs."""
     _require_admin(request)
-    import httpx, json, os
+    import json as _json, os as _os
     url = "https://www.fema.gov/api/open/v1/fimaNfipCommunities"
     all_records = []
     skip = 0
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        while True:
-            r = await client.get(url, params={"$top": 1000, "$skip": skip, "$format": "json"})
-            r.raise_for_status()
-            records = r.json().get("FimaNfipCommunities", [])
-            if not records:
-                break
-            all_records.extend(records)
-            if len(records) < 1000:
-                break
-            skip += 1000
-    db = {}
-    for rec in all_records:
-        state = (rec.get("state") or rec.get("stateAbbr") or "").strip().upper()
-        cid   = (rec.get("communityIdentifierNFIP") or "").strip()
-        name  = (rec.get("communityName") or "").strip()
-        county_fips = str(rec.get("countyCode") or "").zfill(3)
-        if cid and state and name:
-            db[f"{state}:{county_fips}:{name.lower()}"] = {
-                "community_id": cid, "community_name": name
-            }
-    outpath = os.path.join(os.path.dirname(__file__), "nfip_communities_db.json")
-    with open(outpath, "w") as f:
-        json.dump(db, f, separators=(",", ":"))
-    return JSONResponse({"status": "ok", "entries": len(db)})
+    try:
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            while True:
+                r = await client.get(url, params={"$top": 1000, "$skip": skip, "$format": "json"})
+                r.raise_for_status()
+                data = r.json()
+                # FEMA API key varies — try both known key names
+                records = (data.get("FimaNfipCommunities")
+                           or data.get("fimaNfipCommunities")
+                           or data.get("data") or [])
+                if not records:
+                    break
+                all_records.extend(records)
+                if len(records) < 1000:
+                    break
+                skip += 1000
+        db = {}
+        for rec in all_records:
+            state = (rec.get("state") or rec.get("stateAbbr") or
+                     rec.get("stateName") or "").strip().upper()
+            cid   = (rec.get("communityIdentifierNFIP") or
+                     rec.get("CID") or rec.get("cid") or "").strip()
+            name  = (rec.get("communityName") or
+                     rec.get("name") or "").strip()
+            county_fips = str(rec.get("countyCode") or
+                               rec.get("countyFips") or "").zfill(3)
+            if cid and state and name:
+                db[f"{state}:{county_fips}:{name.lower()}"] = {
+                    "community_id": cid, "community_name": name
+                }
+        outpath = _os.path.join(_os.path.dirname(__file__), "nfip_communities_db.json")
+        with open(outpath, "w") as fp:
+            _json.dump(db, fp, separators=(",", ":"))
+        return JSONResponse({"status": "ok", "entries": len(db), "raw_records": len(all_records)})
+    except Exception as e:
+        return JSONResponse({"status": "error", "detail": str(e)[:500]}, status_code=500)
 
 @app.post("/admin/users/{user_id}/approve")
 async def admin_approve(request: Request, user_id: int):
