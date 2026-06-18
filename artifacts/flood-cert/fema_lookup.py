@@ -57,6 +57,11 @@ CT_PLANNING_REGION_TO_COUNTY: dict[str, str] = {
 # query_nfip_community_csb() will gracefully return empty on connection failure.
 # The browser-side Layer 22 enrichment in result.html provides the correct CID at render time.
 FEMA_CSB_URL = "https://www.fema.gov/api/open/v1/fimaNfipCommunities"
+# FEMA MSC Products layer — different host from hazards.fema.gov, NOT network-blocked
+FEMA_MSC_PRODUCTS_URL = "https://msc.fema.gov/arcgis/rest/services/MSC/Products/MapServer/0/query"
+# FCC Census Block API — authoritative FIPS, always reachable, no API key
+FCC_BLOCK_API = "https://geo.fcc.gov/api/census/block/find"
+
 
 # ZONE_SUBTY values that map to X500 (shaded Zone X, 0.2% annual chance / 500-year floodplain).
 # Includes levee-reduced-risk subtypes: per FEMA NFHL data model, "Area With Reduced Flood
@@ -714,6 +719,105 @@ async def query_nfip_community(lat: float, lon: float) -> dict:
     return {}
 
 
+
+
+async def query_fcc_fips(lat: float, lon: float) -> dict:
+    """FCC Census Block API — returns authoritative state+county FIPS.
+    
+    Always reachable (no TLS blocks), free, no API key required.
+    More reliable than Census geocoder for border cities and rural addresses.
+    Used as primary FIPS source when Census geocoder returns empty county_fips.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(FCC_BLOCK_API, params={
+                "latitude": lat, "longitude": lon,
+                "censusYear": "2020", "format": "json"
+            })
+            resp.raise_for_status()
+            d = resp.json()
+        state_fips  = (d.get("State",  {}).get("FIPS") or "")[:2]
+        county_fips = (d.get("County", {}).get("FIPS") or "")[2:5]
+        county_name = (d.get("County", {}).get("name") or "").replace(" County","").strip()
+        if state_fips and county_fips:
+            print(f"FCC FIPS: state={state_fips} county={county_fips} ({county_name})")
+            return {
+                "state_fips": state_fips,
+                "county_fips": county_fips, 
+                "county_name": county_name,
+            }
+    except Exception as e:
+        print(f"FCC FIPS lookup error: {e}")
+    return {}
+
+
+async def query_msc_firm_panel(lat: float, lon: float) -> dict:
+    """Query FEMA MSC Products layer for FIRM panel number.
+    
+    msc.fema.gov is NOT network-blocked unlike hazards.fema.gov.
+    Returns complete panel number with suffix (e.g. "26161C 0243E").
+    """
+    queries = [
+        {"geometry": f"{lon},{lat}", "geometryType": "esriGeometryPoint"},
+        {"geometry": f"{lon-0.003},{lat-0.003},{lon+0.003},{lat+0.003}",
+         "geometryType": "esriGeometryEnvelope"},
+        {"geometry": f"{lon-0.008},{lat-0.008},{lon+0.008},{lat+0.008}",
+         "geometryType": "esriGeometryEnvelope"},
+    ]
+    for q in queries:
+        params = {
+            **q,
+            "inSR": "4326",
+            "spatialRel": "esriSpatialRelIntersects",
+            "outFields": "FIRM_PAN,EFF_DATE,STATUS,CASE_NO",
+            "returnGeometry": "false",
+            "resultRecordCount": "10",
+            "f": "json",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(FEMA_MSC_PRODUCTS_URL, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+            features = data.get("features", [])
+            if not features:
+                continue
+
+            # Prefer current/effective panels
+            best = None
+            for f in features:
+                attrs = f.get("attributes", {})
+                status = (attrs.get("STATUS") or "").upper()
+                pan = (attrs.get("FIRM_PAN") or "").strip()
+                if pan and ("EFFECTIVE" in status or "CURRENT" in status):
+                    best = attrs
+                    break
+            if best is None:
+                for f in features:
+                    if (f.get("attributes", {}).get("FIRM_PAN") or "").strip():
+                        best = f["attributes"]
+                        break
+            if best is None:
+                continue
+
+            raw = (best.get("FIRM_PAN") or "").strip()
+            firm_pan = f"{raw[:6]} {raw[6:]}" if len(raw) >= 7 else raw
+            eff = best.get("EFF_DATE")
+            if isinstance(eff, (int, float)) and eff > 0:
+                from datetime import datetime, timezone
+                eff_str = datetime.fromtimestamp(eff/1000, tz=timezone.utc).strftime("%m/%d/%Y")
+            elif isinstance(eff, str) and eff:
+                eff_str = eff
+            else:
+                eff_str = ""
+
+            if firm_pan:
+                print(f"MSC FIRM panel: {firm_pan} ({eff_str})")
+                return {"msc_firm_panel": firm_pan, "msc_eff_date": eff_str}
+        except Exception as e:
+            print(f"MSC panel query error ({q['geometryType']}): {e}")
+    return {}
+
 async def query_firm_panel(lat: float, lon: float, county_fips: str = "") -> dict:
     """Query NFHL Layer 3 (FIRM Panels) for full panel number and effective date.
 
@@ -1089,8 +1193,8 @@ def determine_flood_info(merged: dict) -> dict:
     esri_dfirm      = (merged.get("esri_dfirm_id") or "").strip()
     firm_panel_l3   = (merged.get("firm_panel_l3") or "").strip()
     eff_date_raw    = merged.get("eff_date")
-    state_fips      = (merged.get("state_fips") or "").strip()
-    county_fips     = (merged.get("county_fips") or "").strip()
+    state_fips      = (merged.get("state_fips") or merged.get("fcc_state_fips") or "").strip()
+    county_fips     = (merged.get("county_fips") or merged.get("fcc_county_fips") or "").strip()
     community_id    = (merged.get("community_id") or "").strip()    # Layer 22
     community_nm    = (merged.get("community_name") or "").strip()  # Layer 22
     csb_community_id   = (merged.get("csb_community_id") or "").strip()    # FEMA CSB API

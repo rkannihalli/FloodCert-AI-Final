@@ -169,10 +169,12 @@ async def _check_lol_record(mon: dict) -> None:
     if not lat or not lon:
         return
     try:
-        zone_data, community_data, firm_data = await asyncio.gather(
+        zone_data, community_data, firm_data, fcc_data, msc_data = await asyncio.gather(
             query_fema_nfhl(float(lat), float(lon)),
             query_nfip_community(float(lat), float(lon)),
             query_firm_panel(float(lat), float(lon)),
+            query_fcc_fips(float(lat), float(lon)),
+            query_msc_firm_panel(float(lat), float(lon)),
         )
         new_info = determine_flood_info({**zone_data, **community_data, **firm_data})
     except Exception as exc:
@@ -924,7 +926,9 @@ async def generate(
             ),
         )
         flood_info = determine_flood_info({
-            **zone_data, **community_data, **firm_data, **county_data, **csb_data,
+            **zone_data, **community_data, **firm_data, **fcc_data, **msc_data,
+            "fcc_state_fips": fcc_data.get("state_fips",""),
+            "fcc_county_fips": fcc_data.get("county_fips",""), **county_data, **csb_data,
             "geocoded_city": geo_result.get("city", ""),
             "state_fips": geo_result.get("state_fips", ""),
             "county_fips": geo_result.get("county_fips", ""),
@@ -1157,10 +1161,12 @@ async def check_fema_update(record_id: int):
     if not lat or not lon:
         return JSONResponse({"error": "No coordinates stored for this record"}, status_code=400)
     try:
-        zone_data, community_data, firm_data = await asyncio.gather(
+        zone_data, community_data, firm_data, fcc_data, msc_data = await asyncio.gather(
             query_fema_nfhl(float(lat), float(lon)),
             query_nfip_community(float(lat), float(lon)),
             query_firm_panel(float(lat), float(lon)),
+            query_fcc_fips(float(lat), float(lon)),
+            query_msc_firm_panel(float(lat), float(lon)),
         )
         new_info = determine_flood_info({**zone_data, **community_data, **firm_data})
     except Exception as exc:
