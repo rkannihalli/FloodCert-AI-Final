@@ -1298,6 +1298,9 @@ def determine_flood_info(merged: dict) -> dict:
     esri_dfirm      = (merged.get("esri_dfirm_id") or "").strip()
     firm_panel_l3   = (merged.get("firm_panel_l3") or "").strip()
     eff_date_raw    = merged.get("eff_date")
+    if _is_likely_lomr_date(eff_date_raw):
+        print(f"[LOMR filter] Suppressing recent eff_date {eff_date_raw!r} — likely LOMR")
+        eff_date_raw = None
     state_fips      = (merged.get("state_fips") or merged.get("fcc_state_fips") or "").strip()
     county_fips     = (merged.get("county_fips") or merged.get("fcc_county_fips") or "").strip()
     community_id    = (merged.get("community_id") or "").strip()    # Layer 22
