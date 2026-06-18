@@ -550,67 +550,58 @@ async def admin_panel(
 
 @app.post("/admin/rebuild-nfip-db")
 async def rebuild_nfip_db(request: Request):
-    """Rebuild nfip_communities_db.json by bulk-querying NFHL Layer 22.
-    Layer 22 (Political Jurisdictions) is already used by the app and works on Railway.
-    Fetches all US states in parallel to build a complete city-level CID lookup."""
+    """Rebuild nfip_communities_db.json by paginating NFHL Layer 22.
+    Uses POL_NAME1 and CID fields confirmed from query_nfip_community.
+    Layer 22 works on Railway. Paginates 1000 records at a time."""
     _require_admin(request)
-    import json as _json, os as _os, httpx as _httpx, asyncio as _asyncio
-    base = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/22/query"
-    # FEMA state FIPS codes 01-56 (excluding non-states)
-    state_fips_list = [
-        "01","02","04","05","06","08","09","10","11","12","13","15","16","17","18",
-        "19","20","21","22","23","24","25","26","27","28","29","30","31","32","33",
-        "34","35","36","37","38","39","40","41","42","44","45","46","47","48","49",
-        "50","51","53","54","55","56","60","66","69","72","78"
-    ]
+    import json as _json, os as _os, httpx as _httpx
+    url = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/22/query"
     db = {}
-    errors = []
-    async def fetch_state(client, sfips):
-        params = {
-            "where": f"STATE_FIPS='{sfips}'",
-            "outFields": "COM_NFP,DFIRM_ID,COMM_NAME,STATE_FIPS,CO_FIPS",
-            "returnGeometry": "false",
-            "resultRecordCount": "2000",
-            "f": "json",
-        }
-        try:
-            r = await client.get(base, params=params)
-            r.raise_for_status()
-            features = r.json().get("features", [])
-            return sfips, features
-        except Exception as e:
-            return sfips, []
+    offset = 0
+    page_size = 1000
+    total_fetched = 0
     try:
-        async with _httpx.AsyncClient(timeout=30.0) as client:
-            tasks = [fetch_state(client, sf) for sf in state_fips_list]
-            results = await _asyncio.gather(*tasks)
-        state_abbr_map = {
-            "01":"AL","02":"AK","04":"AZ","05":"AR","06":"CA","08":"CO","09":"CT",
-            "10":"DE","11":"DC","12":"FL","13":"GA","15":"HI","16":"ID","17":"IL",
-            "18":"IN","19":"IA","20":"KS","21":"KY","22":"LA","23":"ME","24":"MD",
-            "25":"MA","26":"MI","27":"MN","28":"MS","29":"MO","30":"MT","31":"NE",
-            "32":"NV","33":"NH","34":"NJ","35":"NM","36":"NY","37":"NC","38":"ND",
-            "39":"OH","40":"OK","41":"OR","42":"PA","44":"RI","45":"SC","46":"SD",
-            "47":"TN","48":"TX","49":"UT","50":"VT","51":"VA","53":"WA","54":"WV",
-            "55":"WI","56":"WY","60":"AS","66":"GU","69":"MP","72":"PR","78":"VI"
-        }
-        total_features = 0
-        for sfips, features in results:
-            state = state_abbr_map.get(sfips, sfips)
-            for feat in features:
-                a = feat.get("attributes", {})
-                cid = (a.get("COM_NFP") or "").strip()
-                name = (a.get("COMM_NAME") or "").strip()
-                co_fips = str(a.get("CO_FIPS") or "").zfill(3)
-                if cid and name:
-                    db[f"{state}:{co_fips}:{name.lower()}"] = {
-                        "community_id": cid, "community_name": name
-                    }
-                    total_features += 1
+        async with _httpx.AsyncClient(timeout=60.0) as client:
+            while True:
+                params = {
+                    "where": "1=1",
+                    "outFields": "POL_NAME1,CID,STATE_FIPS,CO_FIPS,DFIRM_ID",
+                    "returnGeometry": "false",
+                    "resultRecordCount": str(page_size),
+                    "resultOffset": str(offset),
+                    "orderByFields": "OBJECTID",
+                    "f": "json",
+                }
+                r = await client.get(url, params=params)
+                r.raise_for_status()
+                data = r.json()
+                if "error" in data:
+                    return JSONResponse({"status": "error", "detail": str(data["error"])[:300]}, status_code=502)
+                features = data.get("features", [])
+                if not features:
+                    break
+                for feat in features:
+                    a = feat.get("attributes", {})
+                    cid = (a.get("CID") or "").strip()
+                    name = (a.get("POL_NAME1") or "").strip()
+                    dfirm = (a.get("DFIRM_ID") or "").strip()
+                    # Derive state abbr from DFIRM_ID prefix (first 2 digits = state FIPS)
+                    sfips = dfirm[:2] if len(dfirm) >= 2 else ""
+                    co_fips = str(a.get("CO_FIPS") or dfirm[2:5] if len(dfirm) >= 5 else "").zfill(3)
+                    state_fips_val = (a.get("STATE_FIPS") or sfips or "").strip()
+                    from fema_lookup import STATE_FIPS as _SF
+                    state_abbr = _SF.get(state_fips_val, ("", ""))[1] if state_fips_val in _SF else state_fips_val
+                    if cid and name and state_abbr:
+                        key = f"{state_abbr}:{co_fips}:{name.lower()}"
+                        db[key] = {"community_id": cid, "community_name": name}
+                total_fetched += len(features)
+                if len(features) < page_size:
+                    break
+                offset += page_size
         outpath = _os.path.join(_os.path.dirname(__file__), "nfip_communities_db.json")
         with open(outpath, "w") as fp:
             _json.dump(db, fp, separators=(",", ":"))
-        return JSONResponse({"status": "ok", "entries": len(db), "features": total_features})
+        return JSONResponse({"status": "ok", "entries": len(db), "features_fetched": total_fetched})
     except Exception as e:
         return JSONResponse({"status": "error", "detail": str(e)[:500]}, status_code=500)
 
