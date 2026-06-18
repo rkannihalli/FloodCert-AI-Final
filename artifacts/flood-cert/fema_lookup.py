@@ -1281,7 +1281,7 @@ def _is_likely_lomr_date(eff_date_raw) -> bool:
             d = datetime.fromtimestamp(eff_date_raw / 1000, tz=timezone.utc).date()
         else:
             d = _d.fromisoformat(str(eff_date_raw)[:10])
-        return (_d.today() - d).days < 730
+        return (_d.today() - d).days < 90  # Only suppress dates within 90 days (true LOMRs)
     except Exception:
         return False
 
