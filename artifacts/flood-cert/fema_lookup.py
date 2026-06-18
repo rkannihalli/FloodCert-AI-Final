@@ -662,11 +662,25 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
             if best is None:
                 best = features[0]["attributes"]
 
+            raw_zone = (best.get("FLD_ZONE") or "X").strip()
+            raw_sfha = best.get("SFHA_TF", "F") == "T"
+            # Boundary check: if point hit SFHA but most nearby features are non-SFHA,
+            # override to avoid false positives for properties near zone edges
+            if raw_sfha and len(features) >= 3:
+                sfha_count = sum(1 for ft in features if ft["attributes"].get("SFHA_TF") == "T")
+                if sfha_count < len(features) - sfha_count:
+                    override = next((ft["attributes"] for ft in features
+                                     if ft["attributes"].get("SFHA_TF") != "T"), None)
+                    if override:
+                        print(f"[Zone boundary] {sfha_count}/{len(features)} SFHA — overriding to non-SFHA")
+                        best = override
+                        raw_zone = (best.get("FLD_ZONE") or "X").strip()
+                        raw_sfha = False
             return {
-                "flood_zone": (best.get("FLD_ZONE") or "X").strip(),
+                "flood_zone": raw_zone,
                 "zone_subtype": best.get("ZONE_SUBTY") or "",
                 "esri_dfirm_id": best.get("DFIRM_ID") or "",
-                "in_sfha": best.get("SFHA_TF", "F") == "T",
+                "in_sfha": raw_sfha,
             }
         except Exception as e:
             print(f"FEMA flood zone query error ({q['geometryType']}): {e}")
@@ -1250,6 +1264,27 @@ def lookup_community_from_db(state_abbr: str, county_fips: str, city: str) -> di
     # 4. Fall back to first result
     return {"community_id": communities[0]["cid"], "community_name": communities[0]["name"]}
 
+
+def _is_county_placeholder_cid(cid: str) -> bool:
+    """County-level NFIP CIDs end in 0 (480300, 250170).
+    City/town CIDs end in non-zero (480640, 250176)."""
+    return bool(cid) and cid.strip().endswith("0")
+
+
+def _is_likely_lomr_date(eff_date_raw) -> bool:
+    """Returns True if date is within 2 years (likely LOMR, not base panel date)."""
+    if not eff_date_raw:
+        return False
+    try:
+        from datetime import date as _d, datetime, timezone
+        if isinstance(eff_date_raw, (int, float)):
+            d = datetime.fromtimestamp(eff_date_raw / 1000, tz=timezone.utc).date()
+        else:
+            d = _d.fromisoformat(str(eff_date_raw)[:10])
+        return (_d.today() - d).days < 730
+    except Exception:
+        return False
+
 def determine_flood_info(merged: dict) -> dict:
     """Derive flood zone details from merged NFHL query results.
 
@@ -1341,12 +1376,14 @@ def determine_flood_info(merged: dict) -> dict:
     db_community_id   = db_result.get("community_id", "")
     db_community_name = db_result.get("community_name", "")
 
-    if community_id:
-        # Layer 22 — most authoritative (exact NFIP-assigned 6-digit CID)
-        panel_number = community_id
-    elif csb_community_id:
-        # FEMA CSB API — authoritative municipal community ID
-        panel_number = csb_community_id
+    if community_id and not _is_county_placeholder_cid(community_id):
+        panel_number = community_id           # Layer 22, city-level
+    elif csb_community_id and not _is_county_placeholder_cid(csb_community_id):
+        panel_number = csb_community_id       # CSB API, city-level
+    elif db_community_id and not _is_county_placeholder_cid(db_community_id):
+        panel_number = db_community_id        # Local DB, city-level
+    elif community_id or csb_community_id or db_community_id:
+        panel_number = community_id or csb_community_id or db_community_id
     elif db_community_id:
         # Local bundled NFIP database — works without API calls
         panel_number = db_community_id
