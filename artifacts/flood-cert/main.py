@@ -547,6 +547,42 @@ async def admin_panel(
     })
 
 
+
+@app.post("/admin/rebuild-nfip-db")
+async def rebuild_nfip_db(request: Request):
+    """One-time admin endpoint to rebuild nfip_communities_db.json from FEMA API.
+    Only callable by admins. Run once after deploy to get city-level CIDs."""
+    _require_admin(request)
+    import httpx, json, os
+    url = "https://www.fema.gov/api/open/v1/fimaNfipCommunities"
+    all_records = []
+    skip = 0
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        while True:
+            r = await client.get(url, params={"$top": 1000, "$skip": skip, "$format": "json"})
+            r.raise_for_status()
+            records = r.json().get("FimaNfipCommunities", [])
+            if not records:
+                break
+            all_records.extend(records)
+            if len(records) < 1000:
+                break
+            skip += 1000
+    db = {}
+    for rec in all_records:
+        state = (rec.get("state") or rec.get("stateAbbr") or "").strip().upper()
+        cid   = (rec.get("communityIdentifierNFIP") or "").strip()
+        name  = (rec.get("communityName") or "").strip()
+        county_fips = str(rec.get("countyCode") or "").zfill(3)
+        if cid and state and name:
+            db[f"{state}:{county_fips}:{name.lower()}"] = {
+                "community_id": cid, "community_name": name
+            }
+    outpath = os.path.join(os.path.dirname(__file__), "nfip_communities_db.json")
+    with open(outpath, "w") as f:
+        json.dump(db, f, separators=(",", ":"))
+    return JSONResponse({"status": "ok", "entries": len(db)})
+
 @app.post("/admin/users/{user_id}/approve")
 async def admin_approve(request: Request, user_id: int):
     _require_admin(request)
