@@ -552,7 +552,7 @@ async def admin_panel(
 async def rebuild_nfip_db(request: Request):
     """Rebuild nfip_communities_db.json from FEMA API for city-level CIDs."""
     _require_admin(request)
-    import json as _json, os as _os
+    import json as _json, os as _os, httpx as httpx
     url = "https://www.fema.gov/api/open/v1/fimaNfipCommunities"
     all_records = []
     skip = 0
