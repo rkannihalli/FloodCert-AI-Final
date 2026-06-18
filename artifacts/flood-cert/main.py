@@ -169,12 +169,10 @@ async def _check_lol_record(mon: dict) -> None:
     if not lat or not lon:
         return
     try:
-        zone_data, community_data, firm_data, fcc_data, msc_data = await asyncio.gather(
+        zone_data, community_data, firm_data = await asyncio.gather(
             query_fema_nfhl(float(lat), float(lon)),
             query_nfip_community(float(lat), float(lon)),
             query_firm_panel(float(lat), float(lon)),
-            query_fcc_fips(float(lat), float(lon)),
-            query_msc_firm_panel(float(lat), float(lon)),
         )
         new_info = determine_flood_info({**zone_data, **community_data, **firm_data})
     except Exception as exc:
@@ -1159,12 +1157,10 @@ async def check_fema_update(record_id: int):
     if not lat or not lon:
         return JSONResponse({"error": "No coordinates stored for this record"}, status_code=400)
     try:
-        zone_data, community_data, firm_data, fcc_data, msc_data = await asyncio.gather(
+        zone_data, community_data, firm_data = await asyncio.gather(
             query_fema_nfhl(float(lat), float(lon)),
             query_nfip_community(float(lat), float(lon)),
             query_firm_panel(float(lat), float(lon)),
-            query_fcc_fips(float(lat), float(lon)),
-            query_msc_firm_panel(float(lat), float(lon)),
         )
         new_info = determine_flood_info({**zone_data, **community_data, **firm_data})
     except Exception as exc:
