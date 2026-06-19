@@ -631,6 +631,25 @@ async def diag_check_db(request: Request, key: str = "TX_473"):
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+
+@app.get("/admin/diag-raw-sample")
+async def diag_raw_sample(request: Request):
+    """Fetch 5 raw Layer 22 records to inspect CID vs DFIRM_ID vs county FIPS relationship."""
+    _require_admin(request)
+    import httpx as _httpx
+    url = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/22/query"
+    params = {
+        "where": "POL_NAME1 LIKE \'%Katy%\' OR POL_NAME1 LIKE \'%Waller%\'",
+        "outFields": "POL_NAME1,CID,DFIRM_ID",
+        "returnGeometry": "false",
+        "resultRecordCount": "20",
+        "f": "json",
+    }
+    async with _httpx.AsyncClient(timeout=20.0) as client:
+        r = await client.get(url, params=params)
+        data = r.json()
+    return JSONResponse(data)
+
 @app.post("/admin/rebuild-nfip-db")
 async def rebuild_nfip_db(request: Request):
     """Rebuild nfip_communities_db.json in the CORRECT schema:
