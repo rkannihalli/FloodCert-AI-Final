@@ -716,15 +716,18 @@ async def query_nfip_community(lat: float, lon: float) -> dict:
             features = data.get("features", [])
             if not features:
                 continue
-            # Prefer feature with valid CID
-            best = None
-            for f in features:
-                cid = (f["attributes"].get("CID") or "").strip()
-                if cid and cid != "0":
-                    best = f["attributes"]
-                    break
-            if best is None:
-                best = features[0]["attributes"]
+            def _is_county_level(nm: str) -> bool:
+                n = nm.lower()
+                return "county" in n or "unincorporated" in n or "parish" in n
+
+            candidates = [f["attributes"] for f in features
+                          if (f["attributes"].get("CID") or "").strip() not in ("", "0")]
+            if not candidates:
+                candidates = [features[0]["attributes"]]
+
+            municipal = [c for c in candidates if not _is_county_level(c.get("POL_NAME1") or "")]
+            best = municipal[0] if municipal else candidates[0]
+
             cid = (best.get("CID") or "").strip()
             name = (best.get("POL_NAME1") or "").strip()
             if cid or name:
