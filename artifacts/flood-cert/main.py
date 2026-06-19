@@ -548,6 +548,43 @@ async def admin_panel(
 
 
 
+
+@app.get("/admin/diag-nfhl22")
+async def diag_nfhl22(request: Request):
+    """Diagnostic: test several Layer 22 query variants on Railway and report results."""
+    _require_admin(request)
+    import httpx as _httpx
+    url = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/22/query"
+    tests = [
+        {"name": "where_objectid_gt0", "params": {"where": "OBJECTID > 0", "outFields": "POL_NAME1,CID", "resultRecordCount": "5", "returnGeometry": "false", "f": "json"}},
+        {"name": "where_cid_notnull", "params": {"where": "CID IS NOT NULL", "outFields": "POL_NAME1,CID", "resultRecordCount": "5", "returnGeometry": "false", "f": "json"}},
+        {"name": "objectids_1to5", "params": {"objectIds": "1,2,3,4,5", "outFields": "POL_NAME1,CID", "returnGeometry": "false", "f": "json"}},
+        {"name": "where_1eq1_no_order", "params": {"where": "1=1", "outFields": "POL_NAME1,CID", "resultRecordCount": "5", "returnGeometry": "false", "f": "json"}},
+        {"name": "where_1eq1_with_order", "params": {"where": "1=1", "outFields": "POL_NAME1,CID", "resultRecordCount": "5", "orderByFields": "OBJECTID", "returnGeometry": "false", "f": "json"}},
+        {"name": "count_only", "params": {"where": "1=1", "returnCountOnly": "true", "f": "json"}},
+    ]
+    results = []
+    async with _httpx.AsyncClient(timeout=20.0) as client:
+        for t in tests:
+            try:
+                r = await client.get(url, params=t["params"])
+                data = r.json()
+                if "error" in data:
+                    results.append({"test": t["name"], "status": "error", "detail": data["error"]})
+                else:
+                    feats = data.get("features", [])
+                    count = data.get("count")
+                    results.append({
+                        "test": t["name"],
+                        "status": "ok",
+                        "feature_count": len(feats),
+                        "total_count": count,
+                        "sample": feats[0]["attributes"] if feats else None,
+                    })
+            except Exception as e:
+                results.append({"test": t["name"], "status": "exception", "detail": str(e)[:200]})
+    return JSONResponse({"results": results})
+
 @app.post("/admin/rebuild-nfip-db")
 async def rebuild_nfip_db(request: Request):
     """Rebuild nfip_communities_db.json by paginating NFHL Layer 22.
