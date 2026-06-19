@@ -549,41 +549,68 @@ async def admin_panel(
 
 
 
-@app.get("/admin/diag-nfhl22")
-async def diag_nfhl22(request: Request):
-    """Diagnostic: test several Layer 22 query variants on Railway and report results."""
+
+@app.get("/admin/trace-lookup")
+async def trace_lookup(request: Request, address: str):
+    """Diagnostic: run the full flood lookup pipeline for one address and
+    return every raw API response + the final determine_flood_info() output,
+    so we can see exactly where a mismatch originates."""
     _require_admin(request)
-    import httpx as _httpx
-    url = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/22/query"
-    tests = [
-        {"name": "where_objectid_gt0", "params": {"where": "OBJECTID > 0", "outFields": "POL_NAME1,CID", "resultRecordCount": "5", "returnGeometry": "false", "f": "json"}},
-        {"name": "where_cid_notnull", "params": {"where": "CID IS NOT NULL", "outFields": "POL_NAME1,CID", "resultRecordCount": "5", "returnGeometry": "false", "f": "json"}},
-        {"name": "objectids_1to5", "params": {"objectIds": "1,2,3,4,5", "outFields": "POL_NAME1,CID", "returnGeometry": "false", "f": "json"}},
-        {"name": "where_1eq1_no_order", "params": {"where": "1=1", "outFields": "POL_NAME1,CID", "resultRecordCount": "5", "returnGeometry": "false", "f": "json"}},
-        {"name": "where_1eq1_with_order", "params": {"where": "1=1", "outFields": "POL_NAME1,CID", "resultRecordCount": "5", "orderByFields": "OBJECTID", "returnGeometry": "false", "f": "json"}},
-        {"name": "count_only", "params": {"where": "1=1", "returnCountOnly": "true", "f": "json"}},
-    ]
-    results = []
-    async with _httpx.AsyncClient(timeout=20.0) as client:
-        for t in tests:
-            try:
-                r = await client.get(url, params=t["params"])
-                data = r.json()
-                if "error" in data:
-                    results.append({"test": t["name"], "status": "error", "detail": data["error"]})
-                else:
-                    feats = data.get("features", [])
-                    count = data.get("count")
-                    results.append({
-                        "test": t["name"],
-                        "status": "ok",
-                        "feature_count": len(feats),
-                        "total_count": count,
-                        "sample": feats[0]["attributes"] if feats else None,
-                    })
-            except Exception as e:
-                results.append({"test": t["name"], "status": "exception", "detail": str(e)[:200]})
-    return JSONResponse({"results": results})
+    from fema_lookup import (
+        geocode_address, query_tigerweb_fips, query_fema_nfhl,
+        query_nfip_community, query_firm_panel, query_county_name,
+        query_nfip_community_csb, determine_flood_info, lookup_community_from_db
+    )
+    trace = {}
+    geo_result = await geocode_address(address)
+    trace["geocode"] = geo_result
+    if not geo_result:
+        return JSONResponse({"error": "geocode failed", "trace": trace})
+
+    if not geo_result.get("state_fips") or not geo_result.get("county_fips"):
+        tiger_fips = await query_tigerweb_fips(geo_result["lat"], geo_result["lon"])
+        trace["tigerweb_fips"] = tiger_fips
+        if tiger_fips.get("state_fips"):
+            geo_result["state_fips"] = tiger_fips["state_fips"]
+            geo_result["county_fips"] = tiger_fips["county_fips"]
+            if not geo_result.get("county_name"):
+                geo_result["county_name"] = tiger_fips.get("county_name", "")
+
+    zone_data, community_data, firm_data, county_data, csb_data = await asyncio.gather(
+        query_fema_nfhl(geo_result["lat"], geo_result["lon"]),
+        query_nfip_community(geo_result["lat"], geo_result["lon"]),
+        query_firm_panel(geo_result["lat"], geo_result["lon"],
+                          county_fips=geo_result.get("state_fips","") + geo_result.get("county_fips","")),
+        query_county_name(geo_result["lat"], geo_result["lon"]),
+        query_nfip_community_csb(
+            geo_result.get("state_fips", ""), geo_result.get("county_fips", ""),
+            geo_result.get("city", ""), geo_result.get("state_abbr", ""),
+        ),
+    )
+    trace["zone_data"] = zone_data
+    trace["community_data"] = community_data
+    trace["firm_data"] = firm_data
+    trace["county_data"] = county_data
+    trace["csb_data"] = csb_data
+
+    db_result = lookup_community_from_db(
+        geo_result.get("state_abbr", ""), geo_result.get("county_fips", ""),
+        geo_result.get("city", "")
+    )
+    trace["local_db_lookup"] = db_result
+
+    merged = {
+        **zone_data, **community_data, **firm_data, **county_data, **csb_data,
+        "geocoded_city": geo_result.get("city", ""),
+        "state_fips": geo_result.get("state_fips", ""),
+        "county_fips": geo_result.get("county_fips", ""),
+        "county_name": geo_result.get("county_name", ""),
+        "state_abbr": geo_result.get("state_abbr", ""),
+    }
+    final = determine_flood_info(merged)
+    trace["final_determination"] = final
+
+    return JSONResponse(trace)
 
 @app.post("/admin/rebuild-nfip-db")
 async def rebuild_nfip_db(request: Request):
