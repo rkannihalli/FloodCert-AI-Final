@@ -588,21 +588,23 @@ async def diag_nfhl22(request: Request):
 @app.post("/admin/rebuild-nfip-db")
 async def rebuild_nfip_db(request: Request):
     """Rebuild nfip_communities_db.json by paginating NFHL Layer 22.
-    Uses POL_NAME1 and CID fields confirmed from query_nfip_community.
-    Layer 22 works on Railway. Paginates 1000 records at a time."""
+    Confirmed working query shape via /admin/diag-nfhl22: where=1=1,
+    orderByFields=OBJECTID, paginate via resultOffset. ~88k total records."""
     _require_admin(request)
     import json as _json, os as _os, httpx as _httpx
+    from fema_lookup import STATE_FIPS as _SF
     url = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/22/query"
     db = {}
     offset = 0
     page_size = 1000
     total_fetched = 0
+    max_pages = 100  # safety cap: 100k records max
     try:
-        async with _httpx.AsyncClient(timeout=60.0) as client:
-            while True:
+        async with _httpx.AsyncClient(timeout=30.0) as client:
+            for page in range(max_pages):
                 params = {
                     "where": "1=1",
-                    "outFields": "POL_NAME1,CID,STATE_FIPS,CO_FIPS,DFIRM_ID",
+                    "outFields": "POL_NAME1,CID,DFIRM_ID",
                     "returnGeometry": "false",
                     "resultRecordCount": str(page_size),
                     "resultOffset": str(offset),
@@ -613,7 +615,7 @@ async def rebuild_nfip_db(request: Request):
                 r.raise_for_status()
                 data = r.json()
                 if "error" in data:
-                    return JSONResponse({"status": "error", "detail": str(data["error"])[:300]}, status_code=502)
+                    return JSONResponse({"status": "error", "detail": str(data["error"])[:300], "fetched_so_far": total_fetched}, status_code=502)
                 features = data.get("features", [])
                 if not features:
                     break
@@ -622,13 +624,12 @@ async def rebuild_nfip_db(request: Request):
                     cid = (a.get("CID") or "").strip()
                     name = (a.get("POL_NAME1") or "").strip()
                     dfirm = (a.get("DFIRM_ID") or "").strip()
-                    # Derive state abbr from DFIRM_ID prefix (first 2 digits = state FIPS)
-                    sfips = dfirm[:2] if len(dfirm) >= 2 else ""
-                    co_fips = str(a.get("CO_FIPS") or dfirm[2:5] if len(dfirm) >= 5 else "").zfill(3)
-                    state_fips_val = (a.get("STATE_FIPS") or sfips or "").strip()
-                    from fema_lookup import STATE_FIPS as _SF
-                    state_abbr = _SF.get(state_fips_val, ("", ""))[1] if state_fips_val in _SF else state_fips_val
-                    if cid and name and state_abbr:
+                    if not (cid and name):
+                        continue
+                    sfips = dfirm[:2] if len(dfirm) >= 2 else cid[:2]
+                    co_fips = dfirm[2:5] if len(dfirm) >= 5 else cid[2:5] if len(cid) >= 5 else "000"
+                    state_abbr = _SF.get(sfips, ("", sfips))[1]
+                    if state_abbr:
                         key = f"{state_abbr}:{co_fips}:{name.lower()}"
                         db[key] = {"community_id": cid, "community_name": name}
                 total_fetched += len(features)
@@ -640,7 +641,7 @@ async def rebuild_nfip_db(request: Request):
             _json.dump(db, fp, separators=(",", ":"))
         return JSONResponse({"status": "ok", "entries": len(db), "features_fetched": total_fetched})
     except Exception as e:
-        return JSONResponse({"status": "error", "detail": str(e)[:500]}, status_code=500)
+        return JSONResponse({"status": "error", "detail": str(e)[:500], "fetched_so_far": total_fetched}, status_code=500)
 
 @app.post("/admin/users/{user_id}/approve")
 async def admin_approve(request: Request, user_id: int):
