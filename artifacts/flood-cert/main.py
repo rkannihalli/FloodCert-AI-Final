@@ -612,6 +612,25 @@ async def trace_lookup(request: Request, address: str):
 
     return JSONResponse(trace)
 
+
+@app.get("/admin/diag-check-db")
+async def diag_check_db(request: Request, key: str = "TX_473"):
+    """Diagnostic: read nfip_communities_db.json directly from disk right now."""
+    _require_admin(request)
+    import json as _json, os as _os
+    path = _os.path.join(_os.path.dirname(__file__), "nfip_communities_db.json")
+    try:
+        with open(path) as f:
+            db = _json.load(f)
+        return JSONResponse({
+            "total_keys": len(db),
+            "requested_key": key,
+            "value_for_key": db.get(key, "KEY NOT FOUND"),
+            "sample_keys": list(db.keys())[:10],
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 @app.post("/admin/rebuild-nfip-db")
 async def rebuild_nfip_db(request: Request):
     """Rebuild nfip_communities_db.json in the CORRECT schema:
