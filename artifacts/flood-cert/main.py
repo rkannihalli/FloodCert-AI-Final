@@ -614,9 +614,10 @@ async def trace_lookup(request: Request, address: str):
 
 @app.post("/admin/rebuild-nfip-db")
 async def rebuild_nfip_db(request: Request):
-    """Rebuild nfip_communities_db.json by paginating NFHL Layer 22.
-    Confirmed working query shape via /admin/diag-nfhl22: where=1=1,
-    orderByFields=OBJECTID, paginate via resultOffset. ~88k total records."""
+    """Rebuild nfip_communities_db.json in the CORRECT schema:
+    key={STATE}_{3-digit county FIPS} -> list of {cid, name} dicts.
+    This matches lookup_community_from_db() exactly. Paginates Layer 22
+    (~88k records) using the confirmed-working query shape."""
     _require_admin(request)
     import json as _json, os as _os, httpx as _httpx
     from fema_lookup import STATE_FIPS as _SF
@@ -625,7 +626,7 @@ async def rebuild_nfip_db(request: Request):
     offset = 0
     page_size = 1000
     total_fetched = 0
-    max_pages = 100  # safety cap: 100k records max
+    max_pages = 100
     try:
         async with _httpx.AsyncClient(timeout=30.0) as client:
             for page in range(max_pages):
@@ -653,12 +654,20 @@ async def rebuild_nfip_db(request: Request):
                     dfirm = (a.get("DFIRM_ID") or "").strip()
                     if not (cid and name):
                         continue
-                    sfips = dfirm[:2] if len(dfirm) >= 2 else cid[:2]
-                    co_fips = dfirm[2:5] if len(dfirm) >= 5 else cid[2:5] if len(cid) >= 5 else "000"
-                    state_abbr = _SF.get(sfips, ("", sfips))[1]
-                    if state_abbr:
-                        key = f"{state_abbr}:{co_fips}:{name.lower()}"
-                        db[key] = {"community_id": cid, "community_name": name}
+                    # Derive state+county FIPS from the CID itself (first 5 digits)
+                    # CID format is SSCCC (2-digit state FIPS + 3-digit county FIPS)
+                    sfips = cid[:2] if len(cid) >= 5 else (dfirm[:2] if len(dfirm) >= 2 else "")
+                    cfips = cid[2:5] if len(cid) >= 5 else (dfirm[2:5] if len(dfirm) >= 5 else "")
+                    state_abbr = _SF.get(sfips, ("", ""))[1] if sfips else ""
+                    if not (state_abbr and cfips):
+                        continue
+                    key = f"{state_abbr}_{cfips}"
+                    entry = {"cid": cid, "name": name}
+                    if key not in db:
+                        db[key] = []
+                    # Avoid duplicate cid+name pairs within the same county
+                    if not any(e["cid"] == cid and e["name"] == name for e in db[key]):
+                        db[key].append(entry)
                 total_fetched += len(features)
                 if len(features) < page_size:
                     break
@@ -666,7 +675,10 @@ async def rebuild_nfip_db(request: Request):
         outpath = _os.path.join(_os.path.dirname(__file__), "nfip_communities_db.json")
         with open(outpath, "w") as fp:
             _json.dump(db, fp, separators=(",", ":"))
-        return JSONResponse({"status": "ok", "entries": len(db), "features_fetched": total_fetched})
+        # Force reload of in-memory cache
+        import fema_lookup as _fl
+        _fl._NFIP_DB = {}
+        return JSONResponse({"status": "ok", "county_keys": len(db), "features_fetched": total_fetched})
     except Exception as e:
         return JSONResponse({"status": "error", "detail": str(e)[:500], "fetched_so_far": total_fetched}, status_code=500)
 
