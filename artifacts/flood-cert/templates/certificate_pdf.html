@@ -259,6 +259,26 @@
     {% else %}
     <div class="map-unavailable">Map image unavailable. View flood zones at msc.fema.gov for coordinates {{ "%.5f"|format(lat|float) }}, {{ "%.5f"|format(lon|float) }}.</div>
     {% endif %}
+
+    <!-- NFIP Map Data Table below map -->
+    <table class="data-table" style="margin-top:6pt;font-size:8pt;">
+      <tr>
+        <td class="label" style="width:28%;">NFIP Map Number</td>
+        <td class="value highlight" style="width:22%;">{{ community_number or "Not Available" }}</td>
+        <td class="label" style="width:28%;">NFIP Community Number</td>
+        <td class="value highlight" style="width:22%;">{{ panel_number or "Not Available" }}</td>
+      </tr>
+      <tr>
+        <td class="label">Map Panel Effective Date</td>
+        <td class="value" colspan="3">{{ panel_effective_date or "Not Available" }}</td>
+      </tr>
+      <tr>
+        <td class="label">Flood Zone</td>
+        <td class="value highlight">{{ flood_zone | zone_label }}</td>
+        <td class="label">Property Coordinates</td>
+        <td class="value">{{ "%.5f"|format(lat|float) }}, {{ "%.5f"|format(lon|float) }}</td>
+      </tr>
+    </table>
   </div>
 
   <!-- FEMA FIRM Standard Legend -->
