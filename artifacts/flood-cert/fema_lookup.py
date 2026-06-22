@@ -625,7 +625,7 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
     # and take the most common (modal) zone. This prevents a single coordinate
     # on a floodplain edge from falsely returning SFHA when the structure
     # footprint majority sits outside the zone.
-    OFFSETS = [(0,0),(0.0002,0),(-0.0002,0),(0,0.0002),(0,-0.0002)]
+    OFFSETS = [(0,0),(0.0004,0),(-0.0004,0),(0,0.0004),(0,-0.0004)]
     zone_tally = {}
     sfha_tally = {}
     dfirm_tally = {}
@@ -712,7 +712,7 @@ async def query_nfip_community(lat: float, lon: float) -> dict:
             "spatialRel": "esriSpatialRelIntersects",
             "outFields": "POL_NAME1,CID",
             "returnGeometry": "false",
-            "resultRecordCount": "10",
+            "resultRecordCount": "20",
             "f": "json",
         }
         try:
