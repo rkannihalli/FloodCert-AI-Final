@@ -133,33 +133,65 @@ def list_companies() -> list:
 # ── Determinations ─────────────────────────────────────────────────────────────
 
 def save_determination(data: dict) -> int:
+    """Insert new determination or update existing one for same loan_id + company_id.
+    
+    When the same loan is re-searched, we update the existing record with fresh data
+    rather than creating duplicates. This ensures history always shows current accurate
+    data and prevents old incorrect results from persisting.
+    """
     conn = get_conn()
-    cur = conn.execute("""
-        INSERT INTO determinations (
-            loan_id, borrower_name, lender_name, lender_email,
-            property_address, matched_address, lat, lon,
-            flood_zone, flood_zone_description, sfha_status, insurance_required,
-            panel_number, panel_effective_date, community_number, community_name,
-            determination_date, determination_date_iso, created_at,
-            company_id, user_id, county
-        ) VALUES (
-            :loan_id, :borrower_name, :lender_name, :lender_email,
-            :property_address, :matched_address, :lat, :lon,
-            :flood_zone, :flood_zone_description, :sfha_status, :insurance_required,
-            :panel_number, :panel_effective_date, :community_number, :community_name,
-            :determination_date, :determination_date_iso, :created_at,
-            :company_id, :user_id, :county
-        )
-    """, {
+    params = {
         "lender_email": "",
         "company_id": None,
         "user_id": None,
         "county": "",
         **data,
         "created_at": datetime.utcnow().isoformat(),
-    })
-    conn.commit()
-    record_id = cur.lastrowid
+    }
+    # Check if record already exists for same loan_id + company_id
+    existing = conn.execute(
+        "SELECT id FROM determinations WHERE loan_id = ? AND company_id IS ? ORDER BY created_at DESC LIMIT 1",
+        (params.get("loan_id"), params.get("company_id"))
+    ).fetchone()
+
+    if existing:
+        # Update existing record with fresh data — no duplicate history
+        conn.execute("""
+            UPDATE determinations SET
+                borrower_name=:borrower_name, lender_name=:lender_name,
+                lender_email=:lender_email, property_address=:property_address,
+                matched_address=:matched_address, lat=:lat, lon=:lon,
+                flood_zone=:flood_zone, flood_zone_description=:flood_zone_description,
+                sfha_status=:sfha_status, insurance_required=:insurance_required,
+                panel_number=:panel_number, panel_effective_date=:panel_effective_date,
+                community_number=:community_number, community_name=:community_name,
+                determination_date=:determination_date,
+                determination_date_iso=:determination_date_iso,
+                created_at=:created_at, county=:county
+            WHERE id=:existing_id
+        """, {**params, "existing_id": existing["id"]})
+        conn.commit()
+        record_id = existing["id"]
+    else:
+        cur = conn.execute("""
+            INSERT INTO determinations (
+                loan_id, borrower_name, lender_name, lender_email,
+                property_address, matched_address, lat, lon,
+                flood_zone, flood_zone_description, sfha_status, insurance_required,
+                panel_number, panel_effective_date, community_number, community_name,
+                determination_date, determination_date_iso, created_at,
+                company_id, user_id, county
+            ) VALUES (
+                :loan_id, :borrower_name, :lender_name, :lender_email,
+                :property_address, :matched_address, :lat, :lon,
+                :flood_zone, :flood_zone_description, :sfha_status, :insurance_required,
+                :panel_number, :panel_effective_date, :community_number, :community_name,
+                :determination_date, :determination_date_iso, :created_at,
+                :company_id, :user_id, :county
+            )
+        """, params)
+        conn.commit()
+        record_id = cur.lastrowid
     conn.close()
     return record_id
 
