@@ -131,7 +131,37 @@
 <!-- Section C: Federal Flood Insurance Availability -->
 <div class="section sfhdf-section-c">
   <div class="sfhdf-section-hdr">C. FEDERAL FLOOD INSURANCE AVAILABILITY <span style="font-weight:normal;">(Check all that apply.)</span></div>
+  <table class="sfhdf-table">
+    <tr>
+      <td class="sfhdf-num">1.</td>
+      <td class="sfhdf-chk-cell"><span class="sfhdf-chk">{% if nfip_ok %}&#10005;{% endif %}</span></td>
+      <td class="sfhdf-text">
+        Federal Flood Insurance is available (community participates in the NFIP).
+        &nbsp;&nbsp;
+        <span class="sfhdf-chk">{% if nfip_ok %}&#10005;{% endif %}</span>
+        <strong>Regular Program</strong>
+        &nbsp;&nbsp;&nbsp;
+        <span class="sfhdf-chk"></span>
+        Emergency Program of NFIP
+      </td>
+    </tr>
+    <tr>
+      <td class="sfhdf-num">2.</td>
+      <td class="sfhdf-chk-cell"><span class="sfhdf-chk">{% if not nfip_ok %}&#10005;{% endif %}</span></td>
+      <td class="sfhdf-text">Federal Flood Insurance is not available (community does not participate in the NFIP).</td>
+    </tr>
+    <tr>
+      <td class="sfhdf-num">3.</td>
+      <td class="sfhdf-chk-cell"><span class="sfhdf-chk"></span></td>
+      <td class="sfhdf-text">
+        Building/Mobile Home is in a Coastal Barrier Resources Area (CBRA) or Otherwise Protected Area (OPA). Federal Flood Insurance may not be available.<br />
+        <span style="padding-left:4pt;">CBRA/OPA Designation Date: ___________</span>
+      </td>
+    </tr>
+  </table>
+</div>
 
+<!-- Section D: Determination -->
 <div class="section sfhdf-section-d">
   <div class="sfhdf-section-hdr">D. DETERMINATION</div>
   <table class="sfhdf-table">
@@ -187,45 +217,6 @@
     </tr>
   </table>
 </div>
-  <table class="sfhdf-table">
-    <tr>
-      <td class="sfhdf-num">1.</td>
-      <td class="sfhdf-chk-cell"><span class="sfhdf-chk">{% if nfip_ok %}&#10005;{% endif %}</span></td>
-      <td class="sfhdf-text">
-        Federal Flood Insurance is available (community participates in the NFIP).
-        &nbsp;&nbsp;
-        <span class="sfhdf-chk">{% if nfip_ok %}&#10005;{% endif %}</span>
-        <strong>Regular Program</strong>
-        &nbsp;&nbsp;&nbsp;
-        <span class="sfhdf-chk"></span>
-        Emergency Program of NFIP
-      </td>
-    </tr>
-    <tr>
-      <td class="sfhdf-num">2.</td>
-      <td class="sfhdf-chk-cell"><span class="sfhdf-chk">{% if not nfip_ok %}&#10005;{% endif %}</span></td>
-      <td class="sfhdf-text">Federal Flood Insurance is not available (community does not participate in the NFIP).</td>
-    </tr>
-    <tr>
-      <td class="sfhdf-num">3.</td>
-      <td class="sfhdf-chk-cell"><span class="sfhdf-chk"></span></td>
-      <td class="sfhdf-text">
-        Building/Mobile Home is in a Coastal Barrier Resources Area (CBRA) or Otherwise Protected Area (OPA). Federal Flood Insurance may not be available.<br />
-        <span style="padding-left:4pt;">CBRA/OPA Designation Date: ___________</span>
-      </td>
-    </tr>
-  </table>
-</div>
-
-
-
-
-<!-- Section D: Determination -->
-
-
-<!-- Section E: Comments -->
-
-
 <!-- Signature area -->
 <div class="sig-area">
   <div class="sig-block">
