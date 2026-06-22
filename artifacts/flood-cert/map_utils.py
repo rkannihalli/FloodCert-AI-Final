@@ -43,19 +43,29 @@ async def generate_map_image(lat: float, lon: float) -> Optional[str]:
 
     try:
         async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-            img_resp, nfhl_resp = await asyncio.gather(
-                client.get(ESRI_IMAGERY_URL, params={**common, "format": "png"}),
-                client.get(NFHL_EXPORT_URL,  params={**common, "format": "png32", "transparent": "true"}),
-            )
+            # Fetch imagery and NFHL overlay concurrently; NFHL failure is non-fatal
+            try:
+                img_resp, nfhl_resp = await asyncio.gather(
+                    client.get(ESRI_IMAGERY_URL, params={**common, "format": "png"}),
+                    client.get(NFHL_EXPORT_URL,  params={**common, "format": "png32", "transparent": "true"}),
+                )
+                nfhl_bytes = nfhl_resp.content
+            except Exception:
+                # NFHL overlay failed — fetch imagery only
+                img_resp = await client.get(ESRI_IMAGERY_URL, params={**common, "format": "png"})
+                nfhl_bytes = None
 
         base_img = Image.open(io.BytesIO(img_resp.content)).convert("RGBA")
         base_img = base_img.resize((MAP_WIDTH, MAP_HEIGHT), Image.LANCZOS)
 
-        try:
-            nfhl_img = Image.open(io.BytesIO(nfhl_resp.content)).convert("RGBA")
-            nfhl_img = nfhl_img.resize((MAP_WIDTH, MAP_HEIGHT), Image.LANCZOS)
-            composite = Image.alpha_composite(base_img, nfhl_img)
-        except Exception:
+        if nfhl_bytes:
+            try:
+                nfhl_img = Image.open(io.BytesIO(nfhl_bytes)).convert("RGBA")
+                nfhl_img = nfhl_img.resize((MAP_WIDTH, MAP_HEIGHT), Image.LANCZOS)
+                composite = Image.alpha_composite(base_img, nfhl_img)
+            except Exception:
+                composite = base_img
+        else:
             composite = base_img
 
         _draw_pin(composite, MAP_WIDTH // 2, MAP_HEIGHT // 2)

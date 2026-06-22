@@ -1032,21 +1032,13 @@ async def generate(
         # use TIGERweb spatial reverse lookup to get authoritative county FIPS.
         # TIGERweb uses actual geographic boundaries — correct for border cities
         # like Summerville SC that span multiple counties.
-        if not geo_result.get("state_fips") or not geo_result.get("county_fips"):
-            tiger_fips = await query_tigerweb_fips(
-                geo_result["lat"], geo_result["lon"]
-            )
-            if tiger_fips.get("state_fips"):
-                geo_result["state_fips"]  = tiger_fips["state_fips"]
-                geo_result["county_fips"] = tiger_fips["county_fips"]
-                if not geo_result.get("county_name"):
-                    geo_result["county_name"] = tiger_fips.get("county_name", "")
-                print(f"TIGERweb FIPS resolved: {tiger_fips}")
-
-        zone_data, community_data, firm_data, county_data, csb_data = await asyncio.gather(
+        # Always run TIGERweb in parallel with other lookups for speed.
+        # TIGERweb uses actual geographic boundaries — always more accurate
+        # than Census geocoder FIPS for county assignment, especially for
+        # rural addresses and border cities (e.g. College Grove TN, Summerville SC).
+        zone_data, community_data, county_data, csb_data, tiger_data = await asyncio.gather(
             query_fema_nfhl(geo_result["lat"], geo_result["lon"]),
             query_nfip_community(geo_result["lat"], geo_result["lon"]),
-            query_firm_panel(geo_result["lat"], geo_result["lon"], county_fips=geo_result.get("state_fips","") + geo_result.get("county_fips","")),
             query_county_name(geo_result["lat"], geo_result["lon"]),
             query_nfip_community_csb(
                 geo_result.get("state_fips", ""),
@@ -1054,6 +1046,23 @@ async def generate(
                 geo_result.get("city", ""),
                 geo_result.get("state_abbr", ""),
             ),
+            query_tigerweb_fips(geo_result["lat"], geo_result["lon"]),
+        )
+        # TIGERweb FIPS always wins over Census geocoder — it uses spatial
+        # boundaries not address attribution, so it's correct for all properties.
+        if tiger_data.get("state_fips"):
+            geo_result["state_fips"]  = tiger_data["state_fips"]
+            geo_result["county_fips"] = tiger_data["county_fips"]
+            if not geo_result.get("county_name"):
+                geo_result["county_name"] = tiger_data.get("county_name", "")
+            print(f"TIGERweb FIPS: {tiger_data}")
+        elif not geo_result.get("state_fips") or not geo_result.get("county_fips"):
+            print("Warning: no FIPS from Census or TIGERweb")
+
+        # Now query FIRM panel with authoritative FIPS
+        firm_data = await query_firm_panel(
+            geo_result["lat"], geo_result["lon"],
+            county_fips=geo_result.get("state_fips","") + geo_result.get("county_fips","")
         )
         flood_info = determine_flood_info({
             **zone_data, **community_data, **firm_data, **county_data, **csb_data,
