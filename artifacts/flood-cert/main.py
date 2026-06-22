@@ -1005,20 +1005,16 @@ async def generate(
             }
         })
 
-    precomputed = lat.strip() and lon.strip() and flood_zone.strip()
-
-    if precomputed:
-        flood_info = {
-            "flood_zone": flood_zone, "flood_zone_description": flood_zone_description,
-            "sfha_status": sfha_status, "insurance_required": insurance_required,
-            "panel_number": panel_number, "panel_effective_date": panel_effective_date,
-            "community_number": community_number, "community_name": community_name,
+    # Always run full server-side lookup — never trust browser-submitted flood data.
+    # Browser JS pre-fills stale panel/zone data; TIGERweb+FIRM is authoritative.
+    geo_result = await geocode_address(property_address)
+    if not geo_result and lat.strip() and lon.strip():
+        geo_result = {
+            "lat": float(lat), "lon": float(lon),
+            "matched_address": matched_address or property_address,
+            "city": "", "state_abbr": "", "state_fips": "", "county_fips": "", "county_name": ""
         }
-        geo_lat = float(lat)
-        geo_lon = float(lon)
-        geo_matched = matched_address or property_address
-    else:
-        geo_result = await geocode_address(property_address)
+    if geo_result:
         if not geo_result:
             return templates.TemplateResponse(request, "index.html", {
                 "errors": ["Could not geocode the provided address. Please check the address and try again."],
