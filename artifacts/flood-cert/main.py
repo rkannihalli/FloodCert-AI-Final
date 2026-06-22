@@ -293,9 +293,68 @@ async def startup():
                 set_user_company(existing_admin["id"], ADMIN_COMPANY_ID)
 
     # Start APScheduler
+ 
+async def _rebuild_nfip_db_background():
+    """Daily background task: refresh nfip_communities_db.json from NFHL Layer 22.
+    Runs at 05:00 UTC daily (1hr before LOL checks) to keep community data current."""
+    import json as _json, os as _os, httpx as _httpx
+    from fema_lookup import STATE_FIPS as _SF
+    url = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/22/query"
+    db = {}
+    offset = 0
+    total = 0
+    try:
+        async with _httpx.AsyncClient(timeout=30.0) as client:
+            for _ in range(100):
+                params = {
+                    "where": "1=1",
+                    "outFields": "POL_NAME1,CID,DFIRM_ID",
+                    "returnGeometry": "false",
+                    "resultRecordCount": "1000",
+                    "resultOffset": str(offset),
+                    "orderByFields": "OBJECTID",
+                    "f": "json",
+                }
+                r = await client.get(url, params=params)
+                r.raise_for_status()
+                features = r.json().get("features", [])
+                if not features:
+                    break
+                for feat in features:
+                    a = feat.get("attributes", {})
+                    cid = (a.get("CID") or "").strip()
+                    name = (a.get("POL_NAME1") or "").strip()
+                    dfirm = (a.get("DFIRM_ID") or "").strip()
+                    if not (cid and name):
+                        continue
+                    sfips = cid[:2] if len(cid) >= 5 else (dfirm[:2] if len(dfirm) >= 2 else "")
+                    cfips = cid[2:5] if len(cid) >= 5 else (dfirm[2:5] if len(dfirm) >= 5 else "")
+                    state_abbr = _SF.get(sfips, ("", ""))[1] if sfips else ""
+                    if not (state_abbr and cfips):
+                        continue
+                    key = f"{state_abbr}_{cfips}"
+                    entry = {"cid": cid, "name": name}
+                    if key not in db:
+                        db[key] = []
+                    if not any(e["cid"] == cid and e["name"] == name for e in db[key]):
+                        db[key].append(entry)
+                total += len(features)
+                if len(features) < 1000:
+                    break
+                offset += 1000
+        outpath = _os.path.join(_os.path.dirname(__file__), "nfip_communities_db.json")
+        with open(outpath, "w") as fp:
+            _json.dump(db, fp, separators=(",", ":"))
+        import fema_lookup as _fl
+        _fl._NFIP_DB = {}
+        print(f"[NFIP] Daily DB rebuild complete: {len(db)} county keys, {total} features")
+    except Exception as e:
+        print(f"[NFIP] Daily DB rebuild failed: {e}")
+
     if _SCHEDULER_AVAILABLE and _scheduler:
         try:
             _scheduler.add_job(run_lol_daily_check, "cron", hour=6, minute=0, id="lol_daily")
+            _scheduler.add_job(_rebuild_nfip_db_background, "cron", hour=5, minute=0, id="nfip_daily")
             _scheduler.start()
             print("[LOL] Daily scheduler started (runs at 06:00 UTC)")
         except Exception as e:
@@ -549,106 +608,6 @@ async def admin_panel(
 
 
 
-
-@app.get("/admin/trace-lookup")
-async def trace_lookup(request: Request, address: str):
-    """Diagnostic: run the full flood lookup pipeline for one address and
-    return every raw API response + the final determine_flood_info() output,
-    so we can see exactly where a mismatch originates."""
-    _require_admin(request)
-    from fema_lookup import (
-        geocode_address, query_tigerweb_fips, query_fema_nfhl,
-        query_nfip_community, query_firm_panel, query_county_name,
-        query_nfip_community_csb, determine_flood_info, lookup_community_from_db
-    )
-    trace = {}
-    geo_result = await geocode_address(address)
-    trace["geocode"] = geo_result
-    if not geo_result:
-        return JSONResponse({"error": "geocode failed", "trace": trace})
-
-    if not geo_result.get("state_fips") or not geo_result.get("county_fips"):
-        tiger_fips = await query_tigerweb_fips(geo_result["lat"], geo_result["lon"])
-        trace["tigerweb_fips"] = tiger_fips
-        if tiger_fips.get("state_fips"):
-            geo_result["state_fips"] = tiger_fips["state_fips"]
-            geo_result["county_fips"] = tiger_fips["county_fips"]
-            if not geo_result.get("county_name"):
-                geo_result["county_name"] = tiger_fips.get("county_name", "")
-
-    zone_data, community_data, firm_data, county_data, csb_data = await asyncio.gather(
-        query_fema_nfhl(geo_result["lat"], geo_result["lon"]),
-        query_nfip_community(geo_result["lat"], geo_result["lon"]),
-        query_firm_panel(geo_result["lat"], geo_result["lon"],
-                          county_fips=geo_result.get("state_fips","") + geo_result.get("county_fips","")),
-        query_county_name(geo_result["lat"], geo_result["lon"]),
-        query_nfip_community_csb(
-            geo_result.get("state_fips", ""), geo_result.get("county_fips", ""),
-            geo_result.get("city", ""), geo_result.get("state_abbr", ""),
-        ),
-    )
-    trace["zone_data"] = zone_data
-    trace["community_data"] = community_data
-    trace["firm_data"] = firm_data
-    trace["county_data"] = county_data
-    trace["csb_data"] = csb_data
-
-    db_result = lookup_community_from_db(
-        geo_result.get("state_abbr", ""), geo_result.get("county_fips", ""),
-        geo_result.get("city", "")
-    )
-    trace["local_db_lookup"] = db_result
-
-    merged = {
-        **zone_data, **community_data, **firm_data, **county_data, **csb_data,
-        "geocoded_city": geo_result.get("city", ""),
-        "state_fips": geo_result.get("state_fips", ""),
-        "county_fips": geo_result.get("county_fips", ""),
-        "county_name": geo_result.get("county_name", ""),
-        "state_abbr": geo_result.get("state_abbr", ""),
-    }
-    final = determine_flood_info(merged)
-    trace["final_determination"] = final
-
-    return JSONResponse(trace)
-
-
-@app.get("/admin/diag-check-db")
-async def diag_check_db(request: Request, key: str = "TX_473"):
-    """Diagnostic: read nfip_communities_db.json directly from disk right now."""
-    _require_admin(request)
-    import json as _json, os as _os
-    path = _os.path.join(_os.path.dirname(__file__), "nfip_communities_db.json")
-    try:
-        with open(path) as f:
-            db = _json.load(f)
-        return JSONResponse({
-            "total_keys": len(db),
-            "requested_key": key,
-            "value_for_key": db.get(key, "KEY NOT FOUND"),
-            "sample_keys": list(db.keys())[:10],
-        })
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-@app.get("/admin/diag-raw-sample")
-async def diag_raw_sample(request: Request):
-    """Fetch 5 raw Layer 22 records to inspect CID vs DFIRM_ID vs county FIPS relationship."""
-    _require_admin(request)
-    import httpx as _httpx
-    url = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/22/query"
-    params = {
-        "where": "POL_NAME1 LIKE \'%Katy%\' OR POL_NAME1 LIKE \'%Waller%\'",
-        "outFields": "POL_NAME1,CID,DFIRM_ID",
-        "returnGeometry": "false",
-        "resultRecordCount": "20",
-        "f": "json",
-    }
-    async with _httpx.AsyncClient(timeout=20.0) as client:
-        r = await client.get(url, params=params)
-        data = r.json()
-    return JSONResponse(data)
 
 @app.post("/admin/rebuild-nfip-db")
 async def rebuild_nfip_db(request: Request):

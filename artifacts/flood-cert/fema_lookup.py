@@ -621,71 +621,78 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
     is the correct county FIPS for that specific map tile.  It is more reliable than
     the Census geocoder county FIPS for properties near county / municipality boundaries.
     """
-    queries = [
-        {
-            "geometry": f"{lon},{lat}",
-            "geometryType": "esriGeometryPoint",
-        },
-        {
-            "geometry": f"{lon - 0.0005},{lat - 0.0005},{lon + 0.0005},{lat + 0.0005}",
-            "geometryType": "esriGeometryEnvelope",
-        },
-    ]
+    # For boundary properties, sample 5 points in a small grid (~30m radius)
+    # and take the most common (modal) zone. This prevents a single coordinate
+    # on a floodplain edge from falsely returning SFHA when the structure
+    # footprint majority sits outside the zone.
+    OFFSETS = [(0,0),(0.0002,0),(-0.0002,0),(0,0.0002),(0,-0.0002)]
+    zone_tally = {}
+    sfha_tally = {}
+    dfirm_tally = {}
+    subtype_tally = {}
 
-    for q in queries:
-        params = {
-            **q,
-            "inSR": "4326",
-            "spatialRel": "esriSpatialRelIntersects",
-            "outFields": "FLD_ZONE,ZONE_SUBTY,SFHA_TF,DFIRM_ID",
-            "returnGeometry": "false",
-            "resultRecordCount": "10",
-            "f": "json",
-        }
-        try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                resp = await client.get(ESRI_FLOOD_ZONE_URL, params=params)
-                resp.raise_for_status()
-                data = resp.json()
-
-            features = data.get("features", [])
-            if not features:
-                continue
-
-            best = None
-            for f in features:
-                a = f["attributes"]
-                zone = (a.get("FLD_ZONE") or "").upper().strip()
-                if zone in SFHA_ZONES:
-                    best = a
-                    break
-            if best is None:
-                best = features[0]["attributes"]
-
-            raw_zone = (best.get("FLD_ZONE") or "X").strip()
-            raw_sfha = best.get("SFHA_TF", "F") == "T"
-            # Boundary check: if point hit SFHA but most nearby features are non-SFHA,
-            # override to avoid false positives for properties near zone edges
-            if raw_sfha and len(features) >= 3:
-                sfha_count = sum(1 for ft in features if ft["attributes"].get("SFHA_TF") == "T")
-                if sfha_count < len(features) - sfha_count:
-                    override = next((ft["attributes"] for ft in features
-                                     if ft["attributes"].get("SFHA_TF") != "T"), None)
-                    if override:
-                        print(f"[Zone boundary] {sfha_count}/{len(features)} SFHA — overriding to non-SFHA")
-                        best = override
-                        raw_zone = (best.get("FLD_ZONE") or "X").strip()
-                        raw_sfha = False
-            return {
-                "flood_zone": raw_zone,
-                "zone_subtype": best.get("ZONE_SUBTY") or "",
-                "esri_dfirm_id": best.get("DFIRM_ID") or "",
-                "in_sfha": raw_sfha,
+    for dlat, dlon in OFFSETS:
+        queries = [
+            {
+                "geometry": f"{lon+dlon},{lat+dlat}",
+                "geometryType": "esriGeometryPoint",
+            },
+            {
+                "geometry": f"{lon+dlon-0.0003},{lat+dlat-0.0003},{lon+dlon+0.0003},{lat+dlat+0.0003}",
+                "geometryType": "esriGeometryEnvelope",
+            },
+        ]
+        for q in queries:
+            params = {
+                **q,
+                "inSR": "4326",
+                "spatialRel": "esriSpatialRelIntersects",
+                "outFields": "FLD_ZONE,ZONE_SUBTY,SFHA_TF,DFIRM_ID",
+                "returnGeometry": "false",
+                "resultRecordCount": "5",
+                "f": "json",
             }
-        except Exception as e:
-            print(f"FEMA flood zone query error ({q['geometryType']}): {e}")
+            try:
+                async with httpx.AsyncClient(timeout=20.0) as client:
+                    resp = await client.get(ESRI_FLOOD_ZONE_URL, params=params)
+                    resp.raise_for_status()
+                    data = resp.json()
+                features = data.get("features", [])
+                if not features:
+                    continue
+                best = None
+                for f in features:
+                    a = f["attributes"]
+                    if (a.get("FLD_ZONE") or "").upper().strip() in SFHA_ZONES:
+                        best = a
+                        break
+                if best is None:
+                    best = features[0]["attributes"]
+                z = (best.get("FLD_ZONE") or "X").strip()
+                zone_tally[z] = zone_tally.get(z, 0) + 1
+                sfha_tally[z] = best.get("SFHA_TF", "F")
+                dfirm_tally[z] = best.get("DFIRM_ID") or ""
+                subtype_tally[z] = best.get("ZONE_SUBTY") or ""
+                break  # got a result for this offset, move to next
+            except Exception as e:
+                print(f"FEMA flood zone query error ({q['geometryType']}): {e}")
 
-    return {"flood_zone": "X", "in_sfha": False, "zone_subtype": "", "esri_dfirm_id": ""}
+    if not zone_tally:
+        return {"flood_zone": "X", "in_sfha": False, "zone_subtype": "", "esri_dfirm_id": ""}
+
+    # Modal zone: most common result across sampled points
+    modal_zone = max(zone_tally, key=zone_tally.get)
+    total_samples = sum(zone_tally.values())
+    sfha_samples = sum(v for z, v in zone_tally.items() if sfha_tally.get(z) == "T")
+    # Only call SFHA if majority of samples confirm it
+    is_sfha = sfha_samples > total_samples / 2
+
+    return {
+        "flood_zone": modal_zone,
+        "zone_subtype": subtype_tally.get(modal_zone, ""),
+        "esri_dfirm_id": dfirm_tally.get(modal_zone, ""),
+        "in_sfha": is_sfha,
+    }
 
 
 async def query_nfip_community(lat: float, lon: float) -> dict:
