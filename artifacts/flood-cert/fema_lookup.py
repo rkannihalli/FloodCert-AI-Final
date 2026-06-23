@@ -219,7 +219,7 @@ async def geocode_address(address: str) -> Optional[dict]:
         try:
             geocode_q_geo = re.sub(r"\s{2,}", " ", _LOT_PATTERN.sub("", address)).strip()
             params = {"q": geocode_q_geo, "api_key": geocodio_key, "limit": "1"}
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=6.0) as client:
                 resp = await client.get(
                     "https://api.geocod.io/v1.7/geocode", params=params
                 )
@@ -414,7 +414,7 @@ async def geocode_address(address: str) -> Optional[dict]:
             "lang": "en",
         }
         headers = {"User-Agent": "FEMA-FloodCert-Generator/1.0"}
-        async with httpx.AsyncClient(timeout=12.0) as client:
+        async with httpx.AsyncClient(timeout=8.0) as client:
             resp = await client.get(PHOTON_URL, params=params, headers=headers)
             resp.raise_for_status()
             data = resp.json()
@@ -653,7 +653,7 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
                 "f": "json",
             }
             try:
-                async with httpx.AsyncClient(timeout=20.0) as client:
+                async with httpx.AsyncClient(timeout=8.0) as client:
                     resp = await client.get(ESRI_FLOOD_ZONE_URL, params=params)
                     resp.raise_for_status()
                     data = resp.json()
@@ -716,7 +716,7 @@ async def query_nfip_community(lat: float, lon: float) -> dict:
             "f": "json",
         }
         try:
-            async with httpx.AsyncClient(timeout=12.0, verify=False) as client:
+            async with httpx.AsyncClient(timeout=8.0, verify=False) as client:
                 resp = await client.get(f"{NFHL_BASE}/22/query", params=params)
                 resp.raise_for_status()
                 data = resp.json()
@@ -877,7 +877,7 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "") -> dic
             "f": "json",
         }
         try:
-            async with httpx.AsyncClient(timeout=12.0, verify=False) as client:
+            async with httpx.AsyncClient(timeout=8.0, verify=False) as client:
                 resp = await client.get(f"{NFHL_BASE}/3/query", params=params)
                 resp.raise_for_status()
                 data = resp.json()
@@ -948,7 +948,7 @@ async def query_tigerweb_fips(lat: float, lon: float) -> dict:
         "f": "json",
     }
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=6.0) as client:
             resp = await client.get(TIGERWEB_COUNTY_URL, params=params)
             resp.raise_for_status()
             data = resp.json()
@@ -981,7 +981,7 @@ async def query_county_name(lat: float, lon: float) -> dict:
         "f": "json",
     }
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=6.0) as client:
             resp = await client.get(TIGERWEB_COUNTY_URL, params=params)
             resp.raise_for_status()
             data = resp.json()
@@ -1031,7 +1031,7 @@ async def query_nfip_community_csb(
                     "$select": "communityNumber,communityName,countyName,countyFips",
                     "$top": "500",
                 }
-                async with httpx.AsyncClient(timeout=10.0) as client:
+                async with httpx.AsyncClient(timeout=6.0) as client:
                     resp = await client.get(FEMA_CSB_URL, params=params_state)
                     resp.raise_for_status()
                     data = resp.json()
@@ -1056,7 +1056,7 @@ async def query_nfip_community_csb(
         "$top": "200",
     }
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=6.0) as client:
             resp = await client.get(FEMA_CSB_URL, params=params)
             resp.raise_for_status()
             data = resp.json()

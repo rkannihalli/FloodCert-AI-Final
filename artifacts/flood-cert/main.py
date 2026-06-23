@@ -1099,6 +1099,15 @@ async def generate(
     }
 
     record_id = save_determination(certificate_data)
+    # Auto-enable Life-of-Loan monitoring for every determination
+    try:
+        from db import set_life_of_loan, upsert_lol_monitoring, get_determination
+        set_life_of_loan(record_id, True)
+        det = get_determination(record_id)
+        if det:
+            upsert_lol_monitoring(det)
+    except Exception as e:
+        print(f"LOL auto-enable error (non-fatal): {e}")
 
     comm_info = nfip_community_info(
         certificate_data["community_number"],
