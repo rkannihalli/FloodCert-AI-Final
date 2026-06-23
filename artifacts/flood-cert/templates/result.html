@@ -512,19 +512,33 @@ async function lolCheck(id, btn) {
         }
         if (!attrs) attrs = features[0].attributes;
 
-        var firmPan = formatPanel(attrs.FIRM_PAN);
-        var effDate = formatDate(attrs.EFF_DATE);
+        // Validate panel against server-side community_number prefix
+        // Server already ran TIGERweb for correct county — only accept matching panel
+        var serverPanel = (document.getElementById('firmPanelDisplay').textContent || '').trim();
+        var serverPrefix = serverPanel.replace(' ', '').slice(0, 5);
 
-        // Map number: always update from authoritative FEMA source
-        var panelEl = document.getElementById('firmPanelDisplay');
+        var bestAttrs = null;
+        for (var k = 0; k < features.length; k++) {
+          var raw = (features[k].attributes.FIRM_PAN || '').trim();
+          var prefix = raw.slice(0, 5);
+          if (serverPrefix && prefix === serverPrefix) {
+            bestAttrs = features[k].attributes;
+            break;
+          }
+        }
+        // Only fall back to first feature if no server prefix to validate against
+        if (!bestAttrs && !serverPrefix) bestAttrs = attrs;
+        if (!bestAttrs) return; // server panel already correct, don't overwrite
+
+        var firmPan = formatPanel(bestAttrs.FIRM_PAN);
+        var effDate = formatDate(bestAttrs.EFF_DATE);
+
         if (firmPan) {
           setText('firmPanelDisplay', firmPan);
           setVal('certPanelNumber', firmPan);
           setVal('noticePanelNumber', firmPan);
         }
 
-        // Effective date: always update from authoritative FEMA source
-        var dateEl = document.getElementById('firmDateDisplay');
         if (effDate) {
           setText('firmDateDisplay', effDate);
           setVal('certPanelDate', effDate);
