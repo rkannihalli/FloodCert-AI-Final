@@ -1014,15 +1014,14 @@ async def generate(
             "matched_address": matched_address or property_address,
             "city": "", "state_abbr": "", "state_fips": "", "county_fips": "", "county_name": ""
         }
-    if geo_result:
-        if not geo_result:
-            return templates.TemplateResponse(request, "index.html", {
-                "errors": ["Could not geocode the provided address. Please check the address and try again."],
-                "form": {
-                    "property_address": property_address, "loan_id": loan_id,
-                    "borrower_name": borrower_name, "lender_name": lender_name,
-                    "lender_email": lender_email,
-                }
+    if not geo_result:
+        return templates.TemplateResponse(request, "index.html", {
+            "errors": ["Could not geocode the provided address. Please check the address and try again."],
+            "form": {
+                "property_address": property_address, "loan_id": loan_id,
+                "borrower_name": borrower_name, "lender_name": lender_name,
+                "lender_email": lender_email,
+            }
             })
         # Universal FIPS fix: if Census geocoder returned no FIPS (400 error),
         # use TIGERweb spatial reverse lookup to get authoritative county FIPS.
