@@ -1022,56 +1022,50 @@ async def generate(
                 "borrower_name": borrower_name, "lender_name": lender_name,
                 "lender_email": lender_email,
             }
-            })
-        # Universal FIPS fix: if Census geocoder returned no FIPS (400 error),
-        # use TIGERweb spatial reverse lookup to get authoritative county FIPS.
-        # TIGERweb uses actual geographic boundaries — correct for border cities
-        # like Summerville SC that span multiple counties.
-        # Step 1: Get authoritative FIPS from TIGERweb in parallel with zone/community.
-        # TIGERweb uses actual geographic boundaries — always correct regardless of
-        # whether Census geocoder succeeds or fails (Census returns 400 for many addresses).
-        # Run zone + community + TIGERweb in parallel (none depend on FIPS).
-        zone_data, community_data, county_data, tiger_data = await asyncio.gather(
-            query_fema_nfhl(geo_result["lat"], geo_result["lon"]),
-            query_nfip_community(geo_result["lat"], geo_result["lon"]),
-            query_county_name(geo_result["lat"], geo_result["lon"]),
-            query_tigerweb_fips(geo_result["lat"], geo_result["lon"]),
-        )
-        # TIGERweb FIPS always wins — spatial boundary lookup beats address attribution.
-        # This fixes wrong county for rural/border addresses where Census geocoder fails.
-        if tiger_data.get("state_fips"):
-            geo_result["state_fips"]  = tiger_data["state_fips"]
-            geo_result["county_fips"] = tiger_data["county_fips"]
-            if not geo_result.get("county_name"):
-                geo_result["county_name"] = tiger_data.get("county_name", "")
-            print(f"TIGERweb FIPS: {tiger_data['state_fips']}{tiger_data['county_fips']} ({tiger_data.get('county_name','')})")
-        elif not geo_result.get("state_fips") or not geo_result.get("county_fips"):
-            print("Warning: no FIPS from Census or TIGERweb")
-
-        # Step 2: Now that FIPS is authoritative, run FIRM panel + CSB in parallel.
-        # Both need correct FIPS — CSB for community ID, FIRM for panel number.
-        firm_data, csb_data = await asyncio.gather(
-            query_firm_panel(
-                geo_result["lat"], geo_result["lon"],
-                county_fips=geo_result.get("state_fips","") + geo_result.get("county_fips","")
-            ),
-            query_nfip_community_csb(
-                geo_result.get("state_fips", ""),
-                geo_result.get("county_fips", ""),
-                geo_result.get("city", ""),
-                geo_result.get("state_abbr", ""),
-            ),
-        )
-        flood_info = determine_flood_info({
-            **zone_data, **community_data, **firm_data, **county_data, **csb_data,
-            "geocoded_city": geo_result.get("city", ""),
-            "state_fips": geo_result.get("state_fips", ""),
-            "county_fips": geo_result.get("county_fips", ""),
-            "county_name": geo_result.get("county_name", ""),
         })
-        geo_lat = geo_result["lat"]
-        geo_lon = geo_result["lon"]
-        geo_matched = geo_result.get("matched_address", property_address)
+    # Step 1: Get authoritative FIPS from TIGERweb in parallel with zone/community.
+    # TIGERweb uses actual geographic boundaries — always correct regardless of
+    # whether Census geocoder succeeds or fails (Census returns 400 for many addresses).
+    zone_data, community_data, county_data, tiger_data = await asyncio.gather(
+        query_fema_nfhl(geo_result["lat"], geo_result["lon"]),
+        query_nfip_community(geo_result["lat"], geo_result["lon"]),
+        query_county_name(geo_result["lat"], geo_result["lon"]),
+        query_tigerweb_fips(geo_result["lat"], geo_result["lon"]),
+    )
+    # TIGERweb FIPS always wins — spatial boundary lookup beats address attribution.
+    if tiger_data.get("state_fips"):
+        geo_result["state_fips"]  = tiger_data["state_fips"]
+        geo_result["county_fips"] = tiger_data["county_fips"]
+        if not geo_result.get("county_name"):
+            geo_result["county_name"] = tiger_data.get("county_name", "")
+        print(f"TIGERweb FIPS: {tiger_data['state_fips']}{tiger_data['county_fips']} ({tiger_data.get('county_name','')})") 
+    elif not geo_result.get("state_fips") or not geo_result.get("county_fips"):
+        print("Warning: no FIPS from Census or TIGERweb")
+
+    # Step 2: Now that FIPS is authoritative, run FIRM panel + CSB in parallel.
+    # Both need correct FIPS — CSB for community ID, FIRM for panel number.
+    firm_data, csb_data = await asyncio.gather(
+        query_firm_panel(
+            geo_result["lat"], geo_result["lon"],
+            county_fips=geo_result.get("state_fips","") + geo_result.get("county_fips","")
+        ),
+        query_nfip_community_csb(
+            geo_result.get("state_fips", ""),
+            geo_result.get("county_fips", ""),
+            geo_result.get("city", ""),
+            geo_result.get("state_abbr", ""),
+        ),
+    )
+    flood_info = determine_flood_info({
+        **zone_data, **community_data, **firm_data, **county_data, **csb_data,
+        "geocoded_city": geo_result.get("city", ""),
+        "state_fips": geo_result.get("state_fips", ""),
+        "county_fips": geo_result.get("county_fips", ""),
+        "county_name": geo_result.get("county_name", ""),
+    })
+    geo_lat = geo_result["lat"]
+    geo_lon = geo_result["lon"]
+    geo_matched = geo_result.get("matched_address", property_address)
 
     # Determine company_id and user_id from session
     s_company_id = session_user.get("company_id") if session_user else None
