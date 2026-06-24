@@ -21,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from pdf_generator import generate_flood_certificate_pdf, generate_borrower_notice_pdf, generate_batch_report_pdf
-from fema_lookup import (
+from fema_lookup import query_local_nfhl, (
     geocode_address, query_fema_nfhl, query_nfip_community, query_firm_panel,
     query_county_name, query_nfip_community_csb, query_tigerweb_fips,
     determine_flood_info, nfip_community_info,
@@ -1875,3 +1875,12 @@ async def reset_password_post(
         "valid": True, "expired": False,
         "success": True, "error": None,
     })
+
+
+async def refresh_nfhl_weekly():
+    """Download and reimport NFHL data weekly from FEMA MSC.
+    Runs every Sunday at 02:00 UTC.
+    """
+    import schedule, asyncio
+    # Placeholder — implement download + ogr2ogr reimport
+    print("[NFHL] Weekly refresh would run here")

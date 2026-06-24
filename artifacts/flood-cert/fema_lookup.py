@@ -1451,3 +1451,89 @@ def determine_flood_info(merged: dict) -> dict:
         "community_name": community_name_out,
         "county": county_name,
     }
+
+
+# ── PostGIS Local NFHL Lookup ─────────────────────────────────────────────────
+import os as _os
+_NFHL_DB_URL = _os.environ.get("NFHL_DATABASE_URL", "")
+
+async def query_local_nfhl(lat: float, lon: float) -> dict:
+    """Query local PostGIS NFHL database for authoritative flood data.
+    
+    Returns flood zone, FIRM panel, and community ID from the downloaded
+    NFHL geodatabase. Zero API dependency — works offline.
+    Falls back gracefully if PostGIS is unavailable.
+    """
+    if not _NFHL_DB_URL:
+        return {}
+    try:
+        import psycopg2
+        import psycopg2.extras
+        conn = psycopg2.connect(_NFHL_DB_URL)
+        conn.autocommit = True
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        point = f"ST_SetSRID(ST_MakePoint({lon}, {lat}), 4326)"
+
+        # 1. Flood zone
+        cur.execute(f"""
+            SELECT fld_zone, zone_subty, sfha_tf, dfirm_id
+            FROM nfhl_flood_zones
+            WHERE ST_Contains(geom, {point})
+            ORDER BY CASE WHEN sfha_tf = 'T' THEN 0 ELSE 1 END,
+                     CASE WHEN fld_zone IN ('AE','AO','AH','VE','AV','AR','A','V') THEN 0 ELSE 1 END
+            LIMIT 1
+        """)
+        zone_row = cur.fetchone()
+
+        # 2. FIRM panel
+        cur.execute(f"""
+            SELECT firm_pan, eff_date, dfirm_id
+            FROM nfhl_firm_panels
+            WHERE ST_Contains(geom, {point})
+            LIMIT 1
+        """)
+        panel_row = cur.fetchone()
+
+        # 3. NFIP Community
+        cur.execute(f"""
+            SELECT cid, pol_name1
+            FROM nfhl_communities
+            WHERE ST_Contains(geom, {point})
+            LIMIT 1
+        """)
+        community_row = cur.fetchone()
+
+        conn.close()
+
+        result = {}
+        if zone_row:
+            raw_zone = (zone_row["fld_zone"] or "X").strip()
+            subtype = (zone_row["zone_subty"] or "").strip()
+            result["flood_zone"] = raw_zone
+            result["zone_subtype"] = subtype
+            result["in_sfha"] = zone_row["sfha_tf"] == "T"
+            result["esri_dfirm_id"] = zone_row["dfirm_id"] or ""
+
+        if panel_row:
+            raw = (panel_row["firm_pan"] or "").strip()
+            firm_pan = f"{raw[:6]} {raw[6:]}" if len(raw) >= 7 else raw
+            result["firm_panel_l3"] = firm_pan
+            eff = panel_row["eff_date"]
+            if eff:
+                from datetime import datetime
+                if isinstance(eff, datetime):
+                    result["eff_date"] = int(eff.timestamp() * 1000)
+                else:
+                    result["eff_date"] = eff
+
+        if community_row:
+            result["community_id"] = (community_row["cid"] or "").strip()
+            result["community_name"] = (community_row["pol_name1"] or "").strip()
+
+        if result:
+            print(f"PostGIS NFHL: zone={result.get('flood_zone')} panel={result.get('firm_panel_l3')} cid={result.get('community_id')}")
+        return result
+
+    except Exception as e:
+        print(f"PostGIS NFHL query error (non-fatal): {e}")
+        return {}
