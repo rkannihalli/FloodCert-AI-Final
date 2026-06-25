@@ -24,7 +24,7 @@ from pdf_generator import generate_flood_certificate_pdf, generate_borrower_noti
 from fema_lookup import (
     geocode_address, query_fema_nfhl, query_nfip_community, query_firm_panel,
     query_county_name, query_nfip_community_csb, query_tigerweb_fips,
-    determine_flood_info, nfip_community_info,
+    determine_flood_info, nfip_community_info, check_loma_at_point,
     ZONE_DISPLAY_NAMES,
 )
 from map_utils import generate_map_image
@@ -40,7 +40,7 @@ from db import (
     get_user_by_reset_token, set_reset_token, clear_reset_token,
     init_companies, get_or_create_company, get_company_by_id, list_companies,
     init_audit_tables, log_admin_deletion, list_admin_deletion_log,
-    init_lol_tables, upsert_lol_monitoring, get_lol_monitoring,
+    init_lol_tables, init_loma_table, upsert_lol_monitoring, get_lol_monitoring,
     list_lol_monitoring, list_active_lol_monitoring,
     close_lol_monitoring, update_lol_last_checked,
     create_lol_alert, list_lol_alerts, count_failed_lol_alerts,
@@ -66,15 +66,10 @@ except ImportError:
     _scheduler = None
 
 def _cert_filename(flood_zone: str, property_address: str) -> str:
-    """Build a clean PDF filename: Flood Cert - {zone label} - {street}.pdf
-    Only the street part (before the first comma) is used so the filename stays short.
-    Zone codes are converted to display labels via ZONE_DISPLAY_NAMES
-    (e.g. 'X-LEVEE' → 'Zone X Levee', 'X500' → 'Zone X (Shaded)').
-    """
+    """Build a clean PDF filename: Flood Cert - {zone label} - {street}.pdf"""
     raw_zone = (flood_zone or "").strip().upper()
     zone_label = ZONE_DISPLAY_NAMES.get(raw_zone, f"Zone {raw_zone}" if raw_zone else "Unknown")
     addr = (property_address or "Unknown").strip()
-    # Keep only the street portion — drop city, state, zip after the first comma
     street = addr.split(",")[0].strip() if addr else "Unknown"
     street_clean = re.sub(r'[\\/:*?"<>|]', "", street)
     street_clean = re.sub(r"\s+", " ", street_clean).strip()
@@ -92,7 +87,6 @@ US_STATES = {
     "DC","PR","GU","VI",
 }
 
-# In-memory store for batch CSV results (keyed by batch_id)
 _batch_results: dict[str, bytes] = {}
 _batch_record_ids: dict[str, list[int]] = {}
 _batch_full_results: dict[str, list] = {}
@@ -143,19 +137,17 @@ def _require_admin(request: Request) -> dict:
 
 
 def _session_company_id(request: Request) -> int | None:
-    """Return company_id from session; None for admin (admin sees all)."""
     user = get_session_user(request)
     if not user:
         return None
     if user.get("is_admin"):
-        return None  # Admin has no company scope restriction
+        return None
     return user.get("company_id")
 
 
 # ── LOL monitoring core check logic ──────────────────────────────────────────
 
 _LOL_CHECKS = [
-    # (lol_monitoring baseline key, human label, determine_flood_info result key)
     ("baseline_panel_number",     "NFIP Map Panel Number",         "panel_number"),
     ("baseline_effective_date",   "FIRM Panel Effective Date",     "panel_effective_date"),
     ("baseline_flood_zone",       "Flood Zone",                    "flood_zone"),
@@ -164,7 +156,6 @@ _LOL_CHECKS = [
 
 
 async def _check_lol_record(mon: dict) -> None:
-    """Check one active lol_monitoring record; create alert + send email if changed."""
     lat, lon = mon.get("lat"), mon.get("lon")
     if not lat or not lon:
         return
@@ -229,7 +220,6 @@ async def _check_lol_record(mon: dict) -> None:
 
 
 async def run_lol_daily_check():
-    """Daily scheduled job: check all active LOL monitoring records."""
     records = list_active_lol_monitoring()
     if not records:
         return
@@ -255,12 +245,11 @@ async def startup():
     init_lol_tables()
     init_loma_table()
 
-    # Seed / update super admin account
     admin_pw = os.getenv("ADMIN_PASSWORD", "")
     existing_admin = get_user_by_email(SUPER_ADMIN_EMAIL)
     if admin_pw:
         if not existing_admin:
-            uid = create_user(
+            create_user(
                 email=SUPER_ADMIN_EMAIL,
                 name="Rishu Kannihalli",
                 first_name="Rishu",
@@ -293,11 +282,17 @@ async def startup():
             if not existing_admin.get("company_id"):
                 set_user_company(existing_admin["id"], ADMIN_COMPANY_ID)
 
-    # Start APScheduler
- 
+    if _SCHEDULER_AVAILABLE and _scheduler:
+        try:
+            _scheduler.add_job(run_lol_daily_check, "cron", hour=6, minute=0, id="lol_daily")
+            _scheduler.add_job(_rebuild_nfip_db_background, "cron", hour=5, minute=0, id="nfip_daily")
+            _scheduler.start()
+            print("[LOL] Daily scheduler started (runs at 06:00 UTC)")
+        except Exception as e:
+            print(f"[LOL] Scheduler startup error: {e}")
+
+
 async def _rebuild_nfip_db_background():
-    """Daily background task: refresh nfip_communities_db.json from NFHL Layer 22.
-    Runs at 05:00 UTC daily (1hr before LOL checks) to keep community data current."""
     import json as _json, os as _os, httpx as _httpx
     from fema_lookup import STATE_FIPS as _SF
     url = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/22/query"
@@ -352,15 +347,6 @@ async def _rebuild_nfip_db_background():
     except Exception as e:
         print(f"[NFIP] Daily DB rebuild failed: {e}")
 
-    if _SCHEDULER_AVAILABLE and _scheduler:
-        try:
-            _scheduler.add_job(run_lol_daily_check, "cron", hour=6, minute=0, id="lol_daily")
-            _scheduler.add_job(_rebuild_nfip_db_background, "cron", hour=5, minute=0, id="nfip_daily")
-            _scheduler.start()
-            print("[LOL] Daily scheduler started (runs at 06:00 UTC)")
-        except Exception as e:
-            print(f"[LOL] Scheduler startup error: {e}")
-
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -373,6 +359,7 @@ async def shutdown():
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
+
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_get(request: Request):
@@ -450,12 +437,12 @@ async def request_access_post(
     email: str = Form(...),
     contact_number: str = Form(...),
 ):
-    first_name     = first_name.strip()
-    last_name      = last_name.strip()
-    company_name   = company_name.strip()
+    first_name      = first_name.strip()
+    last_name       = last_name.strip()
+    company_name    = company_name.strip()
     company_address = company_address.strip()
-    email          = email.strip().lower()
-    contact_number = contact_number.strip()
+    email           = email.strip().lower()
+    contact_number  = contact_number.strip()
 
     errors = []
     if not all([first_name, last_name, company_name, company_address, email, contact_number]):
@@ -471,12 +458,9 @@ async def request_access_post(
         contact_number = f"({digits_only[:3]}) {digits_only[3:6]}-{digits_only[6:]}"
 
     form_data = {
-        "first_name": first_name,
-        "last_name": last_name,
-        "company_name": company_name,
-        "company_address": company_address,
-        "email": email,
-        "contact_number": contact_number,
+        "first_name": first_name, "last_name": last_name,
+        "company_name": company_name, "company_address": company_address,
+        "email": email, "contact_number": contact_number,
     }
 
     if errors:
@@ -539,17 +523,14 @@ async def admin_panel(
     _require_admin(request)
     flash = request.session.pop("flash_approval", None)
 
-    # ── User Management tab data ──
     all_users = list_users_by_status()
     pending  = [u for u in all_users if u["status"] == "pending"]
     active   = [u for u in all_users if u["status"] == "active"]
     inactive = [u for u in all_users if u["status"] in ("inactive", "rejected")]
 
-    # ── Access Requests tab data ──
     status_scope = req_status if req_status in ("pending", "active", "rejected", "inactive") else None
     access_requests = list_users_by_status(status=status_scope)
 
-    # Enrich with display name
     for u in access_requests:
         if not u.get("name") or u["name"] == "":
             u["display_name"] = f"{u.get('first_name', '')} {u.get('last_name', '')}".strip() or u["email"]
@@ -561,7 +542,6 @@ async def admin_panel(
         else:
             u["display_name"] = u["name"]
 
-    # ── Company History tab data ──
     companies = list_companies()
     history_records = []
     history_users = []
@@ -578,7 +558,6 @@ async def admin_panel(
         history_users = list_users_by_company(cid)
         selected_company = get_company_by_id(cid)
 
-    # ── LOL Alerts tab data ──
     lol_alerts = list_lol_alerts() if tab == "lol" else []
 
     stats = {
@@ -607,15 +586,8 @@ async def admin_panel(
     })
 
 
-
-
-
 @app.post("/admin/rebuild-nfip-db")
 async def rebuild_nfip_db(request: Request):
-    """Rebuild nfip_communities_db.json in the CORRECT schema:
-    key={STATE}_{3-digit county FIPS} -> list of {cid, name} dicts.
-    This matches lookup_community_from_db() exactly. Paginates Layer 22
-    (~88k records) using the confirmed-working query shape."""
     _require_admin(request)
     import json as _json, os as _os, httpx as _httpx
     from fema_lookup import STATE_FIPS as _SF
@@ -652,8 +624,6 @@ async def rebuild_nfip_db(request: Request):
                     dfirm = (a.get("DFIRM_ID") or "").strip()
                     if not (cid and name):
                         continue
-                    # Derive state+county FIPS from the CID itself (first 5 digits)
-                    # CID format is SSCCC (2-digit state FIPS + 3-digit county FIPS)
                     sfips = cid[:2] if len(cid) >= 5 else (dfirm[:2] if len(dfirm) >= 2 else "")
                     cfips = cid[2:5] if len(cid) >= 5 else (dfirm[2:5] if len(dfirm) >= 5 else "")
                     state_abbr = _SF.get(sfips, ("", ""))[1] if sfips else ""
@@ -663,7 +633,6 @@ async def rebuild_nfip_db(request: Request):
                     entry = {"cid": cid, "name": name}
                     if key not in db:
                         db[key] = []
-                    # Avoid duplicate cid+name pairs within the same county
                     if not any(e["cid"] == cid and e["name"] == name for e in db[key]):
                         db[key].append(entry)
                 total_fetched += len(features)
@@ -673,12 +642,12 @@ async def rebuild_nfip_db(request: Request):
         outpath = _os.path.join(_os.path.dirname(__file__), "nfip_communities_db.json")
         with open(outpath, "w") as fp:
             _json.dump(db, fp, separators=(",", ":"))
-        # Force reload of in-memory cache
         import fema_lookup as _fl
         _fl._NFIP_DB = {}
         return JSONResponse({"status": "ok", "county_keys": len(db), "features_fetched": total_fetched})
     except Exception as e:
         return JSONResponse({"status": "error", "detail": str(e)[:500], "fetched_so_far": total_fetched}, status_code=500)
+
 
 @app.post("/admin/users/{user_id}/approve")
 async def admin_approve(request: Request, user_id: int):
@@ -687,7 +656,6 @@ async def admin_approve(request: Request, user_id: int):
     if not user:
         raise HTTPException(404)
 
-    # Find or create company from user's submitted company_name
     company_name = (user.get("company_name") or "").strip()
     company_address = (user.get("company_address") or "").strip()
     if company_name:
@@ -696,7 +664,6 @@ async def admin_approve(request: Request, user_id: int):
         company_id = ADMIN_COMPANY_ID
 
     set_user_company(user_id, company_id)
-
     tmp_pw = generate_temp_password()
     approve_user(user_id, hash_password(tmp_pw))
 
@@ -827,8 +794,6 @@ async def admin_create_user(
     return RedirectResponse("/admin?tab=users", status_code=303)
 
 
-# Admin: delete history records (with audit log)
-
 @app.post("/admin/history/{record_id}/delete")
 async def admin_delete_history(
     request: Request,
@@ -862,8 +827,6 @@ async def admin_bulk_delete(request: Request):
     return RedirectResponse(f"/admin?tab=companies&cid={cid_back}", status_code=303)
 
 
-# Admin: trigger LOL check manually
-
 @app.post("/admin/lol/run-check")
 async def admin_run_lol_check(request: Request):
     _require_admin(request)
@@ -873,11 +836,6 @@ async def admin_run_lol_check(request: Request):
 
 @app.post("/admin/live-test")
 async def admin_live_test(request: Request):
-    """Run a single address through the full geocoding + NFHL pipeline.
-
-    Used by the admin Live Test panel to verify the stack end-to-end before
-    publishing.  Returns JSON — never saves to the DB.
-    """
     _require_admin(request)
     body = await request.json()
     address = (body.get("address") or "").strip()
@@ -1006,8 +964,6 @@ async def generate(
             }
         })
 
-    # Always run full server-side lookup — never trust browser-submitted flood data.
-    # Browser JS pre-fills stale panel/zone data; TIGERweb+FIRM is authoritative.
     geo_result = await geocode_address(property_address)
     if not geo_result and lat.strip() and lon.strip():
         geo_result = {
@@ -1024,27 +980,24 @@ async def generate(
                 "lender_email": lender_email,
             }
         })
-    # Step 1: Get authoritative FIPS from TIGERweb in parallel with zone/community.
-    # TIGERweb uses actual geographic boundaries — always correct regardless of
-    # whether Census geocoder succeeds or fails (Census returns 400 for many addresses).
+
+    # Step 1: Get authoritative FIPS from TIGERweb
     zone_data, community_data, county_data, tiger_data = await asyncio.gather(
         query_fema_nfhl(geo_result["lat"], geo_result["lon"]),
         query_nfip_community(geo_result["lat"], geo_result["lon"]),
         query_county_name(geo_result["lat"], geo_result["lon"]),
         query_tigerweb_fips(geo_result["lat"], geo_result["lon"]),
     )
-    # TIGERweb FIPS always wins — spatial boundary lookup beats address attribution.
     if tiger_data.get("state_fips"):
         geo_result["state_fips"]  = tiger_data["state_fips"]
         geo_result["county_fips"] = tiger_data["county_fips"]
         if not geo_result.get("county_name"):
             geo_result["county_name"] = tiger_data.get("county_name", "")
-        print(f"TIGERweb FIPS: {tiger_data['state_fips']}{tiger_data['county_fips']} ({tiger_data.get('county_name','')})") 
+        print(f"TIGERweb FIPS: {tiger_data['state_fips']}{tiger_data['county_fips']} ({tiger_data.get('county_name','')})")
     elif not geo_result.get("state_fips") or not geo_result.get("county_fips"):
         print("Warning: no FIPS from Census or TIGERweb")
 
-    # Step 2: Now that FIPS is authoritative, run FIRM panel + CSB in parallel.
-    # Both need correct FIPS — CSB for community ID, FIRM for panel number.
+    # Step 2: FIRM panel + CSB with authoritative FIPS
     firm_data, csb_data = await asyncio.gather(
         query_firm_panel(
             geo_result["lat"], geo_result["lon"],
@@ -1064,14 +1017,31 @@ async def generate(
         "county_fips": geo_result.get("county_fips", ""),
         "county_name": geo_result.get("county_name", ""),
     })
+
     geo_lat = geo_result["lat"]
     geo_lon = geo_result["lon"]
     geo_matched = geo_result.get("matched_address", property_address)
 
+    # Step 3: Check for LOMA/LOMR — overrides NFHL zone if effective removal found
+    loma = await check_loma_at_point(geo_lat, geo_lon)
+    loma_note = None
+    loma_original_zone = None
+    if loma and loma.get("status") == "Effective" and loma.get("outcome_zone") == "X":
+        loma_original_zone = flood_info["flood_zone"]
+        flood_info["flood_zone"] = "X"
+        flood_info["sfha_status"] = "No"
+        flood_info["insurance_required"] = "No"
+        loma_note = (
+            f"Removed from SFHA per FEMA {loma['amendment_type']} "
+            f"Case No. {loma['case_number']} "
+            f"(effective {loma['effective_date']}). "
+            f"Map shows {loma_original_zone} — LOMA overrides."
+        )
+        print(f"[LOMA] Override applied: {loma['case_number']} at ({geo_lat},{geo_lon})")
+
     # Determine company_id and user_id from session
     s_company_id = session_user.get("company_id") if session_user else None
     s_user_id = session_user.get("id") if session_user else None
-    # Admin certs go to Admin company
     if session_user and session_user.get("is_admin") and not s_company_id:
         s_company_id = ADMIN_COMPANY_ID
 
@@ -1097,9 +1067,15 @@ async def generate(
         "determination_date_iso": date.today().isoformat(),
         "company_id": s_company_id,
         "user_id": s_user_id,
+        "loma_case_number":    loma.get("case_number")    if loma else None,
+        "loma_amendment_type": loma.get("amendment_type") if loma else None,
+        "loma_effective_date": loma.get("effective_date") if loma else None,
+        "loma_original_zone":  loma_original_zone,
+        "loma_note":           loma_note,
     }
 
     record_id = save_determination(certificate_data)
+
     # Auto-enable Life-of-Loan monitoring for every determination
     try:
         from db import set_life_of_loan, upsert_lol_monitoring, get_determination
@@ -1195,7 +1171,7 @@ async def download_notice(
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
-# ── History routes ─────────────────────────────────────────────────────────────
+# ── History routes ────────────────────────────────────────────────────────────
 
 @app.get("/history", response_class=HTMLResponse)
 async def history(request: Request, q: str = ""):
@@ -1284,10 +1260,8 @@ async def toggle_monitor(record_id: int, request: Request):
     body = await request.json()
     enable = bool(body.get("enable", not record.get("life_of_loan", 0)))
     set_life_of_loan(record_id, enable)
-
     if enable:
         upsert_lol_monitoring(record)
-
     return JSONResponse({"record_id": record_id, "life_of_loan": int(enable)})
 
 
@@ -1339,7 +1313,6 @@ async def history_detail(request: Request, record_id: int):
     record = get_determination(record_id)
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
-    # Enforce company scope for non-admin
     if user and not user.get("is_admin"):
         if record.get("company_id") and record.get("company_id") != user.get("company_id"):
             raise HTTPException(403)
@@ -1664,6 +1637,7 @@ async def batch_email_all(batch_id: str):
             details.append({"record_id": rid, "loan_id": record.get("loan_id"), "status": "error", "msg": str(exc)[:200]})
 
     sem = asyncio.Semaphore(3)
+
     async def bounded(rid):
         async with sem:
             await _send_one(rid)
@@ -1675,6 +1649,7 @@ async def batch_email_all(batch_id: str):
 @app.get("/fema-test")
 async def fema_test(request: Request):
     return templates.TemplateResponse("fema_test.html", {"request": request})
+
 
 @app.get("/batch/download/{batch_id}")
 async def batch_download(batch_id: str):
@@ -1713,13 +1688,12 @@ async def profile_page(request: Request):
     from db import get_determinations
     all_records = get_determinations(user_id=user["id"])
     return templates.TemplateResponse(
-        request,
-        "profile.html",
+        request, "profile.html",
         {
-            "user":         user,
+            "user": user,
             "record_count": len(all_records) if all_records else 0,
-            "success":      request.session.pop("profile_success", None),
-            "error":        request.session.pop("profile_error",   None),
+            "success": request.session.pop("profile_success", None),
+            "error": request.session.pop("profile_error", None),
         }
     )
 
@@ -1745,37 +1719,6 @@ async def change_password(
         request.session["profile_error"] = "Password must be at least 8 characters."
         return RedirectResponse("/profile", status_code=303)
     update_user_password(db_user["id"], hash_password(new_password))
-    request.session["profile_success"] = "Password updated successfully!"
-    return RedirectResponse("/profile", status_code=303)
-
-
-
-# ── User Profile & Password Management ───────────────────────────────────────
-
-@app.post("/profile/change-password")
-async def change_password_post(
-    request: Request,
-    current_password: str = Form(...),
-    new_password:     str = Form(...),
-    confirm_password: str = Form(...),
-):
-    user = get_session_user(request)
-    if not user:
-        return RedirectResponse("/login", status_code=303)
-    try:
-        db_user = get_user_by_email(user["email"])
-    except Exception:
-        db_user = None
-    if not db_user or not verify_password(current_password, db_user["password_hash"]):
-        request.session["profile_error"] = "Current password is incorrect."
-        return RedirectResponse("/profile", status_code=303)
-    if new_password != confirm_password:
-        request.session["profile_error"] = "New passwords do not match."
-        return RedirectResponse("/profile", status_code=303)
-    if len(new_password) < 8:
-        request.session["profile_error"] = "Password must be at least 8 characters."
-        return RedirectResponse("/profile", status_code=303)
-    update_user_password(db_user["id"], hash_password(new_password))
     request.session["profile_success"] = "Password updated successfully."
     return RedirectResponse("/profile", status_code=303)
 
@@ -1783,40 +1726,32 @@ async def change_password_post(
 @app.get("/forgot-password", response_class=HTMLResponse)
 async def forgot_password_get(request: Request):
     return templates.TemplateResponse("forgot_password.html", {
-        "request": request,
-        "sent": False,
-        "error": None,
+        "request": request, "sent": False, "error": None,
     })
 
 
 @app.post("/forgot-password", response_class=HTMLResponse)
 async def forgot_password_post(request: Request, email: str = Form(...)):
-    from db import set_reset_token
     import secrets
-    from datetime import datetime, timedelta
+    from datetime import timedelta
     db_user = get_user_by_email(email.strip().lower())
-    # Always show success to avoid email enumeration
     if db_user and db_user.get("status") == "active":
         token  = secrets.token_urlsafe(32)
         expiry = (datetime.utcnow() + timedelta(hours=1)).isoformat()
         set_reset_token(db_user["id"], token, expiry)
-        base   = str(request.base_url).rstrip("/")
+        base = str(request.base_url).rstrip("/")
         reset_url = f"{base}/reset-password?token={token}"
         try:
-            send_password_reset_email(db_user["email"], db_user.get("name",""), reset_url)
+            send_password_reset_email(db_user["email"], db_user.get("name", ""), reset_url)
         except Exception as e:
             print(f"[FORGOT-PW] email failed: {e}")
     return templates.TemplateResponse("forgot_password.html", {
-        "request": request,
-        "sent": True,
-        "error": None,
+        "request": request, "sent": True, "error": None,
     })
 
 
 @app.get("/reset-password", response_class=HTMLResponse)
 async def reset_password_get(request: Request, token: str = ""):
-    from db import get_user_by_reset_token
-    from datetime import datetime
     db_user = get_user_by_reset_token(token)
     expired = False
     if db_user:
@@ -1825,24 +1760,19 @@ async def reset_password_get(request: Request, token: str = ""):
             expired = True
             db_user = None
     return templates.TemplateResponse("reset_password.html", {
-        "request": request,
-        "token": token,
-        "valid": db_user is not None,
-        "expired": expired,
-        "success": False,
-        "error": None,
+        "request": request, "token": token,
+        "valid": db_user is not None, "expired": expired,
+        "success": False, "error": None,
     })
 
 
 @app.post("/reset-password", response_class=HTMLResponse)
 async def reset_password_post(
     request: Request,
-    token:            str = Form(...),
-    new_password:     str = Form(...),
+    token: str = Form(...),
+    new_password: str = Form(...),
     confirm_password: str = Form(...),
 ):
-    from db import get_user_by_reset_token, clear_reset_token
-    from datetime import datetime
     db_user = get_user_by_reset_token(token)
     if not db_user:
         return templates.TemplateResponse("reset_password.html", {
@@ -1879,9 +1809,5 @@ async def reset_password_post(
 
 
 async def refresh_nfhl_weekly():
-    """Download and reimport NFHL data weekly from FEMA MSC.
-    Runs every Sunday at 02:00 UTC.
-    """
-    import schedule, asyncio
-    # Placeholder — implement download + ogr2ogr reimport
+    """Download and reimport NFHL data weekly from FEMA MSC."""
     print("[NFHL] Weekly refresh would run here")
