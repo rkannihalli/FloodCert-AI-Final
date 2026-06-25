@@ -44,7 +44,7 @@ CT_PLANNING_REGION_TO_COUNTY: dict[str, str] = {
     "western connecticut planning region":           "Fairfield County",
 }
 
-FEMA_CSB_URL = "https://www.fema.gov/api/open/v2/fimaNfipCommunities"
+FEMA_CSB_URL = "https://www.fema.gov/api/open/v1/fimaNfipCommunities"
 
 _X500_SUBTYPES = frozenset({
     "0.2 PCT ANNUAL CHANCE FLOOD HAZARD",
@@ -680,14 +680,8 @@ async def query_nfip_community_csb(
     county_fips: str,
     city: str,
     state_abbr: str = "",
-    community_id_from_layer22: str = "",
 ) -> dict:
-    """Look up NFIP community name and number.
-    Priority:
-      1. Local nfip_communities_db.json (fast, offline)
-      2. FEMA CSB API (fallback, may be unavailable)
-    """
-    import os, json as _json
+    """Query FEMA NFIP Community Status Book API for the authoritative community number."""
     empty: dict = {"csb_community_id": "", "csb_community_name": ""}
 
     sa = state_abbr.upper().strip()
@@ -696,74 +690,89 @@ async def query_nfip_community_csb(
     if not sa:
         return empty
 
-    # ── 1. Local JSON DB ─────────────────────────────────────────────────────
+    if not county_fips or len(county_fips) != 3:
+        if sa and city:
+            try:
+                params_state = {
+                    "$filter": f"stateAbbreviation eq '{sa}'",
+                    "$select": "communityNumber,communityName,countyName,countyFips",
+                    "$top": "500",
+                }
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.get(FEMA_CSB_URL, params=params_state)
+                    resp.raise_for_status()
+                    data = resp.json()
+                communities_all = data.get("fimaNfipCommunities", [])
+                city_n = city.lower().strip()
+                for c in communities_all:
+                    c_name = (c.get("communityName") or "").lower()
+                    if (c_name == city_n
+                            or c_name.startswith(city_n + ",")
+                            or city_n in c_name):
+                        return {
+                            "csb_community_id": c.get("communityNumber", ""),
+                            "csb_community_name": c.get("communityName", ""),
+                        }
+            except Exception as e:
+                print(f"FEMA CSB state-only lookup error: {e}")
+        return empty
+
+    params = {
+        "$filter": f"stateAbbreviation eq '{sa}' and countyFips eq '{county_fips}'",
+        "$select": "communityNumber,communityName,countyName",
+        "$top": "200",
+    }
     try:
-        db_path = os.path.join(os.path.dirname(__file__), "nfip_communities_db.json")
-        with open(db_path) as f:
-            nfip_db = _json.load(f)
-
-        # Try exact county key first: STATE_COUNTYCODE
-        cfips = county_fips.zfill(3) if county_fips else ""
-        key = f"{sa}_{cfips}" if cfips else None
-        communities = nfip_db.get(key, []) if key else []
-
-        # If not found by county, search all state entries
-        if not communities and sa:
-            for k, v in nfip_db.items():
-                if k.startswith(f"{sa}_"):
-                    communities.extend(v)
-
-        city_norm = city.lower().strip()
-
-        if communities and city_norm:
-            # Exact match first
-            for c in communities:
-                c_name = (c.get("name") or "").lower()
-                if c_name == city_norm or c_name.startswith(city_norm + ","):
-                    return {"csb_community_id": c.get("cid", ""),
-                            "csb_community_name": c.get("name", "")}
-            # Partial match
-            for c in communities:
-                c_name = (c.get("name") or "").lower()
-                if city_norm in c_name:
-                    return {"csb_community_id": c.get("cid", ""),
-                            "csb_community_name": c.get("name", "")}
-            # County/unincorporated fallback
-            for c in communities:
-                c_name = (c.get("name") or "").lower()
-                if "county" in c_name or "unincorporated" in c_name:
-                    return {"csb_community_id": c.get("cid", ""),
-                            "csb_community_name": c.get("name", "")}
-            # Single result
-            if len(communities) == 1:
-                return {"csb_community_id": communities[0].get("cid", ""),
-                        "csb_community_name": communities[0].get("name", "")}
-    except Exception as e:
-        print(f"NFIP local DB lookup error: {e}")
-
-    # ── 2. FEMA CSB API fallback ──────────────────────────────────────────────
-    try:
-        params = {
-            "$filter": f"stateAbbreviation eq '{sa}' and countyFips eq '{county_fips}'",
-            "$select": "communityNumber,communityName,countyName",
-            "$top": "200",
-        }
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(FEMA_CSB_URL, params=params)
             resp.raise_for_status()
             data = resp.json()
-        communities_api = data.get("fimaNfipCommunities", [])
-        city_norm = city.lower().strip()
-        for c in communities_api:
-            c_name = (c.get("communityName") or "").lower()
-            if city_norm and (c_name == city_norm or city_norm in c_name):
-                return {"csb_community_id": c.get("communityNumber", ""),
-                        "csb_community_name": c.get("communityName", "")}
-        if len(communities_api) == 1:
-            return {"csb_community_id": communities_api[0].get("communityNumber", ""),
-                    "csb_community_name": communities_api[0].get("communityName", "")}
     except Exception as e:
-        print(f"FEMA CSB API fallback error: {e}")
+        print(f"FEMA CSB API error: {e}")
+        return empty
+
+    communities = data.get("fimaNfipCommunities", [])
+    if not communities:
+        return empty
+
+    city_norm = city.lower().strip()
+
+    if city_norm:
+        for c in communities:
+            c_name = (c.get("communityName") or "").lower()
+            if (
+                c_name == city_norm
+                or c_name.startswith(city_norm + ",")
+                or c_name.startswith(city_norm + " ")
+            ):
+                return {
+                    "csb_community_id": c.get("communityNumber", ""),
+                    "csb_community_name": c.get("communityName", ""),
+                }
+
+    if city_norm:
+        for c in communities:
+            c_name = (c.get("communityName") or "").lower()
+            if city_norm in c_name:
+                return {
+                    "csb_community_id": c.get("communityNumber", ""),
+                    "csb_community_name": c.get("communityName", ""),
+                }
+
+    for c in communities:
+        c_name = (c.get("communityName") or "").lower()
+        if "county" in c_name or "unincorporated" in c_name:
+            return {
+                "csb_community_id": c.get("communityNumber", ""),
+                "csb_community_name": c.get("communityName", ""),
+            }
+
+    if len(communities) == 1:
+        c = communities[0]
+        return {
+            "csb_community_id": c.get("communityNumber", ""),
+            "csb_community_name": c.get("communityName", ""),
+        }
 
     return empty
 
