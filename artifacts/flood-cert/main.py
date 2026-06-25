@@ -1026,9 +1026,9 @@ async def generate(
     loma = await check_loma_at_point(geo_lat, geo_lon)
     loma_note = None
     loma_original_zone = None
-    if loma and loma.get("status") == "Effective" and loma.get("outcome_zone") == "X":
+    if loma and loma.get("status") == "Effective" and loma.get("outcome_zone") in ("X", "X500", "X (Shaded)"):
         loma_original_zone = flood_info["flood_zone"]
-        flood_info["flood_zone"] = "X"
+        flood_info["flood_zone"] = loma.get("outcome_zone", "X")
         flood_info["sfha_status"] = "No"
         flood_info["insurance_required"] = "No"
         loma_note = (
