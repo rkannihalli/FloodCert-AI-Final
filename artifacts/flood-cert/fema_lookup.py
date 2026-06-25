@@ -20,8 +20,8 @@ async def check_loma_at_point(lat: float, lon: float) -> dict | None:
                     SELECT case_number, outcome_zone, amendment_type,
                            effective_date, original_zone
                     FROM loma_records
-                    WHERE ABS(lat - %s) < 0.001
-                      AND ABS(lon - %s) < 0.001
+                    WHERE ABS(lat - %s) < 0.005
+                      AND ABS(lon - %s) < 0.005
                     ORDER BY looked_up_at DESC
                     LIMIT 1
                 """, (lat, lon))
