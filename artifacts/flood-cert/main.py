@@ -248,11 +248,12 @@ async def run_lol_daily_check():
 
 @app.on_event("startup")
 async def startup():
-    init_companies()
     init_db()
+    init_companies()
     init_auth_tables()
     init_audit_tables()
     init_lol_tables()
+    init_loma_table()
 
     # Seed / update super admin account
     admin_pw = os.getenv("ADMIN_PASSWORD", "")
