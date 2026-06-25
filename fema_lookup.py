@@ -2,14 +2,14 @@ import re
 import httpx
 from typing import Optional
 
-CENSUS_GEO_URL = "https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress"
-CENSUS_LOC_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
-ARCGIS_GEO_URL = (
+CENSUS_GEO_URL  = "https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress"
+CENSUS_LOC_URL  = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
+ARCGIS_GEO_URL  = (
     "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer"
     "/findAddressCandidates"
 )
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-PHOTON_URL = "https://photon.komoot.io/api/"
+NOMINATIM_URL  = "https://nominatim.openstreetmap.org/search"
+PHOTON_URL     = "https://photon.komoot.io/api/"
 
 _LOT_PATTERN = re.compile(
     r",?\s+(?:Lot|Parcel|Tract)\s*[\w-]+\b",
@@ -29,42 +29,40 @@ ESRI_FLOOD_ZONE_URL = (
 )
 
 SFHA_ZONES = {"A", "AE", "AH", "AO", "AR", "A99", "V", "VE"}
-NFHL_BASE = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer"
+NFHL_BASE  = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer"
 
 CT_PLANNING_REGION_TO_COUNTY: dict[str, str] = {
-    "capitol planning region": "Hartford County",
-    "greater bridgeport planning region": "Fairfield County",
-    "lower connecticut river valley planning region": "Middlesex County",
-    "naugatuck valley planning region": "New Haven County",
-    "northeastern connecticut planning region": "Windham County",
-    "northwest hills planning region": "Litchfield County",
-    "south central connecticut planning region": "New Haven County",
-    "south central connecticut": "New Haven County",
-    "southeastern connecticut planning region": "New London County",
-    "western connecticut planning region": "Fairfield County",
+    "capitol planning region":                       "Hartford County",
+    "greater bridgeport planning region":            "Fairfield County",
+    "lower connecticut river valley planning region":"Middlesex County",
+    "naugatuck valley planning region":              "New Haven County",
+    "northeastern connecticut planning region":      "Windham County",
+    "northwest hills planning region":               "Litchfield County",
+    "south central connecticut planning region":     "New Haven County",
+    "south central connecticut":                     "New Haven County",
+    "southeastern connecticut planning region":      "New London County",
+    "western connecticut planning region":           "Fairfield County",
 }
 
 FEMA_CSB_URL = "https://www.fema.gov/api/open/v1/fimaNfipCommunities"
 
-_X500_SUBTYPES = frozenset(
-    {
-        "0.2 PCT ANNUAL CHANCE FLOOD HAZARD",
-        "0.2 PCT ANNUAL CHANCE FLOOD",
-        "0.2% ANNUAL CHANCE FLOOD HAZARD",
-        "0.2 PERCENT ANNUAL CHANCE FLOOD HAZARD",
-        "AREA OF 500-YEAR FLOOD HAZARD",
-        "500-YEAR FLOOD HAZARD",
-        "500 YEAR FLOOD HAZARD",
-        "SHADED ZONE X",
-        "0.2 PCT ANNUAL CHANCE",
-        "0.2 PERCENT ANNUAL CHANCE",
-        "AREA WITH REDUCED FLOOD RISK DUE TO LEVEE",
-        "REDUCED FLOOD RISK DUE TO LEVEE",
-        "PROTECTED BY LEVEE",
-        "AREA PROTECTED BY LEVEE",
-        "AREA PROTECTED FROM 100-YEAR FLOOD BY LEVEE",
-    }
-)
+_X500_SUBTYPES = frozenset({
+    "0.2 PCT ANNUAL CHANCE FLOOD HAZARD",
+    "0.2 PCT ANNUAL CHANCE FLOOD",
+    "0.2% ANNUAL CHANCE FLOOD HAZARD",
+    "0.2 PERCENT ANNUAL CHANCE FLOOD HAZARD",
+    "AREA OF 500-YEAR FLOOD HAZARD",
+    "500-YEAR FLOOD HAZARD",
+    "500 YEAR FLOOD HAZARD",
+    "SHADED ZONE X",
+    "0.2 PCT ANNUAL CHANCE",
+    "0.2 PERCENT ANNUAL CHANCE",
+    "AREA WITH REDUCED FLOOD RISK DUE TO LEVEE",
+    "REDUCED FLOOD RISK DUE TO LEVEE",
+    "PROTECTED BY LEVEE",
+    "AREA PROTECTED BY LEVEE",
+    "AREA PROTECTED FROM 100-YEAR FLOOD BY LEVEE",
+})
 
 
 def _classify_x_zone(flood_zone: str, zone_subtype: str) -> str:
@@ -88,7 +86,6 @@ def _classify_x_zone(flood_zone: str, zone_subtype: str) -> str:
 
     return "X"
 
-
 TIGERWEB_COUNTY_URL = (
     "https://tigerweb.geo.census.gov/arcgis/rest/services"
     "/TIGERweb/State_County/MapServer/1/query"
@@ -107,36 +104,10 @@ def _geocode_plausible(input_address: str, matched_address: str) -> bool:
 
     street_part = re.sub(r"^\s*\d+\s*", "", inp.split(",")[0])
     _STOP = {
-        "DR",
-        "ST",
-        "AVE",
-        "BLVD",
-        "RD",
-        "LN",
-        "CT",
-        "CIR",
-        "PL",
-        "WAY",
-        "TER",
-        "TRL",
-        "PKWY",
-        "HWY",
-        "DRIVE",
-        "STREET",
-        "AVENUE",
-        "BOULEVARD",
-        "ROAD",
-        "LANE",
-        "COURT",
-        "CIRCLE",
-        "PLACE",
-        "TERRACE",
-        "TRAIL",
-        "PARKWAY",
-        "HIGHWAY",
-        "UNIT",
-        "APT",
-        "STE",
+        "DR", "ST", "AVE", "BLVD", "RD", "LN", "CT", "CIR", "PL", "WAY",
+        "TER", "TRL", "PKWY", "HWY", "DRIVE", "STREET", "AVENUE",
+        "BOULEVARD", "ROAD", "LANE", "COURT", "CIRCLE", "PLACE",
+        "TERRACE", "TRAIL", "PARKWAY", "HIGHWAY", "UNIT", "APT", "STE",
     }
     sig_words = [w for w in re.findall(r"\b[A-Z]{2,}\b", street_part) if w not in _STOP]
     primary_word = sig_words[0] if sig_words else ""
@@ -144,9 +115,9 @@ def _geocode_plausible(input_address: str, matched_address: str) -> bool:
     zip_m = re.search(r"\b(\d{5})\b", inp)
     zip_code = zip_m.group(1) if zip_m else ""
 
-    house_ok = bool(house_num) and house_num in mat
+    house_ok  = bool(house_num)    and house_num    in mat
     street_ok = bool(primary_word) and primary_word in mat
-    zip_ok = bool(zip_code) and zip_code in mat
+    zip_ok    = bool(zip_code)     and zip_code     in mat
 
     if house_ok and (street_ok or zip_ok):
         return True
@@ -203,7 +174,7 @@ async def geocode_address(address: str) -> Optional[dict]:
             counties = m.get("geographies", {}).get("Counties", [])
             geoid = counties[0].get("GEOID", "") if counties else ""
             county_raw = counties[0].get("NAME", "") if counties else ""
-            state_fips = geoid[:2] if len(geoid) >= 5 else ""
+            state_fips  = geoid[:2] if len(geoid) >= 5 else ""
             county_fips = geoid[2:] if len(geoid) >= 5 else ""
             result = {
                 "lat": coords.get("y"),
@@ -217,9 +188,7 @@ async def geocode_address(address: str) -> Optional[dict]:
             }
             if _geocode_plausible(geocode_q, result["matched_address"]):
                 return result
-            print(
-                f"Geocoding (geographies) plausibility rejected: {result['matched_address']!r}"
-            )
+            print(f"Geocoding (geographies) plausibility rejected: {result['matched_address']!r}")
     except Exception as e:
         print(f"Geocoding (geographies) error: {e}")
 
@@ -252,9 +221,7 @@ async def geocode_address(address: str) -> Optional[dict]:
             }
             if _geocode_plausible(geocode_q, result["matched_address"]):
                 return result
-            print(
-                f"Geocoding (locations) plausibility rejected: {result['matched_address']!r}"
-            )
+            print(f"Geocoding (locations) plausibility rejected: {result['matched_address']!r}")
     except Exception as e:
         print(f"Geocoding (locations) error: {e}")
 
@@ -273,24 +240,19 @@ async def geocode_address(address: str) -> Optional[dict]:
             resp.raise_for_status()
             data = resp.json()
 
-        _ARCGIS_PRECISE = {
-            "PointAddress",
-            "Subaddress",
-            "BuildingName",
-            "StreetAddress",
-        }
+        _ARCGIS_PRECISE = {"PointAddress", "Subaddress", "BuildingName", "StreetAddress"}
         best_a = None
         for c in data.get("candidates", []):
-            score = c.get("score", 0)
+            score     = c.get("score", 0)
             addr_type = (c.get("attributes") or {}).get("Addr_type", "")
             if score >= 85 and addr_type in _ARCGIS_PRECISE:
                 best_a = c
                 break
 
         if best_a:
-            loc = best_a.get("location", {})
-            lat_a = float(loc.get("y", 0))
-            lon_a = float(loc.get("x", 0))
+            loc     = best_a.get("location", {})
+            lat_a   = float(loc.get("y", 0))
+            lon_a   = float(loc.get("x", 0))
             attrs_a = best_a.get("attributes") or {}
             result = {
                 "lat": lat_a,
@@ -300,15 +262,11 @@ async def geocode_address(address: str) -> Optional[dict]:
                 "state_abbr": (attrs_a.get("RegionAbbr") or "").upper(),
                 "state_fips": "",
                 "county_fips": "",
-                "county_name": (attrs_a.get("Subregion") or "")
-                .replace(" County", "")
-                .strip(),
+                "county_name": (attrs_a.get("Subregion") or "").replace(" County", "").strip(),
             }
             if _geocode_plausible(geocode_q, result["matched_address"]):
                 return result
-            print(
-                f"Geocoding (ArcGIS) plausibility rejected: {result['matched_address']!r}"
-            )
+            print(f"Geocoding (ArcGIS) plausibility rejected: {result['matched_address']!r}")
     except Exception as e:
         print(f"Geocoding (ArcGIS) error: {e}")
 
@@ -330,17 +288,8 @@ async def geocode_address(address: str) -> Optional[dict]:
         best = None
         for f in features:
             osm_value = (f.get("properties", {}).get("osm_value") or "").lower()
-            if osm_value in (
-                "house",
-                "residential",
-                "detached",
-                "apartments",
-                "yes",
-                "building",
-                "terrace",
-                "semi",
-                "bungalow",
-            ):
+            if osm_value in ("house", "residential", "detached", "apartments",
+                             "yes", "building", "terrace", "semi", "bungalow"):
                 best = f
                 break
         if best is None:
@@ -356,10 +305,7 @@ async def geocode_address(address: str) -> Optional[dict]:
             if len(coords_p) >= 2:
                 lon_p, lat_p = float(coords_p[0]), float(coords_p[1])
                 city_p = (
-                    props.get("city")
-                    or props.get("locality")
-                    or props.get("village")
-                    or ""
+                    props.get("city") or props.get("locality") or props.get("village") or ""
                 ).title()
                 state_p = props.get("state_code") or props.get("state") or ""
                 state_abbr_p = (state_p[:2] if len(state_p) >= 2 else state_p).upper()
@@ -380,10 +326,8 @@ async def geocode_address(address: str) -> Optional[dict]:
                 }
                 if _geocode_plausible(geocode_q, result["matched_address"]):
                     return result
-                print(
-                    f"Geocoding (Photon) plausibility rejected: {result['matched_address']!r} "
-                    f"(osm_key={props.get('osm_key')}, osm_value={props.get('osm_value')})"
-                )
+                print(f"Geocoding (Photon) plausibility rejected: {result['matched_address']!r} "
+                      f"(osm_key={props.get('osm_key')}, osm_value={props.get('osm_value')})")
     except Exception as e:
         print(f"Geocoding (Photon) error: {e}")
 
@@ -414,9 +358,7 @@ async def geocode_address(address: str) -> Optional[dict]:
             state_abbr = addr_detail.get("state_code", "").upper()
             county_raw = addr_detail.get("county", "").replace(" County", "").strip()
             display = r.get("display_name", address).split(",")[0].strip()
-            matched = f"{display}, {addr_detail.get('city', '')}, {state_abbr}".strip(
-                ", "
-            )
+            matched = f"{display}, {addr_detail.get('city', '')}, {state_abbr}".strip(", ")
             result = {
                 "lat": float(r["lat"]),
                 "lon": float(r["lon"]),
@@ -429,9 +371,7 @@ async def geocode_address(address: str) -> Optional[dict]:
             }
             if _geocode_plausible(geocode_q, result["matched_address"]):
                 return result
-            print(
-                f"Geocoding (Nominatim) plausibility rejected: {result['matched_address']!r}"
-            )
+            print(f"Geocoding (Nominatim) plausibility rejected: {result['matched_address']!r}")
     except Exception as e:
         print(f"Geocoding (Nominatim) error: {e}")
 
@@ -461,15 +401,9 @@ async def geocode_address(address: str) -> Optional[dict]:
                     or ""
                 ).title()
                 state_abbr = addr_detail.get("state_code", "").upper()
-                county_raw = (
-                    addr_detail.get("county", "").replace(" County", "").strip()
-                )
+                county_raw = addr_detail.get("county", "").replace(" County", "").strip()
                 display = r.get("display_name", address).split(",")[0].strip()
-                matched = (
-                    f"{display}, {addr_detail.get('city', '')}, {state_abbr}".strip(
-                        ", "
-                    )
-                )
+                matched = f"{display}, {addr_detail.get('city', '')}, {state_abbr}".strip(", ")
                 result = {
                     "lat": float(r["lat"]),
                     "lon": float(r["lon"]),
@@ -482,17 +416,15 @@ async def geocode_address(address: str) -> Optional[dict]:
                 }
                 if _geocode_plausible(geocode_q, result["matched_address"]):
                     return result
-                print(
-                    f"Geocoding (Nominatim normalized) plausibility rejected: "
-                    f"{result['matched_address']!r}"
-                )
+                print(f"Geocoding (Nominatim normalized) plausibility rejected: "
+                      f"{result['matched_address']!r}")
         except Exception as e:
             print(f"Geocoding (Nominatim normalized) error: {e}")
 
     # ── Attempt 7: Minimal query ──────────────────────────────────────────────
     try:
         num_m2 = re.match(r"\s*(\d+)", geocode_q)
-        parts = [p.strip() for p in geocode_q.split(",")]
+        parts  = [p.strip() for p in geocode_q.split(",")]
         if num_m2 and len(parts) >= 2:
             city_state_zip = ", ".join(parts[1:])
             minimal_q = f"{num_m2.group(1)} {city_state_zip}"
@@ -518,9 +450,7 @@ async def geocode_address(address: str) -> Optional[dict]:
                     or ""
                 ).title()
                 state_abbr = addr_detail.get("state_code", "").upper()
-                county_raw = (
-                    addr_detail.get("county", "").replace(" County", "").strip()
-                )
+                county_raw = addr_detail.get("county", "").replace(" County", "").strip()
                 zip_r = addr_detail.get("postcode", "")
                 result = {
                     "lat": float(r["lat"]),
@@ -593,12 +523,7 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
         except Exception as e:
             print(f"FEMA flood zone query error ({q['geometryType']}): {e}")
 
-    return {
-        "flood_zone": "X",
-        "in_sfha": False,
-        "zone_subtype": "",
-        "esri_dfirm_id": "",
-    }
+    return {"flood_zone": "X", "in_sfha": False, "zone_subtype": "", "esri_dfirm_id": ""}
 
 
 async def query_nfip_community(lat: float, lon: float) -> dict:
@@ -663,16 +588,13 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "") -> dic
             if county_fips:
                 county_prefix = county_fips[:5]
                 filtered = [
-                    f
-                    for f in features
+                    f for f in features
                     if (f["attributes"].get("DFIRM_ID") or "").startswith(county_prefix)
                 ]
                 if filtered:
                     features = filtered
-                    print(
-                        f"FIRM panel matched county {county_prefix}: "
-                        f"{features[0]['attributes'].get('FIRM_PAN', '')}"
-                    )
+                    print(f"FIRM panel matched county {county_prefix}: "
+                          f"{features[0]['attributes'].get('FIRM_PAN','')}")
 
             attrs = None
             for f in features:
@@ -713,12 +635,12 @@ async def query_tigerweb_fips(lat: float, lon: float) -> dict:
         if not features:
             return {}
         attrs = features[0]["attributes"]
-        state_fips = str(attrs.get("STATE", "")).zfill(2)
+        state_fips  = str(attrs.get("STATE",  "")).zfill(2)
         county_fips = str(attrs.get("COUNTY", "")).zfill(3)
         county_name = (attrs.get("NAME") or "").strip()
         print(f"TIGERweb FIPS: {state_fips}{county_fips} ({county_name})")
         return {
-            "state_fips": state_fips,
+            "state_fips":  state_fips,
             "county_fips": county_fips,
             "county_name": county_name,
         }
@@ -784,11 +706,9 @@ async def query_nfip_community_csb(
                 city_n = city.lower().strip()
                 for c in communities_all:
                     c_name = (c.get("communityName") or "").lower()
-                    if (
-                        c_name == city_n
-                        or c_name.startswith(city_n + ",")
-                        or city_n in c_name
-                    ):
+                    if (c_name == city_n
+                            or c_name.startswith(city_n + ",")
+                            or city_n in c_name):
                         return {
                             "csb_community_id": c.get("communityNumber", ""),
                             "csb_community_name": c.get("communityName", ""),
@@ -859,68 +779,29 @@ async def query_nfip_community_csb(
 
 # State FIPS → (full name, abbreviation)
 STATE_FIPS: dict[str, tuple[str, str]] = {
-    "01": ("Alabama", "AL"),
-    "02": ("Alaska", "AK"),
-    "04": ("Arizona", "AZ"),
-    "05": ("Arkansas", "AR"),
-    "06": ("California", "CA"),
-    "08": ("Colorado", "CO"),
-    "09": ("Connecticut", "CT"),
-    "10": ("Delaware", "DE"),
-    "11": ("District of Columbia", "DC"),
-    "12": ("Florida", "FL"),
-    "13": ("Georgia", "GA"),
-    "15": ("Hawaii", "HI"),
-    "16": ("Idaho", "ID"),
-    "17": ("Illinois", "IL"),
-    "18": ("Indiana", "IN"),
-    "19": ("Iowa", "IA"),
-    "20": ("Kansas", "KS"),
-    "21": ("Kentucky", "KY"),
-    "22": ("Louisiana", "LA"),
-    "23": ("Maine", "ME"),
-    "24": ("Maryland", "MD"),
-    "25": ("Massachusetts", "MA"),
-    "26": ("Michigan", "MI"),
-    "27": ("Minnesota", "MN"),
-    "28": ("Mississippi", "MS"),
-    "29": ("Missouri", "MO"),
-    "30": ("Montana", "MT"),
-    "31": ("Nebraska", "NE"),
-    "32": ("Nevada", "NV"),
-    "33": ("New Hampshire", "NH"),
-    "34": ("New Jersey", "NJ"),
-    "35": ("New Mexico", "NM"),
-    "36": ("New York", "NY"),
-    "37": ("North Carolina", "NC"),
-    "38": ("North Dakota", "ND"),
-    "39": ("Ohio", "OH"),
-    "40": ("Oklahoma", "OK"),
-    "41": ("Oregon", "OR"),
-    "42": ("Pennsylvania", "PA"),
-    "44": ("Rhode Island", "RI"),
-    "45": ("South Carolina", "SC"),
-    "46": ("South Dakota", "SD"),
-    "47": ("Tennessee", "TN"),
-    "48": ("Texas", "TX"),
-    "49": ("Utah", "UT"),
-    "50": ("Vermont", "VT"),
-    "51": ("Virginia", "VA"),
-    "53": ("Washington", "WA"),
-    "54": ("West Virginia", "WV"),
-    "55": ("Wisconsin", "WI"),
-    "56": ("Wyoming", "WY"),
-    "60": ("American Samoa", "AS"),
-    "66": ("Guam", "GU"),
-    "69": ("Northern Mariana Islands", "MP"),
-    "72": ("Puerto Rico", "PR"),
-    "78": ("U.S. Virgin Islands", "VI"),
+    "01": ("Alabama", "AL"), "02": ("Alaska", "AK"), "04": ("Arizona", "AZ"),
+    "05": ("Arkansas", "AR"), "06": ("California", "CA"), "08": ("Colorado", "CO"),
+    "09": ("Connecticut", "CT"), "10": ("Delaware", "DE"), "11": ("District of Columbia", "DC"),
+    "12": ("Florida", "FL"), "13": ("Georgia", "GA"), "15": ("Hawaii", "HI"),
+    "16": ("Idaho", "ID"), "17": ("Illinois", "IL"), "18": ("Indiana", "IN"),
+    "19": ("Iowa", "IA"), "20": ("Kansas", "KS"), "21": ("Kentucky", "KY"),
+    "22": ("Louisiana", "LA"), "23": ("Maine", "ME"), "24": ("Maryland", "MD"),
+    "25": ("Massachusetts", "MA"), "26": ("Michigan", "MI"), "27": ("Minnesota", "MN"),
+    "28": ("Mississippi", "MS"), "29": ("Missouri", "MO"), "30": ("Montana", "MT"),
+    "31": ("Nebraska", "NE"), "32": ("Nevada", "NV"), "33": ("New Hampshire", "NH"),
+    "34": ("New Jersey", "NJ"), "35": ("New Mexico", "NM"), "36": ("New York", "NY"),
+    "37": ("North Carolina", "NC"), "38": ("North Dakota", "ND"), "39": ("Ohio", "OH"),
+    "40": ("Oklahoma", "OK"), "41": ("Oregon", "OR"), "42": ("Pennsylvania", "PA"),
+    "44": ("Rhode Island", "RI"), "45": ("South Carolina", "SC"), "46": ("South Dakota", "SD"),
+    "47": ("Tennessee", "TN"), "48": ("Texas", "TX"), "49": ("Utah", "UT"),
+    "50": ("Vermont", "VT"), "51": ("Virginia", "VA"), "53": ("Washington", "WA"),
+    "54": ("West Virginia", "WV"), "55": ("Wisconsin", "WI"), "56": ("Wyoming", "WY"),
+    "60": ("American Samoa", "AS"), "66": ("Guam", "GU"), "69": ("Northern Mariana Islands", "MP"),
+    "72": ("Puerto Rico", "PR"), "78": ("U.S. Virgin Islands", "VI"),
 }
 
 
-def nfip_community_info(
-    community_number: str, lat: float = 0.0, lon: float = 0.0
-) -> dict:
+def nfip_community_info(community_number: str, lat: float = 0.0, lon: float = 0.0) -> dict:
     """Derive NFIP community context from the stored DFIRM_ID / community number."""
     raw = (community_number or "").strip()
     valid = raw not in ("", "0", "N/A", "Not Available")
@@ -930,13 +811,13 @@ def nfip_community_info(
 
     csb_url = (
         f"https://www.fema.gov/cis/{state_abbr}.html"
-        if state_abbr
-        else "https://www.fema.gov/flood-insurance/work-with-nfip/community-status"
+        if state_abbr else
+        "https://www.fema.gov/flood-insurance/work-with-nfip/community-status"
     )
     msc_url = (
         f"https://msc.fema.gov/portal/search#lonlat={lon},{lat}"
-        if lat and lon
-        else "https://msc.fema.gov/portal/home"
+        if lat and lon else
+        "https://msc.fema.gov/portal/home"
     )
 
     return {
@@ -967,39 +848,39 @@ FLOOD_ZONE_DESCRIPTIONS = {
 }
 
 ZONE_DISPLAY_NAMES: dict[str, str] = {
-    "X": "Zone X",
-    "X500": "Zone X (Shaded)",
-    "X-LEVEE": "Zone X Levee",
-    "A": "Zone A",
-    "AE": "Zone AE",
-    "AH": "Zone AH",
-    "AO": "Zone AO",
-    "AR": "Zone AR",
-    "A99": "Zone A99",
-    "V": "Zone V",
-    "VE": "Zone VE",
-    "B": "Zone B",
-    "C": "Zone C",
-    "D": "Zone D",
+    "X":           "Zone X",
+    "X500":        "Zone X (Shaded)",
+    "X-LEVEE":     "Zone X Levee",
+    "A":           "Zone A",
+    "AE":          "Zone AE",
+    "AH":          "Zone AH",
+    "AO":          "Zone AO",
+    "AR":          "Zone AR",
+    "A99":         "Zone A99",
+    "V":           "Zone V",
+    "VE":          "Zone VE",
+    "B":           "Zone B",
+    "C":           "Zone C",
+    "D":           "Zone D",
     "UNDETERMINED": "Undetermined",
 }
 
 
 def determine_flood_info(merged: dict) -> dict:
     """Derive flood zone details from merged NFHL query results."""
-    flood_zone = (merged.get("flood_zone") or "X").strip().upper()
-    zone_subtype = (merged.get("zone_subtype") or "").strip()
-    in_sfha = merged.get("in_sfha", False)
-    esri_dfirm = (merged.get("esri_dfirm_id") or "").strip()
-    firm_panel_l3 = (merged.get("firm_panel_l3") or "").strip()
-    eff_date_raw = merged.get("eff_date")
-    state_fips = (merged.get("state_fips") or "").strip()
-    county_fips = (merged.get("county_fips") or "").strip()
-    community_id = (merged.get("community_id") or "").strip()
-    community_nm = (merged.get("community_name") or "").strip()
-    csb_community_id = (merged.get("csb_community_id") or "").strip()
+    flood_zone      = (merged.get("flood_zone") or "X").strip().upper()
+    zone_subtype    = (merged.get("zone_subtype") or "").strip()
+    in_sfha         = merged.get("in_sfha", False)
+    esri_dfirm      = (merged.get("esri_dfirm_id") or "").strip()
+    firm_panel_l3   = (merged.get("firm_panel_l3") or "").strip()
+    eff_date_raw    = merged.get("eff_date")
+    state_fips      = (merged.get("state_fips") or "").strip()
+    county_fips     = (merged.get("county_fips") or "").strip()
+    community_id    = (merged.get("community_id") or "").strip()
+    community_nm    = (merged.get("community_name") or "").strip()
+    csb_community_id   = (merged.get("csb_community_id") or "").strip()
     csb_community_name = (merged.get("csb_community_name") or "").strip()
-    geocoded_city = (merged.get("geocoded_city") or "").strip()
+    geocoded_city   = (merged.get("geocoded_city") or "").strip()
 
     flood_zone_out = _classify_x_zone(flood_zone, zone_subtype)
     zone_key = flood_zone_out
@@ -1032,9 +913,7 @@ def determine_flood_info(merged: dict) -> dict:
     else:
         panel_number = "Not Available"
 
-    community_name_out = (
-        community_nm or csb_community_name or geocoded_city or "Not Available"
-    )
+    community_name_out = community_nm or csb_community_name or geocoded_city or "Not Available"
 
     county_name = (merged.get("county_name") or "").strip()
     if not county_name:
@@ -1052,7 +931,6 @@ def determine_flood_info(merged: dict) -> dict:
         panel_effective_date = eff_date_raw
     elif isinstance(eff_date_raw, (int, float)) and eff_date_raw > 0:
         from datetime import datetime, timezone
-
         panel_effective_date = datetime.fromtimestamp(
             eff_date_raw / 1000, tz=timezone.utc
         ).strftime("%m/%d/%Y")
@@ -1074,7 +952,6 @@ def determine_flood_info(merged: dict) -> dict:
 
 # ── LOMA / LOMR lookup ────────────────────────────────────────────────────────
 
-
 async def check_loma_at_point(lat: float, lon: float) -> dict | None:
     """
     Check for LOMA/LOMR at the given coordinates.
@@ -1089,12 +966,10 @@ async def check_loma_at_point(lat: float, lon: float) -> dict | None:
     # ── 1. Local DB cache ─────────────────────────────────────────────────────
     try:
         from db import get_conn
-
         with get_conn() as conn:
             with conn.cursor() as cur:
                 # Match within ~500 metres (0.005 decimal degrees)
-                cur.execute(
-                    """
+                cur.execute("""
                     SELECT case_number, outcome_zone, amendment_type,
                            effective_date, original_zone
                     FROM loma_records
@@ -1102,19 +977,15 @@ async def check_loma_at_point(lat: float, lon: float) -> dict | None:
                       AND ABS(lon - %s) < 0.005
                     ORDER BY looked_up_at DESC
                     LIMIT 1
-                """,
-                    (lat, lon),
-                )
+                """, (lat, lon))
                 row = cur.fetchone()
                 if row:
                     print(f"[LOMA] Cache hit: {row['case_number']} at ({lat},{lon})")
                     return {
-                        "case_number": row["case_number"],
-                        "status": "Effective",
-                        "outcome_zone": row["outcome_zone"],
-                        "effective_date": str(row["effective_date"])
-                        if row["effective_date"]
-                        else None,
+                        "case_number":    row["case_number"],
+                        "status":         "Effective",
+                        "outcome_zone":   row["outcome_zone"],
+                        "effective_date": str(row["effective_date"]) if row["effective_date"] else None,
                         "amendment_type": row["amendment_type"],
                     }
     except Exception as e:
@@ -1151,9 +1022,9 @@ async def check_loma_at_point(lat: float, lon: float) -> dict | None:
                 eff_date = None
 
         result = {
-            "case_number": attrs.get("CASE_NO"),
-            "status": attrs.get("STATUS"),
-            "outcome_zone": attrs.get("OUT_ZONE"),
+            "case_number":    attrs.get("CASE_NO"),
+            "status":         attrs.get("STATUS"),
+            "outcome_zone":   attrs.get("OUT_ZONE"),
             "effective_date": eff_date,
             "amendment_type": attrs.get("AMEND_TYPE"),
         }
@@ -1162,35 +1033,27 @@ async def check_loma_at_point(lat: float, lon: float) -> dict | None:
         if result.get("case_number") and result.get("status") == "Effective":
             try:
                 from db import get_conn
-
                 with get_conn() as conn:
                     with conn.cursor() as cur:
-                        cur.execute(
-                            """
+                        cur.execute("""
                             INSERT INTO loma_records
                                 (case_number, lat, lon, outcome_zone,
                                  amendment_type, effective_date, source)
                             VALUES (%s, %s, %s, %s, %s, %s, 'FEMA_API')
                             ON CONFLICT (case_number) DO NOTHING
-                        """,
-                            (
-                                result["case_number"],
-                                lat,
-                                lon,
-                                result["outcome_zone"],
-                                result["amendment_type"],
-                                result["effective_date"],
-                            ),
-                        )
+                        """, (
+                            result["case_number"], lat, lon,
+                            result["outcome_zone"], result["amendment_type"],
+                            result["effective_date"],
+                        ))
             except Exception as e:
                 print(f"[LOMA] Cache write failed (non-fatal): {e}")
 
-        print(
-            f"[LOMA] API result: {result.get('case_number')} "
-            f"status={result.get('status')} zone={result.get('outcome_zone')}"
-        )
+        print(f"[LOMA] API result: {result.get('case_number')} "
+              f"status={result.get('status')} zone={result.get('outcome_zone')}")
         return result
 
     except Exception as e:
         print(f"[LOMA] FEMA API check failed: {e}")
         return None
+        
