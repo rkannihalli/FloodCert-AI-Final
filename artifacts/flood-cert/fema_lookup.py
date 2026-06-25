@@ -1537,3 +1537,41 @@ async def query_local_nfhl(lat: float, lon: float) -> dict:
     except Exception as e:
         print(f"PostGIS NFHL query error (non-fatal): {e}")
         return {}
+async def check_loma_at_point(lat: float, lon: float) -> dict | None:
+    """
+    Query FEMA Map Amendments for any effective LOMA/LOMR at this location.
+    Returns amendment details if found, None otherwise.
+    """
+    import httpx
+    url = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/4/query"
+    params = {
+        "geometry": f"{lon},{lat}",
+        "geometryType": "esriGeometryPoint",
+        "spatialRel": "esriSpatialRelIntersects",
+        "outFields": "CASE_NO,STATUS,OUT_ZONE,EFF_DATE,AMEND_TYPE",
+        "returnGeometry": "false",
+        "f": "json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(url, params=params)
+            data = r.json()
+        features = data.get("features", [])
+        if not features:
+            return None
+        attrs = features[0]["attributes"]
+        # EFF_DATE comes as milliseconds epoch — convert to ISO date
+        eff_ms = attrs.get("EFF_DATE")
+        eff_date = None
+        if eff_ms:
+            from datetime import datetime, timezone
+            eff_date = datetime.fromtimestamp(eff_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+        return {
+            "case_number": attrs.get("CASE_NO"),
+            "status": attrs.get("STATUS"),
+            "outcome_zone": attrs.get("OUT_ZONE"),
+            "effective_date": eff_date,
+            "amendment_type": attrs.get("AMEND_TYPE"),
+        }
+    except Exception:
+        return None
