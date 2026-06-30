@@ -91,7 +91,26 @@ def check_csb_url():
         "      Both v1 and v2 return 404 from Replit AND Railway. "
         "Local JSON DB should be primary source. CSB API is best-effort fallback only.")
 
-def check_bcrypt():
+
+def check_nfhl_layer():
+    path = os.path.join(APP_DIR, "fema_lookup.py")
+    content = read_file(path)
+    if content is None: return
+    has_layer28 = "NFHL/MapServer/28/query" in content
+    has_old_esri = "USA_Flood_Hazard_Reduced_Set_gdb" in content
+    if has_layer28 and not has_old_esri:
+        record("Flood zone uses FEMA NFHL Layer 28 (authoritative)","PASS",
+            "Switched from Esri Living Atlas — fixes Mannford OK Zone A/X mismatch")
+    elif has_old_esri:
+        record("Flood zone uses FEMA NFHL Layer 28 (authoritative)","FAIL",
+            "Still using Esri Living Atlas — less accurate, can return wrong zone")
+    else:
+        record("Flood zone uses FEMA NFHL Layer 28 (authoritative)","WARN",
+            "Could not determine which layer is being used")
+
+def check_nfhl_layer():
+    pass
+check_bcrypt():
     record("bcrypt AttributeError in deploy logs","INFO",
         "Non-fatal — app starts fine despite this warning. "
         "passlib expects older bcrypt API. Safe to ignore.")
@@ -134,6 +153,7 @@ check_main_loma()
 check_loma_code()
 check_local_db()
 check_csb_url()
+check_nfhl_layer()
 check_bcrypt()
 check_git()
 summary()
