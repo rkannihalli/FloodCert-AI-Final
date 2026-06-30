@@ -24,9 +24,6 @@ _STREET_TYPE_RE = re.compile(
 )
 
 ESRI_FLOOD_ZONE_URL = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28/query"
-    "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services"
-    "/USA_Flood_Hazard_Reduced_Set_gdb/FeatureServer/0/query"
-)
 
 SFHA_ZONES = {"A", "AE", "AH", "AO", "AR", "A99", "V", "VE"}
 NFHL_BASE  = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer"
