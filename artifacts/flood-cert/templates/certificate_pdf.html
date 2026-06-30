@@ -125,6 +125,65 @@
   </table>
 </div>
 
+
+<!-- Section 3: Letter of Map Change (LOMC) -->
+<div class="section sfhdf-section-lomc">
+  <div class="sfhdf-section-hdr">3. IS THERE A LETTER OF MAP CHANGE (LOMC)?</div>
+  <table class="sfhdf-table">
+    <tr>
+      <td style="width:40pt; vertical-align:top; padding-top:4pt;">
+        <div style="display:flex; flex-direction:column; gap:6pt;">
+          <div style="display:flex; align-items:center; gap:6pt;">
+            <span class="sfhdf-chk" style="border:1.5pt solid #333; width:11pt; height:11pt; display:inline-flex; align-items:center; justify-content:center; font-size:9pt;">
+              {% if not loma_case_number %}&#10005;{% endif %}
+            </span>
+            <span style="font-weight:600;">NO</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:6pt;">
+            <span class="sfhdf-chk" style="border:1.5pt solid #333; width:11pt; height:11pt; display:inline-flex; align-items:center; justify-content:center; font-size:9pt;">
+              {% if loma_case_number %}&#10005;{% endif %}
+            </span>
+            <span style="font-weight:600;">YES</span>
+            <span style="font-weight:normal; font-size:8pt;">(if yes, and LOMC date/no. is available, enter date and case no. below)</span>
+          </div>
+        </div>
+      </td>
+      <td style="vertical-align:middle; padding-left:12pt;">
+        {% if loma_case_number %}
+        <table style="border-collapse:collapse; font-size:9pt;">
+          <tr>
+            <td style="padding-right:16pt;">
+              <span style="font-weight:600;">Date:</span>
+              <span style="margin-left:6pt; border-bottom:1pt solid #333; padding:0 12pt; font-weight:700;">
+                {% if loma_effective_date %}
+                  {{ loma_effective_date | replace("-", "/") if loma_effective_date else "" }}
+                {% endif %}
+              </span>
+            </td>
+            <td>
+              <span style="font-weight:600;">Case No.:</span>
+              <span style="margin-left:6pt; border-bottom:1pt solid #333; padding:0 12pt; font-weight:700;">
+                {{ loma_case_number }}
+              </span>
+            </td>
+          </tr>
+          {% if loma_amendment_type %}
+          <tr>
+            <td colspan="2" style="padding-top:4pt; color:#003366; font-size:8pt;">
+              Amendment Type: {{ loma_amendment_type }}
+              {% if loma_original_zone %} — Original Zone: {{ loma_original_zone }}{% endif %}
+            </td>
+          </tr>
+          {% endif %}
+        </table>
+        {% else %}
+        <span style="color:#666; font-size:8.5pt; font-style:italic;">No Letter of Map Change on record for this property.</span>
+        {% endif %}
+      </td>
+    </tr>
+  </table>
+</div>
+
 {% set nfip_ok = panel_number and panel_number != 'Not Available' %}
 {% set is_sfha = sfha_status == 'Yes' %}
 
