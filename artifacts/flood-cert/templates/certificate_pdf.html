@@ -184,7 +184,8 @@
   </table>
 </div>
 
-{% set nfip_ok = panel_number and panel_number != 'Not Available' %}
+{% set nfip_ok = panel_number and panel_number != 'Not Available' and community_number and community_number != 'Not Available' %}
+{% set nfip_participates = nfip_ok and (insurance_required is defined) %}
 {% set is_sfha = sfha_status == 'Yes' %}
 
 <!-- Section C: Federal Flood Insurance Availability -->
