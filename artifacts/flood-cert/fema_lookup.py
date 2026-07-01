@@ -524,32 +524,83 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
 
 
 async def query_nfip_community(lat: float, lon: float) -> dict:
-    """Query NFHL Layer 22 (Political Jurisdictions) for NFIP community name and CID."""
-    params = {
-        "geometry": f"{lon},{lat}",
-        "geometryType": "esriGeometryPoint",
-        "inSR": "4326",
-        "spatialRel": "esriSpatialRelIntersects",
-        "outFields": "POL_NAME1,CID",
-        "returnGeometry": "false",
-        "f": "json",
-    }
-    try:
-        async with httpx.AsyncClient(timeout=12.0, verify=False) as client:
-            resp = await client.get(f"{NFHL_BASE}/22/query", params=params)
-            resp.raise_for_status()
-            data = resp.json()
-        features = data.get("features", [])
-        if not features:
-            return {}
-        attrs = features[0]["attributes"]
-        return {
-            "community_id": (attrs.get("CID") or "").strip(),
-            "community_name": (attrs.get("POL_NAME1") or "").strip(),
+    """Query NFHL Layer 22 (Political Jurisdictions) for NFIP community name and CID.
+    
+    Strategy:
+    1. Point query — most precise
+    2. Small envelope fallback — catches edge cases near boundaries
+    3. Prefer city/town/village over county results
+    """
+    queries = [
+        {
+            "geometry": f"{lon},{lat}",
+            "geometryType": "esriGeometryPoint",
+        },
+        {
+            "geometry": f"{lon-0.005},{lat-0.005},{lon+0.005},{lat+0.005}",
+            "geometryType": "esriGeometryEnvelope",
+        },
+        {
+            "geometry": f"{lon-0.02},{lat-0.02},{lon+0.02},{lat+0.02}",
+            "geometryType": "esriGeometryEnvelope",
+        },
+    ]
+    
+    _COUNTY_WORDS = {"county", "parish", "borough", "unincorporated", "areas"}
+    
+    def _is_city_level(name: str) -> bool:
+        """Return True if this is a city/town/village — not a county."""
+        n = name.lower()
+        return not any(w in n for w in _COUNTY_WORDS)
+    
+    all_features = []
+    
+    for q in queries:
+        params = {
+            **q,
+            "inSR": "4326",
+            "spatialRel": "esriSpatialRelIntersects",
+            "outFields": "POL_NAME1,CID",
+            "returnGeometry": "false",
+            "resultRecordCount": "10",
+            "f": "json",
         }
-    except Exception as e:
-        print(f"NFIP community query (Layer 22) error: {e}")
+        try:
+            async with httpx.AsyncClient(timeout=12.0, verify=False) as client:
+                resp = await client.get(f"{NFHL_BASE}/22/query", params=params)
+                resp.raise_for_status()
+                data = resp.json()
+            features = data.get("features", [])
+            if features:
+                all_features.extend(features)
+                break  # Got results, stop trying wider queries
+        except Exception as e:
+            print(f"NFIP community query (Layer 22) error ({q['geometryType']}): {e}")
+            continue
+    
+    if not all_features:
         return {}
+    
+    # Deduplicate by CID
+    seen = set()
+    unique = []
+    for f in all_features:
+        cid = (f["attributes"].get("CID") or "").strip()
+        if cid and cid not in seen:
+            seen.add(cid)
+            unique.append(f)
+    
+    # Prefer city/town/village over county
+    city_features = [f for f in unique if _is_city_level(f["attributes"].get("POL_NAME1") or "")]
+    best = city_features[0] if city_features else unique[0]
+    
+    attrs = best["attributes"]
+    result = {
+        "community_id": (attrs.get("CID") or "").strip(),
+        "community_name": (attrs.get("POL_NAME1") or "").strip(),
+    }
+    print(f"NFIP community (Layer 22): {result['community_id']} / {result['community_name']}")
+    return result
 
 
 async def query_firm_panel(lat: float, lon: float, county_fips: str = "") -> dict:
@@ -581,16 +632,24 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "") -> dic
             if not features:
                 continue
 
-            # Filter by county_fips if provided
+            # Filter by county_fips if provided — match first 5 digits
             if county_fips:
-                county_prefix = county_fips[:5]
+                # Try exact 5-digit prefix match
+                county_prefix = county_fips[:5] if len(county_fips) >= 5 else county_fips
                 filtered = [
                     f for f in features
                     if (f["attributes"].get("DFIRM_ID") or "").startswith(county_prefix)
                 ]
+                # Also try matching just the state+county numeric (handles community IDs like 240010)
+                if not filtered and len(county_fips) >= 2:
+                    state_prefix = county_fips[:2]
+                    filtered = [
+                        f for f in features
+                        if (f["attributes"].get("DFIRM_ID") or "").startswith(state_prefix)
+                    ]
                 if filtered:
                     features = filtered
-                    print(f"FIRM panel matched county {county_prefix}: "
+                    print(f"FIRM panel matched prefix {county_prefix}: "
                           f"{features[0]['attributes'].get('FIRM_PAN','')}")
 
             attrs = None

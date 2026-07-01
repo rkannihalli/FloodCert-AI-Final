@@ -8,6 +8,7 @@ FROM_EMAIL = os.environ.get("FROM_EMAIL", "FloodCert AI <onboarding@resend.dev>"
 
 def _send(to_email: str, subject: str, body: str, attachments: list | None = None) -> None:
     if not resend.api_key:
+        print("[EMAIL] RESEND_API_KEY not set — email not sent. Add it to Railway environment variables.")
         raise ValueError("RESEND_API_KEY not configured. Set it as an environment variable.")
     payload = {"from": FROM_EMAIL, "to": [to_email], "subject": subject, "text": body}
     if attachments:
