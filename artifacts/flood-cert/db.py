@@ -136,13 +136,29 @@ def init_companies():
                 )
 
 
+def _normalize_company_name(name: str) -> str:
+    """Normalize company name for fuzzy matching — remove punctuation, extra spaces, lowercase."""
+    import re as _re
+    n = name.lower().strip()
+    n = _re.sub(r"[^a-z0-9 ]", " ", n)   # remove all punctuation
+    n = _re.sub(r"\s+", " ", n).strip()   # collapse whitespace
+    # Remove common suffixes that vary
+    for suffix in [" llc", " inc", " corp", " ltd", " co", " isaoa", " atima"]:
+        if n.endswith(suffix):
+            n = n[:-len(suffix)].strip()
+    return n
+
 def get_or_create_company(name: str, address: str = "") -> int:
+    norm = _normalize_company_name(name)
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM companies WHERE LOWER(name) = LOWER(%s)", (name.strip(),))
-            row = cur.fetchone()
-            if row:
-                return row["id"]
+            # Try exact normalized match first
+            cur.execute("SELECT id, name FROM companies ORDER BY id")
+            rows = cur.fetchall()
+            for row in rows:
+                if _normalize_company_name(row["name"]) == norm:
+                    return row["id"]
+            # Not found — create new
             cur.execute(
                 "INSERT INTO companies (name, address, created_at) VALUES (%s, %s, %s) RETURNING id",
                 (name.strip(), address.strip(), datetime.utcnow().isoformat()),

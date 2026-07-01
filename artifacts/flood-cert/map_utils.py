@@ -26,7 +26,7 @@ NFHL_EXPORT_URL = (
 
 MAP_WIDTH = 800
 MAP_HEIGHT = 480
-BBOX_PAD = 0.012   # ~1.3 km half-width at mid-latitudes
+BBOX_PAD = 0.006   # ~650m half-width — tighter zoom for precise property location
 
 
 def _bbox(lat: float, lon: float) -> str:
@@ -81,24 +81,39 @@ async def generate_map_image(lat: float, lon: float) -> Optional[str]:
 
 
 def _draw_pin(img: Image.Image, cx: int, cy: int) -> None:
+    """Draw a precise property marker: crosshair + teardrop pin."""
     draw = ImageDraw.Draw(img)
-    r = 11
-    # White halo
-    draw.ellipse([cx - r - 3, cy - r - 3, cx + r + 3, cy + r + 3], fill=(255, 255, 255, 210))
+
+    # Crosshair lines for precision
+    cross_len = 18
+    draw.line([(cx - cross_len, cy), (cx - 6, cy)], fill=(255, 50, 50, 220), width=2)
+    draw.line([(cx + 6, cy), (cx + cross_len, cy)], fill=(255, 50, 50, 220), width=2)
+    draw.line([(cx, cy - cross_len), (cx, cy - 6)], fill=(255, 50, 50, 220), width=2)
+    draw.line([(cx, cy + 6), (cx, cy + cross_len)], fill=(255, 50, 50, 220), width=2)
+
+    # White halo behind pin
+    r = 12
+    draw.ellipse([cx - r - 3, cy - r - 3, cx + r + 3, cy + r + 3], fill=(255, 255, 255, 220))
     # Red circle body
     draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(210, 35, 35, 255))
     # White inner dot
     draw.ellipse([cx - 4, cy - 4, cx + 4, cy + 4], fill=(255, 255, 255, 255))
     # Stem
     stem_top_y = cy + r - 3
-    stem_tip_y = cy + r + 16
+    stem_tip_y = cy + r + 20
     draw.polygon(
         [(cx - 5, stem_top_y), (cx + 5, stem_top_y), (cx, stem_tip_y)],
         fill=(210, 35, 35, 255),
     )
-    # Stem white side lines
     draw.line([(cx - 5, stem_top_y), (cx, stem_tip_y)], fill=(255, 255, 255, 160), width=1)
     draw.line([(cx + 5, stem_top_y), (cx, stem_tip_y)], fill=(255, 255, 255, 160), width=1)
+
+    # Subject property label
+    label = "SUBJECT PROPERTY"
+    lw = len(label) * 6
+    lx, ly = cx - lw // 2, stem_tip_y + 4
+    draw.rectangle([lx - 3, ly - 2, lx + lw + 3, ly + 13], fill=(210, 35, 35, 230))
+    draw.text((lx, ly), label, fill=(255, 255, 255, 255))
 
 
 def _draw_coord_label(img: Image.Image, lat: float, lon: float) -> None:

@@ -513,7 +513,7 @@ async def admin_panel(
     request: Request,
     tab: str = "requests",
     cid: Optional[int] = None,
-    uid: Optional[int] = None,
+    uid: Optional[str] = None,
     dfrom: str = "",
     dto: str = "",
     hq: str = "",
@@ -546,10 +546,11 @@ async def admin_panel(
     history_records = []
     history_users = []
     selected_company = None
+    uid_int = int(uid) if uid and str(uid).strip().isdigit() else None
     if tab == "companies" and cid:
         history_records = list_determinations_admin(
             company_id=cid,
-            user_id=uid or None,
+            user_id=uid_int,
             date_from=dfrom or None,
             date_to=dto or None,
             query=hq or None,

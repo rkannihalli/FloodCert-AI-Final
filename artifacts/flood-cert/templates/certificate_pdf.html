@@ -128,7 +128,7 @@
 
 <!-- Section 3: Letter of Map Change (LOMC) -->
 <div class="section sfhdf-section-lomc">
-  <div class="sfhdf-section-hdr">3. IS THERE A LETTER OF MAP CHANGE (LOMC)?</div>
+  <div class="sfhdf-section-hdr">B.3. IS THERE A LETTER OF MAP CHANGE (LOMC)?</div>
   <table class="sfhdf-table" style="width:100%;">
     <tr>
       <td style="width:180pt; vertical-align:top; padding:4pt 8pt;">
@@ -184,7 +184,8 @@
 </div>
 
 {% set nfip_ok = panel_number and panel_number != 'Not Available' and community_number and community_number != 'Not Available' %}
-{% set nfip_participates = nfip_ok and (insurance_required is defined) %}
+{% set nfip_participates = nfip_ok %}
+{% set nfip_not_available = not nfip_ok or (community_number == 'Not Available' or not community_number) %}
 {% set is_sfha = sfha_status == 'Yes' %}
 
 <!-- Section C: Federal Flood Insurance Availability -->
@@ -206,7 +207,7 @@
     </tr>
     <tr>
       <td class="sfhdf-num">2.</td>
-      <td class="sfhdf-chk-cell"><span class="sfhdf-chk">{% if not nfip_ok %}&#10005;{% endif %}</span></td>
+      <td class="sfhdf-chk-cell"><span class="sfhdf-chk">{% if nfip_not_available %}&#10005;{% endif %}</span></td>
       <td class="sfhdf-text">Federal Flood Insurance is not available (community does not participate in the NFIP).</td>
     </tr>
     <tr>
