@@ -1317,6 +1317,46 @@ async def history_detail(request: Request, record_id: int):
     if user and not user.get("is_admin"):
         if record.get("company_id") and record.get("company_id") != user.get("company_id"):
             raise HTTPException(403)
+
+    # Re-apply LOMA override if record has LOMA data saved
+    # This ensures saved records show the correct LOMA-overridden zone
+    loma_case = record.get("loma_case_number")
+    loma_zone = record.get("loma_original_zone")
+    if loma_case and loma_zone:
+        # LOMA was applied — ensure display shows overridden zone
+        if record.get("flood_zone") not in ("X", "X500", "X (Shaded)"):
+            # Zone wasn't saved correctly — re-apply override
+            record["loma_original_zone"] = record["flood_zone"]
+            record["flood_zone"] = record.get("loma_outcome_zone") or "X500"
+            record["sfha_status"] = "No"
+            record["insurance_required"] = "No — Flood insurance is not federally required"
+    elif record.get("lat") and record.get("lon"):
+        # No LOMA saved — check live for this record
+        try:
+            from fema_lookup import check_loma_at_point
+            loma = await check_loma_at_point(float(record["lat"]), float(record["lon"]))
+            if loma and loma.get("status") == "Effective" and loma.get("outcome_zone") in ("X", "X500", "X (Shaded)"):
+                original_zone = record["flood_zone"]
+                record["flood_zone"] = loma.get("outcome_zone", "X500")
+                record["sfha_status"] = "No"
+                record["insurance_required"] = "No — Flood insurance is not federally required"
+                record["loma_case_number"] = loma.get("case_number")
+                record["loma_amendment_type"] = loma.get("amendment_type")
+                record["loma_effective_date"] = loma.get("effective_date")
+                record["loma_original_zone"] = original_zone
+                record["loma_note"] = (
+                    f"Removed from SFHA per FEMA {loma.get('amendment_type')} "
+                    f"Case No. {loma.get('case_number')} "
+                    f"(effective {loma.get('effective_date')}). "
+                    f"Map shows {original_zone} — LOMA overrides."
+                )
+                # Update saved record with correct data
+                from db import save_determination
+                save_determination(record)
+                print(f"[HISTORY] LOMA override applied and saved for record {record_id}")
+        except Exception as e:
+            print(f"[HISTORY] LOMA check error (non-fatal): {e}")
+
     comm_info = nfip_community_info(
         record.get("community_number", ""),
         lat=record.get("lat", 0.0),
