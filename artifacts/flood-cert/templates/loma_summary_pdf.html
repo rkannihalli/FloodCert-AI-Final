@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>LOMA/LOMR Summary</title>
+  <style>
+    @page { size: letter; margin: 0.75in; }
+    body { font-family: Arial, sans-serif; font-size: 10pt; color: #1a1a2e; }
+    .header { text-align: center; border-bottom: 2pt solid #003366; padding-bottom: 8pt; margin-bottom: 16pt; }
+    .header h1 { font-size: 13pt; color: #003366; margin: 0 0 4pt 0; }
+    .header h2 { font-size: 11pt; color: #003366; margin: 0; font-weight: normal; }
+    .seal { font-size: 8pt; color: #555; margin-top: 4pt; }
+    .section { margin-bottom: 14pt; }
+    .section-title { background: #003366; color: white; font-weight: bold; font-size: 9pt; padding: 4pt 6pt; margin-bottom: 6pt; }
+    table { width: 100%; border-collapse: collapse; font-size: 9pt; }
+    td { padding: 4pt 6pt; border: 0.5pt solid #b0b8c4; vertical-align: top; }
+    .label { background: #eef2f7; font-weight: bold; width: 40%; }
+    .value { font-weight: normal; }
+    .highlight { font-weight: bold; color: #003366; font-size: 11pt; }
+    .outcome-box { border: 2pt solid #2e7d32; background: #f1f8e9; padding: 10pt; text-align: center; margin: 12pt 0; }
+    .outcome-zone { font-size: 22pt; font-weight: bold; color: #2e7d32; }
+    .outcome-label { font-size: 9pt; color: #555; margin-top: 4pt; }
+    .notice { background: #fff3cd; border: 1pt solid #ffc107; padding: 8pt; font-size: 8.5pt; margin-top: 12pt; }
+    .footer { margin-top: 20pt; border-top: 0.5pt solid #ccc; padding-top: 6pt; font-size: 7.5pt; color: #666; text-align: center; }
+    .checkbox-row { display: flex; align-items: center; gap: 6pt; margin: 4pt 0; }
+    .chk { display: inline-block; width: 11pt; height: 11pt; border: 1.5pt solid #333; text-align: center; font-size: 9pt; line-height: 11pt; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="seal">DEPARTMENT OF HOMELAND SECURITY — FEDERAL EMERGENCY MANAGEMENT AGENCY</div>
+  <h1>LETTER OF MAP CHANGE (LOMC) SUMMARY</h1>
+  <h2>Attachment to Standard Flood Hazard Determination Form</h2>
+</div>
+
+<div class="section">
+  <div class="section-title">PROPERTY INFORMATION</div>
+  <table>
+    <tr>
+      <td class="label">Property Address</td>
+      <td class="value highlight">{{ property_address }}</td>
+    </tr>
+    <tr>
+      <td class="label">Loan / File No.</td>
+      <td class="value">{{ loan_id }}</td>
+    </tr>
+    <tr>
+      <td class="label">Determination Date</td>
+      <td class="value">{{ determination_date }}</td>
+    </tr>
+  </table>
+</div>
+
+<div class="outcome-box">
+  <div style="font-size:9pt; color:#555; margin-bottom:4pt;">LOMC OUTCOME — FLOOD ZONE AFTER AMENDMENT</div>
+  <div class="outcome-zone">{{ flood_zone | zone_label }}</div>
+  <div class="outcome-label">Property removed from Special Flood Hazard Area (SFHA)</div>
+  <div class="outcome-label" style="margin-top:4pt;">Original Map Zone: <strong>{{ loma_original_zone }}</strong> → Amended to: <strong>{{ flood_zone | zone_label }}</strong></div>
+</div>
+
+<div class="section">
+  <div class="section-title">LETTER OF MAP CHANGE DETAILS</div>
+  <table>
+    <tr>
+      <td class="label">LOMC Type</td>
+      <td class="value highlight">{{ loma_amendment_type }}</td>
+      <td class="label">Case Number</td>
+      <td class="value highlight">{{ loma_case_number }}</td>
+    </tr>
+    <tr>
+      <td class="label">Effective Date</td>
+      <td class="value">{{ loma_effective_date }}</td>
+      <td class="label">Status</td>
+      <td class="value" style="color:#2e7d32; font-weight:bold;">Effective</td>
+    </tr>
+    <tr>
+      <td class="label">Original Flood Zone</td>
+      <td class="value">{{ loma_original_zone }}</td>
+      <td class="label">Amended Flood Zone</td>
+      <td class="value">{{ flood_zone | zone_label }}</td>
+    </tr>
+  </table>
+</div>
+
+<div class="section">
+  <div class="section-title">B.3. IS THERE A LETTER OF MAP CHANGE (LOMC)?</div>
+  <table>
+    <tr>
+      <td style="width:50%; padding:8pt;">
+        <div class="checkbox-row">
+          <span class="chk"></span>
+          <span style="font-weight:600;">NO</span>
+        </div>
+        <div class="checkbox-row" style="margin-top:6pt;">
+          <span class="chk">&#10005;</span>
+          <span style="font-weight:600;">YES</span>
+          <span style="font-size:8pt;">(LOMC date/no. available)</span>
+        </div>
+      </td>
+      <td style="width:50%; padding:8pt; border-left:1pt solid #b0b8c4;">
+        <table style="border:none;">
+          <tr>
+            <td style="border:none; padding:2pt 8pt 2pt 0; white-space:nowrap;">
+              <strong>Date:</strong>
+              <span style="border-bottom:1pt solid #333; padding:0 8pt; margin-left:4pt;">
+                {{ loma_effective_date | replace("-", "/") if loma_effective_date else "" }}
+              </span>
+            </td>
+          </tr>
+          <tr>
+            <td style="border:none; padding:2pt 0; white-space:nowrap;">
+              <strong>Case No.:</strong>
+              <span style="border-bottom:1pt solid #333; padding:0 8pt; margin-left:4pt;">
+                {{ loma_case_number }}
+              </span>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</div>
+
+<div class="section">
+  <div class="section-title">DETERMINATION IMPACT</div>
+  <table>
+    <tr>
+      <td class="label">SFHA Status After LOMC</td>
+      <td class="value" style="color:#2e7d32; font-weight:bold;">NO — Property removed from SFHA</td>
+    </tr>
+    <tr>
+      <td class="label">Federal Flood Insurance Required</td>
+      <td class="value" style="color:#2e7d32; font-weight:bold;">NO — Federal mandatory purchase requirement does NOT apply</td>
+    </tr>
+    <tr>
+      <td class="label">Lender Option</td>
+      <td class="value">The lender retains the option to require flood insurance to protect its financial interest in the loan.</td>
+    </tr>
+  </table>
+</div>
+
+{% if loma_note %}
+<div class="notice">
+  <strong>Note:</strong> {{ loma_note }}
+</div>
+{% endif %}
+
+<div class="notice" style="margin-top:8pt;">
+  <strong>Important:</strong> This LOMC summary is derived from FEMA amendment records. 
+  For official verification, contact the FEMA Mapping and Insurance eXchange (FMIX) at 
+  1-877-FEMA-MAP (1-877-336-2627) or visit msc.fema.gov. The original LOMC determination 
+  document supersedes this summary for all regulatory purposes.
+</div>
+
+<div class="footer">
+  FEMA LOMC Case No. {{ loma_case_number }} | Amendment Type: {{ loma_amendment_type }} | 
+  Effective: {{ loma_effective_date }} | Generated: {{ determination_date }}<br>
+  This attachment is part of the Standard Flood Hazard Determination for {{ property_address }}
+</div>
+
+</body>
+</html>

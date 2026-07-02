@@ -23,7 +23,38 @@ def _render_pdf(template_name: str, data: dict) -> bytes:
     return html_doc.write_pdf(stylesheets=sheets)
 
 def generate_flood_certificate_pdf(data: dict) -> bytes:
-    return _render_pdf("certificate_pdf.html", data)
+    """Generate flood certificate PDF, appending LOMA summary page if LOMA exists."""
+    cert_bytes = _render_pdf("certificate_pdf.html", data)
+    
+    # Append LOMA summary page if this property has a LOMA/LOMR
+    if data.get("loma_case_number"):
+        try:
+            loma_bytes = _render_pdf("loma_summary_pdf.html", data)
+            cert_bytes = _merge_pdfs(cert_bytes, loma_bytes)
+        except Exception as e:
+            print(f"[PDF] LOMA summary append failed (non-fatal): {e}")
+    
+    return cert_bytes
+
+def _merge_pdfs(pdf1: bytes, pdf2: bytes) -> bytes:
+    """Merge two PDFs using pypdf."""
+    try:
+        from pypdf import PdfWriter, PdfReader
+        import io
+        writer = PdfWriter()
+        for pdf_bytes in (pdf1, pdf2):
+            reader = PdfReader(io.BytesIO(pdf_bytes))
+            for page in reader.pages:
+                writer.add_page(page)
+        out = io.BytesIO()
+        writer.write(out)
+        return out.getvalue()
+    except ImportError:
+        print("[PDF] pypdf not installed — returning cert without LOMA attachment")
+        return pdf1
+    except Exception as e:
+        print(f"[PDF] PDF merge failed: {e}")
+        return pdf1
 
 def generate_borrower_notice_pdf(data: dict) -> bytes:
     return _render_pdf("notice_pdf.html", data)

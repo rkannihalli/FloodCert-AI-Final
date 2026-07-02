@@ -523,6 +523,42 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
     return {"flood_zone": "X", "in_sfha": False, "zone_subtype": "", "esri_dfirm_id": ""}
 
 
+async def _query_nfhl_at_offset(lat: float, lon: float, dlat: float, dlon: float) -> dict:
+    """Query NFHL at a specific offset from the geocoded point."""
+    params = {
+        "geometry": f"{lon+dlon},{lat+dlat}",
+        "geometryType": "esriGeometryPoint",
+        "inSR": "4326",
+        "spatialRel": "esriSpatialRelIntersects",
+        "outFields": "FLD_ZONE,ZONE_SUBTY,SFHA_TF,DFIRM_ID",
+        "returnGeometry": "false",
+        "resultRecordCount": "5",
+        "f": "json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(ESRI_FLOOD_ZONE_URL, params=params)
+            data = resp.json()
+        features = data.get("features", [])
+        if not features:
+            return {"flood_zone": "X", "in_sfha": False}
+        best = None
+        for f in features:
+            if (f["attributes"].get("FLD_ZONE") or "").upper() in SFHA_ZONES:
+                best = f["attributes"]
+                break
+        if best is None:
+            best = features[0]["attributes"]
+        return {
+            "flood_zone": (best.get("FLD_ZONE") or "X").strip(),
+            "zone_subtype": best.get("ZONE_SUBTY") or "",
+            "in_sfha": best.get("SFHA_TF", "F") == "T",
+            "esri_dfirm_id": best.get("DFIRM_ID") or "",
+        }
+    except Exception:
+        return {"flood_zone": "X", "in_sfha": False}
+
+
 async def query_nfip_community(lat: float, lon: float) -> dict:
     """Query NFHL Layer 22 (Political Jurisdictions) for NFIP community name and CID.
     
@@ -603,7 +639,7 @@ async def query_nfip_community(lat: float, lon: float) -> dict:
     return result
 
 
-async def query_firm_panel(lat: float, lon: float, county_fips: str = "") -> dict:
+async def query_firm_panel(lat: float, lon: float, county_fips: str = "", community_id: str = "") -> dict:
     """Query NFHL Layer 3 (FIRM Panels) for full panel number and effective date."""
     queries = [
         {"geometry": f"{lon},{lat}", "geometryType": "esriGeometryPoint"},
@@ -632,15 +668,32 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "") -> dic
             if not features:
                 continue
 
-            # Filter by county_fips if provided — match first 5 digits
-            if county_fips:
-                # Try exact 5-digit prefix match
+            # Filter priority: community_id > county_fips > state prefix
+            if community_id:
+                # Best match: use community CID (e.g. 240010, 090119)
+                cid_prefix = community_id[:6]
+                filtered = [
+                    f for f in features
+                    if (f["attributes"].get("DFIRM_ID") or "").startswith(cid_prefix)
+                ]
+                if filtered:
+                    features = filtered
+                    print(f"FIRM panel matched community {cid_prefix}: "
+                          f"{features[0]['attributes'].get('FIRM_PAN','')}")
+                elif county_fips:
+                    county_prefix = county_fips[:5] if len(county_fips) >= 5 else county_fips
+                    filtered2 = [
+                        f for f in features
+                        if (f["attributes"].get("DFIRM_ID") or "").startswith(county_prefix)
+                    ]
+                    if filtered2:
+                        features = filtered2
+            elif county_fips:
                 county_prefix = county_fips[:5] if len(county_fips) >= 5 else county_fips
                 filtered = [
                     f for f in features
                     if (f["attributes"].get("DFIRM_ID") or "").startswith(county_prefix)
                 ]
-                # Also try matching just the state+county numeric (handles community IDs like 240010)
                 if not filtered and len(county_fips) >= 2:
                     state_prefix = county_fips[:2]
                     filtered = [
@@ -649,7 +702,7 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "") -> dic
                     ]
                 if filtered:
                     features = filtered
-                    print(f"FIRM panel matched prefix {county_prefix}: "
+                    print(f"FIRM panel matched county {county_prefix}: "
                           f"{features[0]['attributes'].get('FIRM_PAN','')}")
 
             attrs = None

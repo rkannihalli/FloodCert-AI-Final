@@ -854,10 +854,14 @@ async def admin_live_test(request: Request):
 
         lat, lon = float(geo["lat"]), float(geo["lon"])
 
-        nfhl, panel_data, community_data = await asyncio.gather(
+        nfhl, community_data = await asyncio.gather(
             query_fema_nfhl(lat, lon),
-            query_firm_panel(lat, lon, county_fips=geo.get("state_fips","") + geo.get("county_fips","")),
             query_nfip_community(lat, lon),
+        )
+        panel_data = await query_firm_panel(
+            lat, lon,
+            county_fips=geo.get("state_fips","") + geo.get("county_fips",""),
+            community_id=community_data.get("community_id", ""),
         )
 
         from fema_lookup import _classify_x_zone, ZONE_DISPLAY_NAMES
@@ -1002,7 +1006,8 @@ async def generate(
     firm_data, csb_data = await asyncio.gather(
         query_firm_panel(
             geo_result["lat"], geo_result["lon"],
-            county_fips=geo_result.get("state_fips","") + geo_result.get("county_fips","")
+            county_fips=geo_result.get("state_fips","") + geo_result.get("county_fips",""),
+            community_id=community_data.get("community_id", ""),
         ),
         query_nfip_community_csb(
             geo_result.get("state_fips", ""),

@@ -16,3 +16,4 @@ python-dotenv==1.0.1
 resend==2.4.0
 itsdangerous==2.2.0
 psycopg2-binary==2.9.9
+pypdf==4.3.1
