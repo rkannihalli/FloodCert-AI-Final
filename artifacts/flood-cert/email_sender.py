@@ -192,7 +192,12 @@ determination for this property immediately to ensure regulatory compliance.
 —
 FEMA Flood Certificate Generator | Life-of-Loan Monitoring Service
 """
-    _send(lender_email, subject, body)
+    # Route to admin email when no verified domain configured
+    admin_email = os.environ.get("ADMIN_EMAIL", "").strip()
+    send_to = admin_email if admin_email else lender_email
+    if admin_email and admin_email != lender_email:
+        print(f"[EMAIL] Routing LOL alert to admin {admin_email} (intended: {lender_email})")
+    _send(send_to, subject, body)
 
 
 def send_password_reset_email(to_email: str, name: str, reset_url: str) -> None:

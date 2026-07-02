@@ -160,12 +160,21 @@ async def _check_lol_record(mon: dict) -> None:
     if not lat or not lon:
         return
     try:
-        zone_data, community_data, firm_data = await asyncio.gather(
+        community_data = await query_nfip_community(float(lat), float(lon))
+        zone_data, firm_data = await asyncio.gather(
             query_fema_nfhl(float(lat), float(lon)),
-            query_nfip_community(float(lat), float(lon)),
-            query_firm_panel(float(lat), float(lon)),
+            query_firm_panel(float(lat), float(lon),
+                community_id=community_data.get("community_id", "")),
         )
         new_info = determine_flood_info({**zone_data, **community_data, **firm_data})
+
+        # Apply LOMA override if exists — prevents false alerts for LOMR properties
+        loma = await check_loma_at_point(float(lat), float(lon))
+        if loma and loma.get("status") == "Effective" and loma.get("outcome_zone") in ("X", "X500", "X (Shaded)"):
+            new_info["flood_zone"] = loma.get("outcome_zone", "X500")
+            new_info["sfha_status"] = "No"
+            new_info["insurance_required"] = "No — Flood insurance is not federally required"
+            print(f"[LOL] LOMA override applied for monitoring_id={mon['id']}: {loma.get('case_number')}")
     except Exception as exc:
         print(f"[LOL] FEMA query failed for monitoring_id={mon['id']}: {exc}")
         return
