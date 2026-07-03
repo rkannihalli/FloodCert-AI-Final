@@ -753,9 +753,23 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "", commun
             if attrs is None:
                 attrs = features[0]["attributes"]
             raw = (attrs.get("FIRM_PAN") or "").strip()
-            firm_pan = f"{raw[:6]} {raw[6:]}" if len(raw) >= 7 else raw
+            dfirm = (attrs.get("DFIRM_ID") or "").strip()
+            
+            # Format panel number correctly
+            # Standard format: SS CCC C PPPP X (split after 6 chars)
+            # NC CTS format: CCCCCC PPPPX (community-based)
+            if raw:
+                # Remove any existing spaces for clean formatting
+                raw_clean = raw.replace(" ", "")
+                if len(raw_clean) >= 7:
+                    firm_pan = f"{raw_clean[:6]} {raw_clean[6:]}"
+                else:
+                    firm_pan = raw_clean
+            else:
+                firm_pan = dfirm
+                
             return {
-                "firm_panel_l3": firm_pan or (attrs.get("DFIRM_ID") or ""),
+                "firm_panel_l3": firm_pan,
                 "eff_date": attrs.get("EFF_DATE"),
             }
         except Exception as e:
