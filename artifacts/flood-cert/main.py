@@ -1011,6 +1011,16 @@ async def generate(
     elif not geo_result.get("state_fips") or not geo_result.get("county_fips"):
         print("Warning: no FIPS from Census or TIGERweb")
 
+    # If Layer 22 returned empty, retry with LOMA coordinates if available
+    if not community_data.get("community_id") and loma:
+        loma_lat = float(loma.get("lat", 0) or geo_result["lat"])
+        loma_lon = float(loma.get("lon", 0) or geo_result["lon"])
+        if loma_lat and loma_lon:
+            community_data_retry = await query_nfip_community(loma_lat, loma_lon)
+            if community_data_retry.get("community_id"):
+                print(f"[COMM] Layer 22 retry with LOMA coords: {community_data_retry}")
+                community_data = community_data_retry
+
     # Step 2: FIRM panel + CSB with authoritative FIPS
     firm_data, csb_data = await asyncio.gather(
         query_firm_panel(

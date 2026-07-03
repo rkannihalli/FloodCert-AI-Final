@@ -504,7 +504,9 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
     """
     # Small offset ~30 metres at mid-latitudes
     D = 0.0003
-    offsets = [(0, 0), (D, 0), (-D, 0), (0, D), (0, -D)]
+    D2 = 0.0006  # ~65m second ring
+    offsets = [(0, 0), (D, 0), (-D, 0), (0, D), (0, -D),
+               (D2, 0), (-D2, 0), (0, D2), (0, -D2)]
 
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
@@ -521,11 +523,13 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
         sfha_results = [r for r in results if r.get("SFHA_TF") == "T"]
         non_sfha_results = [r for r in results if r.get("SFHA_TF") != "T"]
 
-        # Use majority vote — if more points are non-SFHA, use non-SFHA
-        # This handles boundary cases where geocoded point is just inside SFHA
-        if len(non_sfha_results) > len(sfha_results):
+        # Majority vote with 60% threshold
+        # If >= 60% of sample points are non-SFHA, treat as non-SFHA (boundary case)
+        total = len(results)
+        non_sfha_pct = len(non_sfha_results) / total if total > 0 else 0
+        if non_sfha_pct >= 0.6:
             best = non_sfha_results[0]
-            print(f"[NFHL] Boundary detected: {len(sfha_results)} SFHA vs {len(non_sfha_results)} non-SFHA — using non-SFHA")
+            print(f"[NFHL] Boundary: {len(sfha_results)} SFHA vs {len(non_sfha_results)} non-SFHA ({non_sfha_pct:.0%}) — using non-SFHA")
         elif sfha_results:
             best = sfha_results[0]
         else:
@@ -616,7 +620,7 @@ async def query_nfip_community(lat: float, lon: float) -> dict:
             **q,
             "inSR": "4326",
             "spatialRel": "esriSpatialRelIntersects",
-            "outFields": "POL_NAME1,CID",
+            "outFields": "POL_NAME1,CID,ANI_TF,COMM_NO",
             "returnGeometry": "false",
             "resultRecordCount": "10",
             "f": "json",
@@ -651,11 +655,16 @@ async def query_nfip_community(lat: float, lon: float) -> dict:
     best = city_features[0] if city_features else unique[0]
     
     attrs = best["attributes"]
+    ani_tf = (attrs.get("ANI_TF") or "F").upper().strip()
+    # ANI_TF = "T" means "Area Not Included" — community does NOT participate in NFIP
+    nfip_participates = (ani_tf != "T")
     result = {
         "community_id": (attrs.get("CID") or "").strip(),
         "community_name": (attrs.get("POL_NAME1") or "").strip(),
+        "nfip_participates": nfip_participates,
+        "ani_tf": ani_tf,
     }
-    print(f"NFIP community (Layer 22): {result['community_id']} / {result['community_name']}")
+    print(f"NFIP community (Layer 22): {result['community_id']} / {result['community_name']} participates={nfip_participates}")
     return result
 
 
@@ -1052,8 +1061,25 @@ def determine_flood_info(merged: dict) -> dict:
     )
 
     has_full_l3_panel = len(firm_panel_l3.replace(" ", "")) > 6
+    csb_panel = (merged.get("csb_panel") or "").strip()
+    csb_panel_date = (merged.get("csb_panel_date") or "").strip()
 
-    if has_full_l3_panel:
+    # Prefer CSB historical community panel over Layer 3 countywide panel
+    # when the CSB panel matches the community CID (community-specific panel)
+    if csb_panel and community_id:
+        cid_clean = community_id.replace(" ", "")
+        pan_clean = csb_panel.replace(" ", "")
+        if pan_clean.startswith(cid_clean[:6]):
+            map_number = csb_panel
+            if csb_panel_date:
+                panel_effective_date = csb_panel_date
+        elif has_full_l3_panel:
+            map_number = firm_panel_l3
+        elif esri_dfirm and len(esri_dfirm) >= 5:
+            map_number = f"{esri_dfirm[:5]}C"
+        else:
+            map_number = "Not Available"
+    elif has_full_l3_panel:
         map_number = firm_panel_l3
     elif esri_dfirm and len(esri_dfirm) >= 5:
         map_number = f"{esri_dfirm[:5]}C"
