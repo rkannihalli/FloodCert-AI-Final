@@ -1137,8 +1137,18 @@ async def download_certificate(
     county: str = Form(default=""),
     determination_date: str = Form(...),
     determination_date_iso: str = Form(...),
+    loma_case_number: str = Form(default=""),
+    loma_amendment_type: str = Form(default=""),
+    loma_effective_date: str = Form(default=""),
+    loma_original_zone: str = Form(default=""),
+    loma_note: str = Form(default=""),
+    cert_number: str = Form(default=""),
 ):
     data = dict(locals())
+    # Convert empty strings to None for loma fields
+    for f in ("loma_case_number","loma_amendment_type","loma_effective_date","loma_original_zone","loma_note"):
+        if not data.get(f):
+            data[f] = None
     try:
         data["map_image_b64"] = await generate_map_image(float(lat), float(lon))
     except Exception as e:
@@ -1177,8 +1187,18 @@ async def download_notice(
     county: str = Form(default=""),
     determination_date: str = Form(...),
     determination_date_iso: str = Form(...),
+    loma_case_number: str = Form(default=""),
+    loma_amendment_type: str = Form(default=""),
+    loma_effective_date: str = Form(default=""),
+    loma_original_zone: str = Form(default=""),
+    loma_note: str = Form(default=""),
+    cert_number: str = Form(default=""),
 ):
     data = dict(locals())
+    # Convert empty strings to None for loma fields
+    for f in ("loma_case_number","loma_amendment_type","loma_effective_date","loma_original_zone","loma_note"):
+        if not data.get(f):
+            data[f] = None
     data["map_image_b64"] = await generate_map_image(float(lat), float(lon))
     pdf_bytes = generate_borrower_notice_pdf(data)
     filename = f"borrower_notice_{loan_id}.pdf".replace(" ", "_")
@@ -1387,6 +1407,31 @@ async def history_download_certificate(record_id: int):
     record = get_determination(record_id)
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
+    # Re-apply LOMA override if needed before PDF generation
+    if not record.get("loma_case_number") and record.get("lat") and record.get("lon"):
+        try:
+            loma = await check_loma_at_point(float(record["lat"]), float(record["lon"]))
+            if loma and loma.get("status") == "Effective" and loma.get("outcome_zone") in ("X","X500","X (Shaded)"):
+                record["loma_original_zone"] = record.get("flood_zone")
+                record["flood_zone"] = loma.get("outcome_zone","X500")
+                record["sfha_status"] = "No"
+                record["insurance_required"] = "No — Flood insurance is not federally required"
+                record["loma_case_number"] = loma.get("case_number")
+                record["loma_amendment_type"] = loma.get("amendment_type")
+                record["loma_effective_date"] = loma.get("effective_date")
+                record["loma_note"] = (
+                    f"Removed from SFHA per FEMA {loma.get('amendment_type')} "
+                    f"Case No. {loma.get('case_number')} "
+                    f"(effective {loma.get('effective_date')}). "
+                    f"Map shows {record['loma_original_zone']} — LOMA overrides."
+                )
+        except Exception as e:
+            print(f"[PDF] LOMA check error (non-fatal): {e}")
+    record["map_image_b64"] = None
+    try:
+        record["map_image_b64"] = await generate_map_image(float(record.get("lat",0)), float(record.get("lon",0)))
+    except Exception:
+        pass
     pdf_bytes = generate_flood_certificate_pdf(record)
     filename = _cert_filename(record.get("flood_zone", ""), record.get("property_address", ""))
     return Response(content=pdf_bytes, media_type="application/pdf",

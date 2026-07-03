@@ -468,57 +468,77 @@ async def geocode_address(address: str) -> Optional[dict]:
     return None
 
 
+async def _query_zone_at_point(client: httpx.AsyncClient, lon: float, lat: float) -> dict:
+    """Query NFHL flood zone at a single point."""
+    params = {
+        "geometry": f"{lon},{lat}",
+        "geometryType": "esriGeometryPoint",
+        "inSR": "4326",
+        "spatialRel": "esriSpatialRelIntersects",
+        "outFields": "FLD_ZONE,ZONE_SUBTY,SFHA_TF,DFIRM_ID",
+        "returnGeometry": "false",
+        "resultRecordCount": "5",
+        "f": "json",
+    }
+    try:
+        resp = await client.get(ESRI_FLOOD_ZONE_URL, params=params)
+        data = resp.json()
+        features = data.get("features", [])
+        if not features:
+            return {}
+        # Prefer SFHA zone if present
+        for f in features:
+            if (f["attributes"].get("FLD_ZONE") or "").upper() in SFHA_ZONES:
+                return f["attributes"]
+        return features[0]["attributes"]
+    except Exception:
+        return {}
+
+
 async def query_fema_nfhl(lat: float, lon: float) -> dict:
-    """Query flood zone via Esri Living Atlas USA Flood Hazard layer."""
-    queries = [
-        {
-            "geometry": f"{lon},{lat}",
-            "geometryType": "esriGeometryPoint",
-        },
-        {
-            "geometry": f"{lon - 0.0005},{lat - 0.0005},{lon + 0.0005},{lat + 0.0005}",
-            "geometryType": "esriGeometryEnvelope",
-        },
-    ]
+    """Query flood zone via FEMA NFHL Layer 28.
+    
+    Uses multi-point sampling to handle properties near zone boundaries.
+    Samples the geocoded point plus 4 small offsets (~30m each).
+    If majority of samples are non-SFHA, returns non-SFHA result.
+    """
+    # Small offset ~30 metres at mid-latitudes
+    D = 0.0003
+    offsets = [(0, 0), (D, 0), (-D, 0), (0, D), (0, -D)]
 
-    for q in queries:
-        params = {
-            **q,
-            "inSR": "4326",
-            "spatialRel": "esriSpatialRelIntersects",
-            "outFields": "FLD_ZONE,ZONE_SUBTY,SFHA_TF,DFIRM_ID",
-            "returnGeometry": "false",
-            "resultRecordCount": "10",
-            "f": "json",
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            results = []
+            for dlat, dlon in offsets:
+                r = await _query_zone_at_point(client, lon + dlon, lat + dlat)
+                if r:
+                    results.append(r)
+
+        if not results:
+            return {"flood_zone": "X", "in_sfha": False, "zone_subtype": "", "esri_dfirm_id": ""}
+
+        # Count SFHA vs non-SFHA votes
+        sfha_results = [r for r in results if r.get("SFHA_TF") == "T"]
+        non_sfha_results = [r for r in results if r.get("SFHA_TF") != "T"]
+
+        # Use majority vote — if more points are non-SFHA, use non-SFHA
+        # This handles boundary cases where geocoded point is just inside SFHA
+        if len(non_sfha_results) > len(sfha_results):
+            best = non_sfha_results[0]
+            print(f"[NFHL] Boundary detected: {len(sfha_results)} SFHA vs {len(non_sfha_results)} non-SFHA — using non-SFHA")
+        elif sfha_results:
+            best = sfha_results[0]
+        else:
+            best = results[0]
+
+        return {
+            "flood_zone": (best.get("FLD_ZONE") or "X").strip(),
+            "zone_subtype": best.get("ZONE_SUBTY") or "",
+            "esri_dfirm_id": best.get("DFIRM_ID") or "",
+            "in_sfha": best.get("SFHA_TF", "F") == "T",
         }
-        try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                resp = await client.get(ESRI_FLOOD_ZONE_URL, params=params)
-                resp.raise_for_status()
-                data = resp.json()
-
-            features = data.get("features", [])
-            if not features:
-                continue
-
-            best = None
-            for f in features:
-                a = f["attributes"]
-                zone = (a.get("FLD_ZONE") or "").upper().strip()
-                if zone in SFHA_ZONES:
-                    best = a
-                    break
-            if best is None:
-                best = features[0]["attributes"]
-
-            return {
-                "flood_zone": (best.get("FLD_ZONE") or "X").strip(),
-                "zone_subtype": best.get("ZONE_SUBTY") or "",
-                "esri_dfirm_id": best.get("DFIRM_ID") or "",
-                "in_sfha": best.get("SFHA_TF", "F") == "T",
-            }
-        except Exception as e:
-            print(f"FEMA flood zone query error ({q['geometryType']}): {e}")
+    except Exception as e:
+        print(f"FEMA flood zone query error: {e}")
 
     return {"flood_zone": "X", "in_sfha": False, "zone_subtype": "", "esri_dfirm_id": ""}
 
@@ -668,41 +688,61 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "", commun
             if not features:
                 continue
 
-            # Filter priority: community_id > county_fips > state prefix
-            if community_id:
-                # Best match: use community CID (e.g. 240010, 090119)
-                cid_prefix = community_id[:6]
+            # Filter priority: community_id numeric match > county_fips > state prefix
+            # DFIRM_ID format: SSCCCX (state+county FIPS + letter) e.g. 09015C
+            # community_id format: SSCCCC (6 digit community number) e.g. 090119
+            # They share first 2 digits (state FIPS) but differ after that
+            matched = False
+            if community_id and len(community_id) >= 6:
+                # Try exact 6-char community CID match first (e.g. 240010)
                 filtered = [
                     f for f in features
-                    if (f["attributes"].get("DFIRM_ID") or "").startswith(cid_prefix)
+                    if (f["attributes"].get("DFIRM_ID") or "").startswith(community_id[:6])
                 ]
                 if filtered:
                     features = filtered
-                    print(f"FIRM panel matched community {cid_prefix}: "
+                    matched = True
+                    print(f"FIRM panel matched community CID {community_id[:6]}: "
                           f"{features[0]['attributes'].get('FIRM_PAN','')}")
-                elif county_fips:
-                    county_prefix = county_fips[:5] if len(county_fips) >= 5 else county_fips
-                    filtered2 = [
+
+            if not matched and community_id and len(community_id) >= 2:
+                # Use state prefix from community_id + county_fips for narrower match
+                state_from_cid = community_id[:2]
+                if county_fips and len(county_fips) >= 5:
+                    county_prefix = county_fips[:5]
+                    filtered = [
                         f for f in features
                         if (f["attributes"].get("DFIRM_ID") or "").startswith(county_prefix)
                     ]
-                    if filtered2:
-                        features = filtered2
-            elif county_fips:
+                    if filtered:
+                        features = filtered
+                        matched = True
+                        print(f"FIRM panel matched county {county_prefix}: "
+                              f"{features[0]['attributes'].get('FIRM_PAN','')}")
+                if not matched:
+                    # State-only filter as last resort
+                    filtered = [
+                        f for f in features
+                        if (f["attributes"].get("DFIRM_ID") or "").startswith(state_from_cid)
+                    ]
+                    if filtered:
+                        features = filtered
+                        matched = True
+
+            if not matched and county_fips:
                 county_prefix = county_fips[:5] if len(county_fips) >= 5 else county_fips
                 filtered = [
                     f for f in features
                     if (f["attributes"].get("DFIRM_ID") or "").startswith(county_prefix)
                 ]
                 if not filtered and len(county_fips) >= 2:
-                    state_prefix = county_fips[:2]
                     filtered = [
                         f for f in features
-                        if (f["attributes"].get("DFIRM_ID") or "").startswith(state_prefix)
+                        if (f["attributes"].get("DFIRM_ID") or "").startswith(county_prefix[:2])
                     ]
                 if filtered:
                     features = filtered
-                    print(f"FIRM panel matched county {county_prefix}: "
+                    print(f"FIRM panel matched county_fips {county_prefix}: "
                           f"{features[0]['attributes'].get('FIRM_PAN','')}")
 
             attrs = None

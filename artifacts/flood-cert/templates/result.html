@@ -266,6 +266,12 @@
         <input type="hidden" name="county"                value="{{ data.county or '' }}" />
         <input type="hidden" name="determination_date"    value="{{ data.determination_date }}" />
         <input type="hidden" name="determination_date_iso" value="{{ data.determination_date_iso }}" />
+        <input type="hidden" name="loma_case_number"    value="{{ data.loma_case_number or '' }}" />
+        <input type="hidden" name="loma_amendment_type" value="{{ data.loma_amendment_type or '' }}" />
+        <input type="hidden" name="loma_effective_date" value="{{ data.loma_effective_date or '' }}" />
+        <input type="hidden" name="loma_original_zone"  value="{{ data.loma_original_zone or '' }}" />
+        <input type="hidden" name="loma_note"           value="{{ data.loma_note or '' }}" />
+        <input type="hidden" name="cert_number"         value="{{ data.cert_number or '' }}" />
         <button type="submit" class="btn-download">📄 Download Flood Certificate (PDF)</button>
       </form>
 
