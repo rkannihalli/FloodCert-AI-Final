@@ -1071,6 +1071,7 @@ def determine_flood_info(merged: dict) -> dict:
     has_full_l3_panel = len(firm_panel_l3.replace(" ", "")) > 6
     csb_panel = (merged.get("csb_panel") or "").strip()
     csb_panel_date = (merged.get("csb_panel_date") or "").strip()
+    panel_effective_date_override = ""
 
     # Prefer CSB historical community panel over Layer 3 countywide panel
     # when the CSB panel matches the community CID (community-specific panel)
@@ -1080,7 +1081,7 @@ def determine_flood_info(merged: dict) -> dict:
         if pan_clean.startswith(cid_clean[:6]):
             map_number = csb_panel
             if csb_panel_date:
-                panel_effective_date = csb_panel_date
+                panel_effective_date_override = csb_panel_date
         elif has_full_l3_panel:
             map_number = firm_panel_l3
         elif esri_dfirm and len(esri_dfirm) >= 5:
@@ -1115,7 +1116,9 @@ def determine_flood_info(merged: dict) -> dict:
     if not county_name:
         county_name = ""
 
-    if isinstance(eff_date_raw, str) and eff_date_raw:
+    if panel_effective_date_override:
+        panel_effective_date = panel_effective_date_override
+    elif isinstance(eff_date_raw, str) and eff_date_raw:
         panel_effective_date = eff_date_raw
     elif isinstance(eff_date_raw, (int, float)) and eff_date_raw > 0:
         from datetime import datetime, timezone
