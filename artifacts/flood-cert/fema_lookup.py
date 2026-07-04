@@ -522,6 +522,8 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
         # Count SFHA vs non-SFHA votes
         sfha_results = [r for r in results if r.get("SFHA_TF") == "T"]
         non_sfha_results = [r for r in results if r.get("SFHA_TF") != "T"]
+        print(f"[ZONE-DEBUG] lat={lat} lon={lon} per-point results: "
+              f"{[(r.get('FLD_ZONE'), r.get('SFHA_TF')) for r in results]}")
 
         # Majority vote with 60% threshold
         # If >= 60% of sample points are non-SFHA, treat as non-SFHA (boundary case)
@@ -763,20 +765,18 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "", commun
                 attrs = features[0]["attributes"]
             raw = (attrs.get("FIRM_PAN") or "").strip()
             dfirm = (attrs.get("DFIRM_ID") or "").strip()
-            
-            # Format panel number correctly
-            # Standard format: SS CCC C PPPP X (split after 6 chars)
-            # NC CTS format: CCCCCC PPPPX (community-based)
+
+            firm_pan = ""
             if raw:
-                # Remove any existing spaces for clean formatting
                 raw_clean = raw.replace(" ", "")
-                if len(raw_clean) >= 7:
+                if dfirm and raw_clean[:6] != dfirm:
+                    print(f"[PANEL] FIRM_PAN/DFIRM_ID mismatch — discarding unreliable FIRM_PAN "
+                          f"(FIRM_PAN={raw_clean!r} DFIRM_ID={dfirm!r})")
+                elif len(raw_clean) >= 7:
                     firm_pan = f"{raw_clean[:6]} {raw_clean[6:]}"
                 else:
                     firm_pan = raw_clean
-            else:
-                firm_pan = dfirm
-                
+
             return {
                 "firm_panel_l3": firm_pan,
                 "eff_date": attrs.get("EFF_DATE"),
@@ -893,23 +893,31 @@ async def query_nfip_community_csb(
                 c_name = (c.get("name") or "").lower()
                 if c_name == city_norm or c_name.startswith(city_norm + ","):
                     return {"csb_community_id": c.get("cid", ""),
-                            "csb_community_name": c.get("name", "")}
+                            "csb_community_name": c.get("name", ""),
+                            "csb_panel": c.get("panel", ""),
+                            "csb_panel_date": c.get("panel_date", "")}
             # Partial match
             for c in communities:
                 c_name = (c.get("name") or "").lower()
                 if city_norm in c_name:
                     return {"csb_community_id": c.get("cid", ""),
-                            "csb_community_name": c.get("name", "")}
+                            "csb_community_name": c.get("name", ""),
+                            "csb_panel": c.get("panel", ""),
+                            "csb_panel_date": c.get("panel_date", "")}
             # County/unincorporated fallback
             for c in communities:
                 c_name = (c.get("name") or "").lower()
                 if "county" in c_name or "unincorporated" in c_name:
                     return {"csb_community_id": c.get("cid", ""),
-                            "csb_community_name": c.get("name", "")}
+                            "csb_community_name": c.get("name", ""),
+                            "csb_panel": c.get("panel", ""),
+                            "csb_panel_date": c.get("panel_date", "")}
             # Single result
             if len(communities) == 1:
                 return {"csb_community_id": communities[0].get("cid", ""),
-                        "csb_community_name": communities[0].get("name", "")}
+                        "csb_community_name": communities[0].get("name", ""),
+                        "csb_panel": communities[0].get("panel", ""),
+                        "csb_panel_date": communities[0].get("panel_date", "")}
     except Exception as e:
         print(f"NFIP local DB lookup error: {e}")
 

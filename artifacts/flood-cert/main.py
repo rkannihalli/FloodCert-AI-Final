@@ -1042,6 +1042,7 @@ async def generate(
         "county_fips": geo_result.get("county_fips", ""),
         "county_name": geo_result.get("county_name", ""),
     })
+    flood_info["nfip_participates"] = community_data.get("nfip_participates", True)
 
     geo_lat = geo_result["lat"]
     geo_lon = geo_result["lon"]
