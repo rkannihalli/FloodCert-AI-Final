@@ -189,6 +189,7 @@ def save_determination(data: dict) -> int:
         "company_id": None,
         "user_id": None,
         "county": "",
+        "nfip_participates": True,
         "loma_case_number": None,
         "loma_amendment_type": None,
         "loma_effective_date": None,
@@ -217,6 +218,7 @@ def save_determination(data: dict) -> int:
                         determination_date=%(determination_date)s,
                         determination_date_iso=%(determination_date_iso)s,
                         created_at=%(created_at)s, county=%(county)s,
+                        nfip_participates=%(nfip_participates)s,
                         loma_case_number=%(loma_case_number)s,
                         loma_amendment_type=%(loma_amendment_type)s,
                         loma_effective_date=%(loma_effective_date)s,
@@ -233,7 +235,7 @@ def save_determination(data: dict) -> int:
                         flood_zone, flood_zone_description, sfha_status, insurance_required,
                         panel_number, panel_effective_date, community_number, community_name,
                         determination_date, determination_date_iso, created_at,
-                        company_id, user_id, county,
+                        company_id, user_id, county, nfip_participates,
                         loma_case_number, loma_amendment_type, loma_effective_date,
                         loma_original_zone, loma_note
                     ) VALUES (
@@ -242,7 +244,7 @@ def save_determination(data: dict) -> int:
                         %(flood_zone)s, %(flood_zone_description)s, %(sfha_status)s, %(insurance_required)s,
                         %(panel_number)s, %(panel_effective_date)s, %(community_number)s, %(community_name)s,
                         %(determination_date)s, %(determination_date_iso)s, %(created_at)s,
-                        %(company_id)s, %(user_id)s, %(county)s,
+                        %(company_id)s, %(user_id)s, %(county)s, %(nfip_participates)s,
                         %(loma_case_number)s, %(loma_amendment_type)s, %(loma_effective_date)s,
                         %(loma_original_zone)s, %(loma_note)s
                     ) RETURNING id

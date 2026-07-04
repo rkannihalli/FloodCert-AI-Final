@@ -1098,6 +1098,7 @@ async def generate(
         "loma_effective_date": loma.get("effective_date") if loma else None,
         "loma_original_zone":  loma_original_zone,
         "loma_note":           loma_note,
+        "nfip_participates":   flood_info.get("nfip_participates", True),
     }
 
     record_id = save_determination(certificate_data)
@@ -1617,6 +1618,7 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str, company_id=N
         "county_fips": geo.get("county_fips", ""),
         "county_name": geo.get("county_name", ""),
     })
+    flood_info["nfip_participates"] = community_data.get("nfip_participates", True)
 
     data = {
         "property_address": property_address,
@@ -1633,6 +1635,7 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str, company_id=N
         "community_number": flood_info["community_number"],
         "community_name": flood_info["community_name"],
         "county": flood_info.get("county", ""),
+        "nfip_participates": flood_info.get("nfip_participates", True),
         "determination_date": det_date,
         "determination_date_iso": det_date_iso,
         "company_id": company_id,
