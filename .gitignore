@@ -47,3 +47,12 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Debug/session artifacts — never commit these
+cookies*.txt
+*_response.html
+*_test.html
+*.bak
+*.backup
+__pycache__/
+*.pyc

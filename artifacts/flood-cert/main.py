@@ -995,6 +995,10 @@ async def generate(
             }
         })
 
+    # LOMA/LOMR lookup — must happen before it's referenced below (Layer 22 retry
+    # and the Step 3 override both depend on it)
+    loma = await check_loma_at_point(geo_result["lat"], geo_result["lon"])
+
     # Step 1: Get authoritative FIPS from TIGERweb
     zone_data, community_data, county_data, tiger_data = await asyncio.gather(
         query_fema_nfhl(geo_result["lat"], geo_result["lon"]),
@@ -1049,7 +1053,7 @@ async def generate(
     geo_matched = geo_result.get("matched_address", property_address)
 
     # Step 3: Check for LOMA/LOMR — overrides NFHL zone if effective removal found
-    loma = await check_loma_at_point(geo_lat, geo_lon)
+    # (loma was already fetched earlier, before the Step 1 FIPS lookup)
     loma_note = None
     loma_original_zone = None
     if loma and loma.get("status") == "Effective" and loma.get("outcome_zone") in ("X", "X500", "X (Shaded)"):
