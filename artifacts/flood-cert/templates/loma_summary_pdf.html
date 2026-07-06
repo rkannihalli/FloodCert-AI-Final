@@ -151,6 +151,13 @@
   For official verification, contact the FEMA Mapping and Insurance eXchange (FMIX) at 
   1-877-FEMA-MAP (1-877-336-2627) or visit msc.fema.gov. The original LOMC determination 
   document supersedes this summary for all regulatory purposes.
+  {% if loma_case_number and community_number %}
+  <br><br>
+  <strong>Original FEMA Document:</strong>
+  <a href="https://msc.fema.gov/portal/downloadProduct?productID={{ loma_case_number }}-{{ community_number }}">
+    Download the official LOMC letter from the FEMA Map Service Center
+  </a>
+  {% endif %}
 </div>
 
 <div class="footer">
