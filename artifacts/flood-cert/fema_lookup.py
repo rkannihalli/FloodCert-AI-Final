@@ -1162,7 +1162,8 @@ async def check_loma_at_point(lat: float, lon: float) -> dict | None:
                 # Match within ~500 metres (0.005 decimal degrees)
                 cur.execute("""
                     SELECT case_number, outcome_zone, amendment_type,
-                           effective_date, original_zone
+                           effective_date, original_zone,
+                           outcome_community_id, outcome_community_name
                     FROM loma_records
                     WHERE ABS(lat - %s) < 0.005
                       AND ABS(lon - %s) < 0.005
@@ -1178,6 +1179,8 @@ async def check_loma_at_point(lat: float, lon: float) -> dict | None:
                         "outcome_zone":   row["outcome_zone"],
                         "effective_date": str(row["effective_date"]) if row["effective_date"] else None,
                         "amendment_type": row["amendment_type"],
+                        "outcome_community_id":   row.get("outcome_community_id"),
+                        "outcome_community_name": row.get("outcome_community_name"),
                     }
     except Exception as e:
         print(f"[LOMA] DB cache check failed (non-fatal): {e}")

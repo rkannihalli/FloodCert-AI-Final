@@ -1061,6 +1061,14 @@ async def generate(
         flood_info["flood_zone"] = loma.get("outcome_zone", "X")
         flood_info["sfha_status"] = "No"
         flood_info["insurance_required"] = "No"
+        # If this LOMA/LOMR record carries a community override (e.g. the property
+        # was annexed into a different community than the NFHL boundary layer still
+        # shows), apply that too — otherwise the certificate shows a corrected flood
+        # zone next to a stale/wrong community number.
+        if loma.get("outcome_community_id"):
+            flood_info["panel_number"] = loma["outcome_community_id"]
+        if loma.get("outcome_community_name"):
+            flood_info["community_name"] = loma["outcome_community_name"]
         loma_note = (
             f"Removed from SFHA per FEMA {loma['amendment_type']} "
             f"Case No. {loma['case_number']} "
