@@ -480,16 +480,28 @@ def upsert_lol_monitoring(det: dict) -> int:
     now = datetime.utcnow().isoformat()
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM lol_monitoring WHERE determination_id = %s", (det["id"],))
+            # Match on loan_id + company_id, not determination_id — every /generate
+            # call creates a brand-new determination row, so matching on
+            # determination_id could never find a prior monitoring record and
+            # always inserted a duplicate. Matching on loan_id means re-running a
+            # report for the same loan refreshes the existing baseline (and
+            # points it at the latest determination) instead of creating a new,
+            # parallel monitoring thread for the same property.
+            cur.execute("""
+                SELECT id FROM lol_monitoring
+                WHERE loan_id = %s AND company_id = %s AND loan_id IS NOT NULL AND loan_id != \'\'
+            """, (det.get("loan_id", ""), det.get("company_id")))
             existing = cur.fetchone()
             if existing:
                 cur.execute("""
                     UPDATE lol_monitoring SET
+                        determination_id=%s,
                         baseline_panel_number=%s, baseline_effective_date=%s,
                         baseline_flood_zone=%s, baseline_community_number=%s,
-                        lender_email=%s, lender_name=%s, status='Active', last_checked_at=%s
+                        lender_email=%s, lender_name=%s, status=\'Active\', last_checked_at=%s
                     WHERE id=%s
                 """, (
+                    det.get("id"),
                     det.get("community_number", ""), det.get("panel_effective_date", ""),
                     det.get("flood_zone", ""), det.get("panel_number", ""),
                     det.get("lender_email", ""), det.get("lender_name", ""),
