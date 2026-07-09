@@ -148,10 +148,10 @@ def _session_company_id(request: Request) -> int | None:
 # ── LOL monitoring core check logic ──────────────────────────────────────────
 
 _LOL_CHECKS = [
-    ("baseline_panel_number",     "NFIP Map Panel Number",         "panel_number"),
+    ("baseline_panel_number",     "NFIP Map Panel Number",         "community_number"),
     ("baseline_effective_date",   "FIRM Panel Effective Date",     "panel_effective_date"),
     ("baseline_flood_zone",       "Flood Zone",                    "flood_zone"),
-    ("baseline_community_number", "NFIP Community Number (CID)",   "community_number"),
+    ("baseline_community_number", "NFIP Community Number (CID)",   "panel_number"),
 ]
 
 
