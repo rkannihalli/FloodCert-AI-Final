@@ -480,17 +480,22 @@ def upsert_lol_monitoring(det: dict) -> int:
     now = datetime.utcnow().isoformat()
     with get_conn() as conn:
         with conn.cursor() as cur:
-            # Match on loan_id + company_id, not determination_id — every /generate
-            # call creates a brand-new determination row, so matching on
-            # determination_id could never find a prior monitoring record and
-            # always inserted a duplicate. Matching on loan_id means re-running a
-            # report for the same loan refreshes the existing baseline (and
-            # points it at the latest determination) instead of creating a new,
-            # parallel monitoring thread for the same property.
+            # Match on rounded coordinates (~11m), not loan_id — a FEMA determination
+            # is a property-level fact, so two different loans/companies on the same
+            # property must share one monitoring baseline, or the same real-world
+            # change would fire a duplicate alert per loan. On a match, we refresh
+            # ONLY the FEMA baseline data (panel/date/zone/community) — we deliberately
+            # do NOT overwrite loan_id/lender/borrower, so whichever loan originally
+            # enrolled this property keeps getting notified. (If you need every
+            # distinct loan on a shared property notified independently, that needs a
+            # separate loans-to-property join table — a bigger, deliberate feature.)
+            lat = det.get("lat")
+            lon = det.get("lon")
             cur.execute("""
                 SELECT id FROM lol_monitoring
-                WHERE loan_id = %s AND company_id = %s AND loan_id IS NOT NULL AND loan_id != \'\'
-            """, (det.get("loan_id", ""), det.get("company_id")))
+                WHERE ROUND(lat::numeric, 4) = ROUND(%s::numeric, 4)
+                  AND ROUND(lon::numeric, 4) = ROUND(%s::numeric, 4)
+            """, (lat, lon))
             existing = cur.fetchone()
             if existing:
                 cur.execute("""
@@ -498,13 +503,12 @@ def upsert_lol_monitoring(det: dict) -> int:
                         determination_id=%s,
                         baseline_panel_number=%s, baseline_effective_date=%s,
                         baseline_flood_zone=%s, baseline_community_number=%s,
-                        lender_email=%s, lender_name=%s, status=\'Active\', last_checked_at=%s
+                        status='Active', last_checked_at=%s
                     WHERE id=%s
                 """, (
                     det.get("id"),
                     det.get("community_number", ""), det.get("panel_effective_date", ""),
                     det.get("flood_zone", ""), det.get("panel_number", ""),
-                    det.get("lender_email", ""), det.get("lender_name", ""),
                     now, existing["id"],
                 ))
                 return existing["id"]
