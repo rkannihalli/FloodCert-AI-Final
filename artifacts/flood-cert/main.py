@@ -863,15 +863,23 @@ async def admin_live_test(request: Request):
 
         lat, lon = float(geo["lat"]), float(geo["lon"])
 
-        nfhl, community_data = await asyncio.gather(
+        nfhl, community_data, tiger_data = await asyncio.gather(
             query_fema_nfhl(lat, lon),
             query_nfip_community(lat, lon),
+            query_tigerweb_fips(lat, lon),
         )
         panel_data = await query_firm_panel(
             lat, lon,
             county_fips=geo.get("state_fips","") + geo.get("county_fips",""),
             community_id=community_data.get("community_id", ""),
         )
+
+        # County: prefer whatever the geocoder gave us, but the geocoder
+        # (especially Census/ArcGIS street-level matches) frequently leaves
+        # this blank. TIGERweb's spatial county lookup is the same
+        # authoritative fallback the real certificate-generation flow uses,
+        # so this tool should reflect the same result a real cert would.
+        county_display = geo.get("county_name", "") or tiger_data.get("county_name", "")
 
         from fema_lookup import _classify_x_zone, ZONE_DISPLAY_NAMES
         raw_zone = (nfhl.get("flood_zone") or "X").upper().strip()
@@ -884,7 +892,7 @@ async def admin_live_test(request: Request):
             "geocoded_address": geo.get("matched_address", ""),
             "lat": round(lat, 5),
             "lon": round(lon, 5),
-            "county": geo.get("county_name", ""),
+            "county": county_display,
             "flood_zone": flood_zone,
             "zone_label": ZONE_DISPLAY_NAMES.get(flood_zone, flood_zone),
             "in_sfha": nfhl.get("in_sfha", False),
@@ -893,6 +901,7 @@ async def admin_live_test(request: Request):
             "eff_date": panel_data.get("eff_date", ""),
             "community_id": community_data.get("community_id", ""),
             "community_name": community_data.get("community_name", ""),
+            "geocode_precision": geo.get("geocode_precision", ""),
         })
     except Exception as exc:
         return JSONResponse(
@@ -1037,6 +1046,7 @@ async def generate(
             geo_result.get("county_fips", ""),
             geo_result.get("city", ""),
             geo_result.get("state_abbr", ""),
+            community_data.get("community_id", ""),
         ),
     )
     flood_info = determine_flood_info({
@@ -1615,16 +1625,27 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str, company_id=N
             "error": "Address could not be geocoded",
         }
 
-    zone_data, community_data, firm_data, county_data, csb_data = await asyncio.gather(
+    zone_data, community_data, county_data, tiger_data = await asyncio.gather(
         query_fema_nfhl(geo["lat"], geo["lon"]),
         query_nfip_community(geo["lat"], geo["lon"]),
-        query_firm_panel(geo["lat"], geo["lon"], county_fips=geo.get("state_fips","") + geo.get("county_fips","")),
         query_county_name(geo["lat"], geo["lon"]),
+        query_tigerweb_fips(geo["lat"], geo["lon"]),
+    )
+    if tiger_data.get("state_fips"):
+        geo["state_fips"]  = tiger_data["state_fips"]
+        geo["county_fips"] = tiger_data["county_fips"]
+        if not geo.get("county_name"):
+            geo["county_name"] = tiger_data.get("county_name", "")
+
+    firm_data, csb_data = await asyncio.gather(
+        query_firm_panel(geo["lat"], geo["lon"], county_fips=geo.get("state_fips","") + geo.get("county_fips",""),
+                          community_id=community_data.get("community_id", "")),
         query_nfip_community_csb(
             geo.get("state_fips", ""),
             geo.get("county_fips", ""),
             geo.get("city", ""),
             geo.get("state_abbr", ""),
+            community_data.get("community_id", ""),
         ),
     )
     flood_info = determine_flood_info({

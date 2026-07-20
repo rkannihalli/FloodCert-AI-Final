@@ -937,8 +937,10 @@ async def query_nfip_community_csb(
 ) -> dict:
     """Look up NFIP community name and number.
     Priority:
-      1. Local nfip_communities_db.json (fast, offline)
-      2. FEMA CSB API (fallback, may be unavailable)
+      1. Authoritative community_id_from_layer22 (from the actual FEMA NFHL
+         spatial point-in-polygon query) — direct CID lookup, no guessing.
+      2. Local nfip_communities_db.json, scoped to the correct county only.
+      3. FEMA CSB API (fallback, may be unavailable)
     """
     import os, json as _json
     empty: dict = {"csb_community_id": "", "csb_community_name": ""}
@@ -949,18 +951,43 @@ async def query_nfip_community_csb(
     if not sa:
         return empty
 
+    cid_wanted = (community_id_from_layer22 or "").strip()
+
     # ── 1. Local JSON DB ─────────────────────────────────────────────────────
     try:
         db_path = os.path.join(os.path.dirname(__file__), "nfip_communities_db.json")
         with open(db_path) as f:
             nfip_db = _json.load(f)
 
-        # Try exact county key first: STATE_COUNTYCODE
+        # 1a. Authoritative CID match — the spatial query already told us
+        # exactly which community polygon the point falls in. Trust that
+        # over any name-based guessing. This must come first: it is the
+        # only lookup here that is actually tied to the property's real
+        # location rather than a text match on city name.
+        if cid_wanted:
+            for k, v in nfip_db.items():
+                if not k.startswith(f"{sa}_"):
+                    continue
+                for c in v:
+                    if (c.get("cid") or "").strip() == cid_wanted:
+                        return {"csb_community_id": c.get("cid", ""),
+                                "csb_community_name": c.get("name", ""),
+                                "csb_panel": c.get("panel", ""),
+                                "csb_panel_date": c.get("panel_date", "")}
+
+        # Try exact county key: STATE_COUNTYCODE
         cfips = county_fips.zfill(3) if county_fips else ""
         key = f"{sa}_{cfips}" if cfips else None
         communities = nfip_db.get(key, []) if key else []
+        # Whether this list is correctly scoped to the property's actual
+        # county. Only a scoped list is safe input for the loose
+        # "county/unincorporated" fallback below — an unscoped, merged,
+        # state-wide list can match an unrelated county hundreds of miles
+        # away just because its name contains "county".
+        scoped_to_county = bool(communities)
 
-        # If not found by county, search all state entries
+        # If not found by exact county key, broaden the search — but only
+        # for name matching, never for the loose county/unincorporated catch-all.
         if not communities and sa:
             for k, v in nfip_db.items():
                 if k.startswith(f"{sa}_"):
@@ -985,7 +1012,12 @@ async def query_nfip_community_csb(
                             "csb_community_name": c.get("name", ""),
                             "csb_panel": c.get("panel", ""),
                             "csb_panel_date": c.get("panel_date", "")}
-            # County/unincorporated fallback
+        if communities and scoped_to_county:
+            # County/unincorporated fallback — only safe when `communities`
+            # is the correct county's own list (exact key match). If we had
+            # to fall back to the whole state, skip this: picking "the first
+            # entry with 'county' in its name" from a merged multi-county
+            # list is a coin flip on the wrong county, not a real match.
             for c in communities:
                 c_name = (c.get("name") or "").lower()
                 if "county" in c_name or "unincorporated" in c_name:
@@ -993,7 +1025,7 @@ async def query_nfip_community_csb(
                             "csb_community_name": c.get("name", ""),
                             "csb_panel": c.get("panel", ""),
                             "csb_panel_date": c.get("panel_date", "")}
-            # Single result
+            # Single result in the correctly-scoped county list
             if len(communities) == 1:
                 return {"csb_community_id": communities[0].get("cid", ""),
                         "csb_community_name": communities[0].get("name", ""),
@@ -1014,6 +1046,11 @@ async def query_nfip_community_csb(
             resp.raise_for_status()
             data = resp.json()
         communities_api = data.get("fimaNfipCommunities", [])
+        if cid_wanted:
+            for c in communities_api:
+                if (c.get("communityNumber") or "").strip() == cid_wanted:
+                    return {"csb_community_id": c.get("communityNumber", ""),
+                            "csb_community_name": c.get("communityName", "")}
         city_norm = city.lower().strip()
         for c in communities_api:
             c_name = (c.get("communityName") or "").lower()
