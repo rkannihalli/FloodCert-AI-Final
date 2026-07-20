@@ -144,6 +144,62 @@ async def geocode_address(address: str) -> Optional[dict]:
     """
     geocode_q = re.sub(r"\s{2,}", " ", _LOT_PATTERN.sub("", address)).strip()
 
+    # ── Attempt 0: ArcGIS World Geocoder — rooftop precision only ────────────
+    # Tried FIRST, ahead of Census. The Census geocoder below does street
+    # address-range interpolation: it estimates a point along the street
+    # segment rather than locating the actual structure, which can be off by
+    # tens of meters. Near a flood zone boundary (creek, levee, floodplain
+    # edge) that error is enough to flip the FEMA zone lookup (e.g. AE vs X).
+    # ArcGIS's "PointAddress"/"Subaddress" match types are rooftop-level —
+    # matched to the actual parcel/structure — so we prefer them when
+    # available and only fall back to the coarser Census interpolation
+    # otherwise.
+    try:
+        params = {
+            "SingleLine": geocode_q,
+            "f": "json",
+            "outFields": "Addr_type,Match_addr,RegionAbbr,Subregion,City",
+            "maxLocations": "3",
+            "forStorage": "false",
+        }
+        headers = {"User-Agent": "FEMA-FloodCert-Generator/1.0"}
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(ARCGIS_GEO_URL, params=params, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+
+        _ARCGIS_ROOFTOP = {"PointAddress", "Subaddress"}
+        best_r = None
+        for c in data.get("candidates", []):
+            score     = c.get("score", 0)
+            addr_type = (c.get("attributes") or {}).get("Addr_type", "")
+            if score >= 90 and addr_type in _ARCGIS_ROOFTOP:
+                best_r = c
+                break
+
+        if best_r:
+            loc     = best_r.get("location", {})
+            lat_r   = float(loc.get("y", 0))
+            lon_r   = float(loc.get("x", 0))
+            attrs_r = best_r.get("attributes") or {}
+            result = {
+                "lat": lat_r,
+                "lon": lon_r,
+                "matched_address": best_r.get("address", geocode_q),
+                "city": (attrs_r.get("City") or "").title(),
+                "state_abbr": (attrs_r.get("RegionAbbr") or "").upper(),
+                "state_fips": "",
+                "county_fips": "",
+                "county_name": (attrs_r.get("Subregion") or "").replace(" County", "").strip(),
+                "geocode_precision": "rooftop",
+                "geocode_source": "arcgis_pointaddress",
+            }
+            if _geocode_plausible(geocode_q, result["matched_address"]):
+                return result
+            print(f"Geocoding (ArcGIS rooftop) plausibility rejected: {result['matched_address']!r}")
+    except Exception as e:
+        print(f"Geocoding (ArcGIS rooftop) error: {e}")
+
     # ── Attempt 1: Census geographies ────────────────────────────────────────
     try:
         params = {
@@ -182,6 +238,8 @@ async def geocode_address(address: str) -> Optional[dict]:
                 "state_fips": state_fips,
                 "county_fips": county_fips,
                 "county_name": county_raw.strip(),
+                "geocode_precision": "interpolated",
+                "geocode_source": "census_geographies",
             }
             if _geocode_plausible(geocode_q, result["matched_address"]):
                 return result
@@ -215,6 +273,8 @@ async def geocode_address(address: str) -> Optional[dict]:
                 "state_fips": "",
                 "county_fips": "",
                 "county_name": "",
+                "geocode_precision": "interpolated",
+                "geocode_source": "census_locations",
             }
             if _geocode_plausible(geocode_q, result["matched_address"]):
                 return result
@@ -260,6 +320,8 @@ async def geocode_address(address: str) -> Optional[dict]:
                 "state_fips": "",
                 "county_fips": "",
                 "county_name": (attrs_a.get("Subregion") or "").replace(" County", "").strip(),
+                "geocode_precision": "rooftop" if addr_type in ("PointAddress", "Subaddress") else "interpolated",
+                "geocode_source": "arcgis_broad",
             }
             if _geocode_plausible(geocode_q, result["matched_address"]):
                 return result
@@ -283,11 +345,13 @@ async def geocode_address(address: str) -> Optional[dict]:
 
         features = data.get("features", [])
         best = None
+        best_is_building = False
         for f in features:
             osm_value = (f.get("properties", {}).get("osm_value") or "").lower()
             if osm_value in ("house", "residential", "detached", "apartments",
                              "yes", "building", "terrace", "semi", "bungalow"):
                 best = f
+                best_is_building = True
                 break
         if best is None:
             for f in features:
@@ -320,6 +384,8 @@ async def geocode_address(address: str) -> Optional[dict]:
                     "state_fips": "",
                     "county_fips": "",
                     "county_name": county_p,
+                    "geocode_precision": "rooftop" if best_is_building else "approximate",
+                    "geocode_source": "photon",
                 }
                 if _geocode_plausible(geocode_q, result["matched_address"]):
                     return result
@@ -365,6 +431,8 @@ async def geocode_address(address: str) -> Optional[dict]:
                 "state_fips": "",
                 "county_fips": "",
                 "county_name": county_raw,
+                "geocode_precision": "approximate",
+                "geocode_source": "nominatim",
             }
             if _geocode_plausible(geocode_q, result["matched_address"]):
                 return result
@@ -410,6 +478,8 @@ async def geocode_address(address: str) -> Optional[dict]:
                     "state_fips": "",
                     "county_fips": "",
                     "county_name": county_raw,
+                    "geocode_precision": "approximate",
+                    "geocode_source": "nominatim_normalized",
                 }
                 if _geocode_plausible(geocode_q, result["matched_address"]):
                     return result
@@ -458,6 +528,8 @@ async def geocode_address(address: str) -> Optional[dict]:
                     "state_fips": "",
                     "county_fips": "",
                     "county_name": county_raw,
+                    "geocode_precision": "approximate",
+                    "geocode_source": "nominatim_minimal",
                 }
                 if zip_r and zip_r in geocode_q:
                     print(f"Geocoding (minimal ZIP fallback) accepted for: {address!r}")
@@ -529,6 +601,14 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
         # If >= 60% of sample points are non-SFHA, treat as non-SFHA (boundary case)
         total = len(results)
         non_sfha_pct = len(non_sfha_results) / total if total > 0 else 0
+        # "boundary_case" flags any address where the samples didn't agree —
+        # i.e. the geocoded point sits close enough to a zone line that
+        # nearby offsets land on different sides of it. When paired with a
+        # non-rooftop geocode (see geocode_precision), this is exactly the
+        # situation that produced false AE/X results: an imprecise point
+        # near a boundary can vote either way depending on where it happens
+        # to land.
+        boundary_case = bool(sfha_results) and bool(non_sfha_results)
         if non_sfha_pct >= 0.6:
             best = non_sfha_results[0]
             print(f"[NFHL] Boundary: {len(sfha_results)} SFHA vs {len(non_sfha_results)} non-SFHA ({non_sfha_pct:.0%}) — using non-SFHA")
@@ -542,11 +622,12 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
             "zone_subtype": best.get("ZONE_SUBTY") or "",
             "esri_dfirm_id": best.get("DFIRM_ID") or "",
             "in_sfha": best.get("SFHA_TF", "F") == "T",
+            "boundary_case": boundary_case,
         }
     except Exception as e:
         print(f"FEMA flood zone query error: {e}")
 
-    return {"flood_zone": "X", "in_sfha": False, "zone_subtype": "", "esri_dfirm_id": ""}
+    return {"flood_zone": "X", "in_sfha": False, "zone_subtype": "", "esri_dfirm_id": "", "boundary_case": False}
 
 
 async def _query_nfhl_at_offset(lat: float, lon: float, dlat: float, dlon: float) -> dict:
@@ -1052,6 +1133,32 @@ def determine_flood_info(merged: dict) -> dict:
     csb_community_id   = (merged.get("csb_community_id") or "").strip()
     csb_community_name = (merged.get("csb_community_name") or "").strip()
     geocoded_city   = (merged.get("geocoded_city") or "").strip()
+    geocode_precision = (merged.get("geocode_precision") or "").strip()
+    boundary_case   = bool(merged.get("boundary_case", False))
+
+    # Zone confidence: a non-rooftop geocode near a zone boundary is exactly
+    # the failure mode that produces a wrong AE/X call — the point can land
+    # on either side of the line depending on interpolation error. Flag it
+    # rather than silently reporting a single zone as if it were certain.
+    if geocode_precision == "rooftop":
+        zone_confidence = "high"
+        zone_confidence_note = ""
+    elif boundary_case:
+        zone_confidence = "low"
+        zone_confidence_note = (
+            "Property is near a flood zone boundary and was geocoded with "
+            "approximate (non-rooftop) precision. The zone call may be "
+            "unreliable — recommend verifying against the FEMA Map Service "
+            "Center or a rooftop-level geocode before relying on this "
+            "determination."
+        )
+    else:
+        zone_confidence = "medium"
+        zone_confidence_note = (
+            "Geocoded with approximate (non-rooftop) precision. Zone is not "
+            "near a detected boundary, but verify for high-value or "
+            "boundary-adjacent properties."
+        )
 
     flood_zone_out = _classify_x_zone(flood_zone, zone_subtype)
     zone_key = flood_zone_out
@@ -1138,6 +1245,9 @@ def determine_flood_info(merged: dict) -> dict:
         "community_number": map_number,
         "community_name": community_name_out,
         "county": county_name,
+        "geocode_precision": geocode_precision or "unknown",
+        "zone_confidence": zone_confidence,
+        "zone_confidence_note": zone_confidence_note,
     }
 
 

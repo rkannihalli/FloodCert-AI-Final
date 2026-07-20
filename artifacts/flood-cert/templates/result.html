@@ -131,12 +131,25 @@
       </div>
     </div>
 
+    {% if data.zone_confidence == "low" %}
+    <div class="detail-card" style="border: 2px solid #c0392b; background: #fdecea;">
+      <div class="detail-card-header" style="color:#c0392b;">⚠ Zone Determination Needs Verification</div>
+      <div class="detail-card-body">
+        <div class="detail-row"><span class="detail-value" style="color:#c0392b;">{{ data.zone_confidence_note }}</span></div>
+      </div>
+    </div>
+    {% endif %}
+
     <div class="detail-card">
       <div class="detail-card-header">FIRM &amp; Community Data</div>
       <div class="detail-card-body">
         <div class="detail-row">
           <span class="detail-label">Flood Zone</span>
           <span id="zoneDetailVal" class="detail-value">{{ _zl.get(data.flood_zone, data.flood_zone) }}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Geocode Precision</span>
+          <span class="detail-value">{{ data.geocode_precision }}</span>
         </div>
         <div class="detail-row">
           <span class="detail-label">SFHA Status</span>

@@ -1045,6 +1045,7 @@ async def generate(
         "state_fips": geo_result.get("state_fips", ""),
         "county_fips": geo_result.get("county_fips", ""),
         "county_name": geo_result.get("county_name", ""),
+        "geocode_precision": geo_result.get("geocode_precision", ""),
     })
     flood_info["nfip_participates"] = community_data.get("nfip_participates", True)
 
@@ -1101,6 +1102,9 @@ async def generate(
         "community_number": flood_info["community_number"],
         "community_name": flood_info["community_name"],
         "county": flood_info.get("county", ""),
+        "geocode_precision": flood_info.get("geocode_precision", ""),
+        "zone_confidence": flood_info.get("zone_confidence", ""),
+        "zone_confidence_note": flood_info.get("zone_confidence_note", ""),
         "determination_date": date.today().strftime("%B %d, %Y"),
         "determination_date_iso": date.today().isoformat(),
         "company_id": s_company_id,
@@ -1629,6 +1633,7 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str, company_id=N
         "state_fips": geo.get("state_fips", ""),
         "county_fips": geo.get("county_fips", ""),
         "county_name": geo.get("county_name", ""),
+        "geocode_precision": geo.get("geocode_precision", ""),
     })
     flood_info["nfip_participates"] = community_data.get("nfip_participates", True)
 
@@ -1647,6 +1652,9 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str, company_id=N
         "community_number": flood_info["community_number"],
         "community_name": flood_info["community_name"],
         "county": flood_info.get("county", ""),
+        "geocode_precision": flood_info.get("geocode_precision", ""),
+        "zone_confidence": flood_info.get("zone_confidence", ""),
+        "zone_confidence_note": flood_info.get("zone_confidence_note", ""),
         "nfip_participates": flood_info.get("nfip_participates", True),
         "determination_date": det_date,
         "determination_date_iso": det_date_iso,
