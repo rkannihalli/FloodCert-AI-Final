@@ -666,13 +666,15 @@ async def _query_nfhl_at_offset(lat: float, lon: float, dlat: float, dlon: float
         return {"flood_zone": "X", "in_sfha": False}
 
 
-async def query_nfip_community(lat: float, lon: float) -> dict:
+async def query_nfip_community(lat: float, lon: float, geocoded_city: str = "") -> dict:
     """Query NFHL Layer 22 (Political Jurisdictions) for NFIP community name and CID.
     
     Strategy:
     1. Point query — most precise
     2. Small envelope fallback — catches edge cases near boundaries
-    3. Prefer city/town/village over county results
+    3. Disambiguate using the geocoded city name when multiple overlapping
+       jurisdictions are returned (see note below on why "prefer city" alone
+       is not reliable)
     """
     queries = [
         {
@@ -690,11 +692,22 @@ async def query_nfip_community(lat: float, lon: float) -> dict:
     ]
     
     _COUNTY_WORDS = {"county", "parish", "borough", "unincorporated", "areas"}
+    _JURIS_PREFIXES = ("city of ", "town of ", "village of ", "township of ")
     
     def _is_city_level(name: str) -> bool:
         """Return True if this is a city/town/village — not a county."""
         n = name.lower()
         return not any(w in n for w in _COUNTY_WORDS)
+
+    def _normalize_juris_name(name: str) -> str:
+        n = name.lower().strip()
+        for p in _JURIS_PREFIXES:
+            if n.startswith(p):
+                n = n[len(p):]
+        # Handle "Beech Grove, City of" style suffix ordering too
+        if n.endswith(", city") or n.endswith(", town") or n.endswith(", village"):
+            n = n.rsplit(",", 1)[0]
+        return re.sub(r"[^a-z0-9]", "", n)
     
     all_features = []
     
@@ -732,10 +745,54 @@ async def query_nfip_community(lat: float, lon: float) -> dict:
         if cid and cid not in seen:
             seen.add(cid)
             unique.append(f)
-    
-    # Prefer city/town/village over county
-    city_features = [f for f in unique if _is_city_level(f["attributes"].get("POL_NAME1") or "")]
-    best = city_features[0] if city_features else unique[0]
+
+    community_confidence = "high"
+    community_confidence_note = ""
+
+    if len(unique) == 1:
+        best = unique[0]
+    else:
+        # Multiple overlapping jurisdictions at this point — normal, since
+        # FEMA's Layer 22 returns both a city polygon and its underlying
+        # county polygon for any point inside an incorporated city. Blindly
+        # preferring "any city-level result" here is wrong about as often as
+        # it's right: for boundary/enclave properties (e.g. a city entirely
+        # surrounded by a larger consolidated city, or an address just
+        # outside a city's actual limits despite a nearby postal city name)
+        # the correct answer can be the county, or a different neighboring
+        # jurisdiction entirely.
+        #
+        # The geocoded city name is a real, independent signal for which
+        # jurisdiction is correct — use it first. Only fall back to the
+        # "prefer city" heuristic as a last resort, and flag that fallback
+        # as low-confidence so it gets reviewed rather than silently trusted.
+        geo_city_norm = _normalize_juris_name(geocoded_city) if geocoded_city else ""
+        name_matched = None
+        if geo_city_norm:
+            for f in unique:
+                cand_name = _normalize_juris_name(f["attributes"].get("POL_NAME1") or "")
+                if cand_name and (cand_name == geo_city_norm or
+                                   cand_name in geo_city_norm or geo_city_norm in cand_name):
+                    name_matched = f
+                    break
+
+        if name_matched is not None:
+            best = name_matched
+        else:
+            city_features = [f for f in unique if _is_city_level(f["attributes"].get("POL_NAME1") or "")]
+            best = city_features[0] if city_features else unique[0]
+            candidate_names = ", ".join(
+                (f["attributes"].get("POL_NAME1") or "?") for f in unique
+            )
+            community_confidence = "low"
+            community_confidence_note = (
+                f"Multiple overlapping jurisdictions found near this point "
+                f"({candidate_names}) and none matched the geocoded city name "
+                f"({geocoded_city or 'unknown'}). Defaulted to the incorporated "
+                f"city result, but this may be incorrect — recommend verifying "
+                f"the NFIP community against FEMA's Community Status Book "
+                f"before relying on it."
+            )
     
     attrs = best["attributes"]
     ani_tf = (attrs.get("ANI_TF") or "F").upper().strip()
@@ -746,8 +803,10 @@ async def query_nfip_community(lat: float, lon: float) -> dict:
         "community_name": (attrs.get("POL_NAME1") or "").strip(),
         "nfip_participates": nfip_participates,
         "ani_tf": ani_tf,
+        "community_confidence": community_confidence,
+        "community_confidence_note": community_confidence_note,
     }
-    print(f"NFIP community (Layer 22): {result['community_id']} / {result['community_name']} participates={nfip_participates}")
+    print(f"NFIP community (Layer 22): {result['community_id']} / {result['community_name']} participates={nfip_participates} confidence={community_confidence}")
     return result
 
 
@@ -847,6 +906,31 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "", commun
             raw = (attrs.get("FIRM_PAN") or "").strip()
             dfirm = (attrs.get("DFIRM_ID") or "").strip()
 
+            # If more than one *distinct* FIRM panel number survived the
+            # community/county filtering, the point is sitting near a panel
+            # tile's grid boundary and the query genuinely returned adjacent
+            # tiles as intersecting results — not just duplicate rows of the
+            # same panel. We don't fetch full polygon geometry here
+            # (returnGeometry=false), so we can't verify true point-in-polygon
+            # containment among them. Rather than silently pick one (which is
+            # a coin flip near the boundary), flag it so it can be verified.
+            distinct_panels = {
+                (f["attributes"].get("FIRM_PAN") or "").strip()
+                for f in features
+                if (f["attributes"].get("FIRM_PAN") or "").strip()
+            }
+            panel_confidence = "high"
+            panel_confidence_note = ""
+            if len(distinct_panels) > 1:
+                panel_confidence = "low"
+                panel_confidence_note = (
+                    f"Property is near a FIRM panel tile boundary — {len(distinct_panels)} "
+                    f"distinct panels ({', '.join(sorted(distinct_panels))}) intersect this "
+                    f"location and the correct one could not be verified without full "
+                    f"polygon geometry. Recommend confirming the panel number against the "
+                    f"FEMA Map Service Center before relying on it."
+                )
+
             firm_pan = ""
             if raw:
                 raw_clean = raw.replace(" ", "")
@@ -861,6 +945,8 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "", commun
             return {
                 "firm_panel_l3": firm_pan,
                 "eff_date": attrs.get("EFF_DATE"),
+                "panel_confidence": panel_confidence,
+                "panel_confidence_note": panel_confidence_note,
             }
         except Exception as e:
             print(f"FIRM panel query (Layer 3, {q['geometryType']}) error: {e}")
@@ -1285,6 +1371,10 @@ def determine_flood_info(merged: dict) -> dict:
         "geocode_precision": geocode_precision or "unknown",
         "zone_confidence": zone_confidence,
         "zone_confidence_note": zone_confidence_note,
+        "community_confidence": (merged.get("community_confidence") or "high"),
+        "community_confidence_note": (merged.get("community_confidence_note") or ""),
+        "panel_confidence": (merged.get("panel_confidence") or "high"),
+        "panel_confidence_note": (merged.get("panel_confidence_note") or ""),
     }
 
 

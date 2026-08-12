@@ -140,6 +140,24 @@
     </div>
     {% endif %}
 
+    {% if data.community_confidence == "low" %}
+    <div class="detail-card" style="border: 2px solid #c0392b; background: #fdecea;">
+      <div class="detail-card-header" style="color:#c0392b;">⚠ Community/Jurisdiction Needs Verification</div>
+      <div class="detail-card-body">
+        <div class="detail-row"><span class="detail-value" style="color:#c0392b;">{{ data.community_confidence_note }}</span></div>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if data.panel_confidence == "low" %}
+    <div class="detail-card" style="border: 2px solid #c0392b; background: #fdecea;">
+      <div class="detail-card-header" style="color:#c0392b;">⚠ FIRM Panel Needs Verification</div>
+      <div class="detail-card-body">
+        <div class="detail-row"><span class="detail-value" style="color:#c0392b;">{{ data.panel_confidence_note }}</span></div>
+      </div>
+    </div>
+    {% endif %}
+
     <div class="detail-card">
       <div class="detail-card-header">FIRM &amp; Community Data</div>
       <div class="detail-card-body">

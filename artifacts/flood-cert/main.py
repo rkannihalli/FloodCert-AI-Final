@@ -865,7 +865,7 @@ async def admin_live_test(request: Request):
 
         nfhl, community_data, tiger_data = await asyncio.gather(
             query_fema_nfhl(lat, lon),
-            query_nfip_community(lat, lon),
+            query_nfip_community(lat, lon, geo.get("city", "")),
             query_tigerweb_fips(lat, lon),
         )
         panel_data = await query_firm_panel(
@@ -902,6 +902,10 @@ async def admin_live_test(request: Request):
             "community_id": community_data.get("community_id", ""),
             "community_name": community_data.get("community_name", ""),
             "geocode_precision": geo.get("geocode_precision", ""),
+            "community_confidence": community_data.get("community_confidence", ""),
+            "community_confidence_note": community_data.get("community_confidence_note", ""),
+            "panel_confidence": panel_data.get("panel_confidence", ""),
+            "panel_confidence_note": panel_data.get("panel_confidence_note", ""),
         })
     except Exception as exc:
         return JSONResponse(
@@ -1011,7 +1015,7 @@ async def generate(
     # Step 1: Get authoritative FIPS from TIGERweb
     zone_data, community_data, county_data, tiger_data = await asyncio.gather(
         query_fema_nfhl(geo_result["lat"], geo_result["lon"]),
-        query_nfip_community(geo_result["lat"], geo_result["lon"]),
+        query_nfip_community(geo_result["lat"], geo_result["lon"], geo_result.get("city", "")),
         query_county_name(geo_result["lat"], geo_result["lon"]),
         query_tigerweb_fips(geo_result["lat"], geo_result["lon"]),
     )
@@ -1029,7 +1033,7 @@ async def generate(
         loma_lat = float(loma.get("lat", 0) or geo_result["lat"])
         loma_lon = float(loma.get("lon", 0) or geo_result["lon"])
         if loma_lat and loma_lon:
-            community_data_retry = await query_nfip_community(loma_lat, loma_lon)
+            community_data_retry = await query_nfip_community(loma_lat, loma_lon, geo_result.get("city", ""))
             if community_data_retry.get("community_id"):
                 print(f"[COMM] Layer 22 retry with LOMA coords: {community_data_retry}")
                 community_data = community_data_retry
@@ -1115,6 +1119,10 @@ async def generate(
         "geocode_precision": flood_info.get("geocode_precision", ""),
         "zone_confidence": flood_info.get("zone_confidence", ""),
         "zone_confidence_note": flood_info.get("zone_confidence_note", ""),
+        "community_confidence": flood_info.get("community_confidence", ""),
+        "community_confidence_note": flood_info.get("community_confidence_note", ""),
+        "panel_confidence": flood_info.get("panel_confidence", ""),
+        "panel_confidence_note": flood_info.get("panel_confidence_note", ""),
         "determination_date": date.today().strftime("%B %d, %Y"),
         "determination_date_iso": date.today().isoformat(),
         "company_id": s_company_id,
@@ -1627,7 +1635,7 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str, company_id=N
 
     zone_data, community_data, county_data, tiger_data = await asyncio.gather(
         query_fema_nfhl(geo["lat"], geo["lon"]),
-        query_nfip_community(geo["lat"], geo["lon"]),
+        query_nfip_community(geo["lat"], geo["lon"], geo.get("city", "")),
         query_county_name(geo["lat"], geo["lon"]),
         query_tigerweb_fips(geo["lat"], geo["lon"]),
     )
@@ -1676,6 +1684,10 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str, company_id=N
         "geocode_precision": flood_info.get("geocode_precision", ""),
         "zone_confidence": flood_info.get("zone_confidence", ""),
         "zone_confidence_note": flood_info.get("zone_confidence_note", ""),
+        "community_confidence": flood_info.get("community_confidence", ""),
+        "community_confidence_note": flood_info.get("community_confidence_note", ""),
+        "panel_confidence": flood_info.get("panel_confidence", ""),
+        "panel_confidence_note": flood_info.get("panel_confidence_note", ""),
         "nfip_participates": flood_info.get("nfip_participates", True),
         "determination_date": det_date,
         "determination_date_iso": det_date_iso,
