@@ -933,10 +933,26 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "", commun
 
             firm_pan = ""
             if raw:
-                raw_clean = raw.replace(" ", "")
-                if dfirm and raw_clean[:6] != dfirm:
-                    print(f"[PANEL] FIRM_PAN/DFIRM_ID mismatch — discarding unreliable FIRM_PAN "
-                          f"(FIRM_PAN={raw_clean!r} DFIRM_ID={dfirm!r})")
+                raw_clean = raw.replace(" ", "").strip().upper()
+                dfirm_norm = (dfirm or "").strip().upper()
+                # Compare only the county FIPS digits (first 5 characters) —
+                # not the full 6-character string including the community
+                # suffix letter. For some states' NFHL Layer 3 data (North
+                # Carolina in particular — confirmed against test data where
+                # every single NC address hit this path), the DFIRM_ID
+                # attribute's suffix letter doesn't match FIRM_PAN's even
+                # though both describe the same valid, correct panel. The
+                # old 6-character exact-match check discarded the entire
+                # FIRM_PAN in that case, which made determine_flood_info()
+                # fall back to a fabricated "county-prefix + C" placeholder
+                # that's missing the actual panel digits and suffix — i.e.
+                # exactly the truncated community_number pattern seen across
+                # ~25 NC test loans. The 5-digit county comparison still
+                # catches genuine wrong-county mismatches (the real purpose
+                # of this guard) without discarding valid same-county data.
+                if dfirm_norm and raw_clean[:5] != dfirm_norm[:5]:
+                    print(f"[PANEL] FIRM_PAN/DFIRM_ID county mismatch — discarding unreliable FIRM_PAN "
+                          f"(FIRM_PAN={raw_clean!r} DFIRM_ID={dfirm_norm!r})")
                 elif len(raw_clean) >= 7:
                     firm_pan = f"{raw_clean[:6]} {raw_clean[6:]}"
                 else:
@@ -1303,6 +1319,8 @@ def determine_flood_info(merged: dict) -> dict:
     csb_panel_date = (merged.get("csb_panel_date") or "").strip()
     panel_effective_date_override = ""
 
+    used_incomplete_placeholder = False
+
     # Prefer CSB historical community panel over Layer 3 countywide panel
     # when the CSB panel matches the community CID (community-specific panel)
     if csb_panel and community_id:
@@ -1316,12 +1334,14 @@ def determine_flood_info(merged: dict) -> dict:
             map_number = firm_panel_l3
         elif esri_dfirm and len(esri_dfirm) >= 5:
             map_number = f"{esri_dfirm[:5]}C"
+            used_incomplete_placeholder = True
         else:
             map_number = "Not Available"
     elif has_full_l3_panel:
         map_number = firm_panel_l3
     elif esri_dfirm and len(esri_dfirm) >= 5:
         map_number = f"{esri_dfirm[:5]}C"
+        used_incomplete_placeholder = True
     else:
         map_number = "Not Available"
 
@@ -1373,8 +1393,15 @@ def determine_flood_info(merged: dict) -> dict:
         "zone_confidence_note": zone_confidence_note,
         "community_confidence": (merged.get("community_confidence") or "high"),
         "community_confidence_note": (merged.get("community_confidence_note") or ""),
-        "panel_confidence": (merged.get("panel_confidence") or "high"),
-        "panel_confidence_note": (merged.get("panel_confidence_note") or ""),
+        "panel_confidence": ("low" if used_incomplete_placeholder else (merged.get("panel_confidence") or "high")),
+        "panel_confidence_note": (
+            "The full FIRM panel number could not be retrieved for this "
+            "property, so the community/county prefix is shown without the "
+            "panel digits and suffix that CoreLogic and other providers "
+            "include (e.g. '37067C' instead of '37067C 6867J'). Recommend "
+            "confirming the complete panel number against the FEMA Map "
+            "Service Center before relying on it."
+        ) if used_incomplete_placeholder else (merged.get("panel_confidence_note") or ""),
     }
 
 
