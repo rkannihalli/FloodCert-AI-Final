@@ -837,7 +837,16 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "", commun
                 data = resp.json()
             features = data.get("features", [])
             if not features:
+                print(f"[PANEL-DEBUG] Layer 3 query ({q['geometryType']}) returned 0 features "
+                      f"for county_fips={county_fips!r} community_id={community_id!r}")
                 continue
+
+            print(f"[PANEL-DEBUG] Layer 3 query ({q['geometryType']}) returned "
+                  f"{len(features)} feature(s) for county_fips={county_fips!r} community_id={community_id!r}:")
+            for f in features:
+                a = f["attributes"]
+                print(f"[PANEL-DEBUG]   FIRM_PAN={a.get('FIRM_PAN')!r} DFIRM_ID={a.get('DFIRM_ID')!r} "
+                      f"PANEL_TYP={a.get('PANEL_TYP')!r} EFF_DATE={a.get('EFF_DATE')!r}")
 
             # Filter priority: community_id numeric match > county_fips > state prefix
             # DFIRM_ID format: SSCCCX (state+county FIPS + letter) e.g. 09015C
@@ -905,6 +914,8 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "", commun
                 attrs = features[0]["attributes"]
             raw = (attrs.get("FIRM_PAN") or "").strip()
             dfirm = (attrs.get("DFIRM_ID") or "").strip()
+            print(f"[PANEL-DEBUG] After filtering ({len(features)} candidate(s), matched={matched}): "
+                  f"chosen FIRM_PAN={raw!r} DFIRM_ID={dfirm!r} PANEL_TYP={attrs.get('PANEL_TYP')!r}")
 
             # If more than one *distinct* FIRM panel number survived the
             # community/county filtering, the point is sitting near a panel
@@ -958,6 +969,7 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "", commun
                 else:
                     firm_pan = raw_clean
 
+            print(f"[PANEL-DEBUG] Final firm_panel_l3={firm_pan!r}")
             return {
                 "firm_panel_l3": firm_pan,
                 "eff_date": attrs.get("EFF_DATE"),
