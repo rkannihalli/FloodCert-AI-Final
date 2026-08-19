@@ -825,7 +825,7 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "", commun
             **q,
             "inSR": "4326",
             "spatialRel": "esriSpatialRelIntersects",
-            "outFields": "FIRM_PAN,EFF_DATE,DFIRM_ID,PANEL_TYP",
+            "outFields": "*",
             "returnGeometry": "false",
             "resultRecordCount": "10",
             "f": "json",
@@ -844,9 +844,7 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "", commun
             print(f"[PANEL-DEBUG] Layer 3 query ({q['geometryType']}) returned "
                   f"{len(features)} feature(s) for county_fips={county_fips!r} community_id={community_id!r}:")
             for f in features:
-                a = f["attributes"]
-                print(f"[PANEL-DEBUG]   FIRM_PAN={a.get('FIRM_PAN')!r} DFIRM_ID={a.get('DFIRM_ID')!r} "
-                      f"PANEL_TYP={a.get('PANEL_TYP')!r} EFF_DATE={a.get('EFF_DATE')!r}")
+                print(f"[PANEL-DEBUG]   ALL ATTRIBUTES: {f['attributes']}")
 
             # Filter priority: community_id numeric match > county_fips > state prefix
             # DFIRM_ID format: SSCCCX (state+county FIPS + letter) e.g. 09015C
