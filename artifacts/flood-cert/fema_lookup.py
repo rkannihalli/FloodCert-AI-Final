@@ -589,7 +589,18 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
                     results.append(r)
 
         if not results:
-            return {"flood_zone": "X", "in_sfha": False, "zone_subtype": "", "esri_dfirm_id": ""}
+            # Every sample point came back with zero features from FEMA's
+            # zone layer — this is a genuine data-coverage gap (confirmed
+            # against real test data: rural Toole County, MT returned zero
+            # features from both the jurisdiction and panel layers too),
+            # not a real "Zone X" determination. Presenting this identically
+            # to a confirmed Zone X — "Non-Special Flood Hazard, Not
+            # Required" — silently asserts something we don't actually
+            # know. Flag it honestly instead.
+            print(f"[ZONE-DEBUG] lat={lat} lon={lon} — 0/9 sample points returned any zone "
+                  f"data; FEMA has no NFHL coverage at this location.")
+            return {"flood_zone": "", "in_sfha": False, "zone_subtype": "", "esri_dfirm_id": "",
+                    "boundary_case": False, "zone_data_available": False}
 
         # Count SFHA vs non-SFHA votes
         sfha_results = [r for r in results if r.get("SFHA_TF") == "T"]
@@ -623,11 +634,13 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
             "esri_dfirm_id": best.get("DFIRM_ID") or "",
             "in_sfha": best.get("SFHA_TF", "F") == "T",
             "boundary_case": boundary_case,
+            "zone_data_available": True,
         }
     except Exception as e:
         print(f"FEMA flood zone query error: {e}")
 
-    return {"flood_zone": "X", "in_sfha": False, "zone_subtype": "", "esri_dfirm_id": "", "boundary_case": False}
+    return {"flood_zone": "", "in_sfha": False, "zone_subtype": "", "esri_dfirm_id": "",
+            "boundary_case": False, "zone_data_available": False}
 
 
 async def _query_nfhl_at_offset(lat: float, lon: float, dlat: float, dlon: float) -> dict:
@@ -967,6 +980,32 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "", commun
                 else:
                     firm_pan = raw_clean
 
+            # BEST-EFFORT, UNVERIFIED: some NC (and possibly other
+            # "Statewide, Panel Printed") NFHL records use an internal
+            # statewide FIRM_PAN numbering scheme that doesn't share a
+            # prefix with DFIRM_ID at all (confirmed: Walkertown NC's
+            # FIRM_PAN='3710686700J' vs DFIRM_ID='37067C' — not just a
+            # suffix-letter mismatch, a genuinely different numbering
+            # system). CoreLogic's format is DFIRM_ID + panel digits +
+            # suffix (e.g. "37067C 6867J"). FEMA's NFHL schema commonly
+            # carries the panel digits and suffix in separate PANEL/SUFFIX
+            # attributes alongside FIRM_PAN. If present and populated, use
+            # them to build the traditional format directly. This is safe
+            # by construction: if these fields are absent or don't produce
+            # a plausible value, firm_pan is left as computed above
+            # (today's existing behavior) rather than being overwritten
+            # with something worse.
+            if dfirm:
+                panel_num = str(attrs.get("PANEL") or attrs.get("PANEL_NO") or
+                                 attrs.get("PANEL_NUM") or "").strip()
+                suffix = str(attrs.get("SUFFIX") or attrs.get("SUFF") or
+                             attrs.get("PANEL_SFX") or "").strip()
+                if panel_num and suffix and panel_num.isdigit() and len(suffix) == 1 and suffix.isalpha():
+                    candidate = f"{dfirm.strip().upper()} {panel_num.zfill(4)}{suffix.upper()}"
+                    print(f"[PANEL-DEBUG] Constructed candidate from PANEL/SUFFIX fields: {candidate!r} "
+                          f"(previous firm_pan was {firm_pan!r})")
+                    firm_pan = candidate
+
             print(f"[PANEL-DEBUG] Final firm_panel_l3={firm_pan!r}")
             return {
                 "firm_panel_l3": firm_pan,
@@ -977,7 +1016,22 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "", commun
         except Exception as e:
             print(f"FIRM panel query (Layer 3, {q['geometryType']}) error: {e}")
 
-    return {}
+    # No features found at any query attempt (point or envelope fallback) —
+    # a genuine FEMA data coverage gap (confirmed against real rural test
+    # data: Toole County, MT had zero features here too). A bare {} would
+    # let downstream code silently default panel_confidence back to "high"
+    # even though we have no panel data at all.
+    return {
+        "firm_panel_l3": "",
+        "eff_date": None,
+        "panel_confidence": "low",
+        "panel_confidence_note": (
+            "No FIRM panel data is available from FEMA's live NFHL service "
+            "for this location. This may be a rural or unmapped area not "
+            "yet covered by FEMA's digital data. Verify manually via the "
+            "FEMA Map Service Center (msc.fema.gov)."
+        ),
+    }
 
 
 async def query_tigerweb_fips(lat: float, lon: float) -> dict:
@@ -1309,20 +1363,49 @@ def determine_flood_info(merged: dict) -> dict:
             "boundary-adjacent properties."
         )
 
-    flood_zone_out = _classify_x_zone(flood_zone, zone_subtype)
-    zone_key = flood_zone_out
-    description = FLOOD_ZONE_DESCRIPTIONS.get(
-        zone_key,
-        f"Flood Zone {flood_zone_out} — See FIRM panel for details",
-    )
+    zone_data_available = merged.get("zone_data_available", True)
 
-    sfha_bool = in_sfha if isinstance(in_sfha, bool) else flood_zone in SFHA_ZONES
-    sfha_status = "Yes" if sfha_bool else "No"
-    insurance_required = (
-        "Yes — Federal mandatory purchase requirement applies"
-        if sfha_bool
-        else "No — Flood insurance is not federally required"
-    )
+    if not zone_data_available:
+        # FEMA's NFHL zone layer returned zero features at every sample
+        # point — a genuine coverage gap (confirmed against real rural
+        # test data), not a real "Zone X" determination. Asserting
+        # "insurance not required" here would be presenting an unknown as
+        # a negative determination, which is the one thing this app must
+        # never silently do.
+        flood_zone_out = "UNKNOWN"
+        description = (
+            "FEMA's live flood zone data has no coverage at this location. "
+            "This does NOT mean the property is outside a flood hazard "
+            "area — it means a determination could not be made from "
+            "available digital data. Verify manually via the FEMA Map "
+            "Service Center (msc.fema.gov) or FEMA's regional office "
+            "before proceeding."
+        )
+        sfha_status = "Unknown"
+        insurance_required = "Undetermined — manual verification required before proceeding"
+        zone_confidence = "low"
+        zone_confidence_note = (
+            "No FEMA digital flood zone data is available for this "
+            "location. This is a data coverage gap, not a confirmed "
+            "determination — do not treat this as \"flood insurance not "
+            "required\" without manual verification against FEMA's Map "
+            "Service Center."
+        )
+    else:
+        flood_zone_out = _classify_x_zone(flood_zone, zone_subtype)
+        zone_key = flood_zone_out
+        description = FLOOD_ZONE_DESCRIPTIONS.get(
+            zone_key,
+            f"Flood Zone {flood_zone_out} — See FIRM panel for details",
+        )
+
+        sfha_bool = in_sfha if isinstance(in_sfha, bool) else flood_zone in SFHA_ZONES
+        sfha_status = "Yes" if sfha_bool else "No"
+        insurance_required = (
+            "Yes — Federal mandatory purchase requirement applies"
+            if sfha_bool
+            else "No — Flood insurance is not federally required"
+        )
 
     has_full_l3_panel = len(firm_panel_l3.replace(" ", "")) > 6
     csb_panel = (merged.get("csb_panel") or "").strip()

@@ -56,13 +56,14 @@
   </div>
 
   {% set sfha = data.sfha_status == 'Yes' %}
-  {% set undetermined = data.flood_zone == 'UNDETERMINED' %}
+  {% set undetermined = data.flood_zone in ('UNDETERMINED', 'UNKNOWN') %}
 
   <div id="zoneBanner" class="zone-banner {{ 'sfha' if sfha else ('undetermined' if undetermined else 'non-sfha') }}">
     {% set _zl = {'X': 'Zone X', 'X500': 'Zone X (Shaded)', 'X-LEVEE': 'Zone X Levee',
                   'A': 'Zone A', 'AE': 'Zone AE', 'AH': 'Zone AH', 'AO': 'Zone AO',
                   'AR': 'Zone AR', 'A99': 'Zone A99', 'V': 'Zone V', 'VE': 'Zone VE',
-                  'B': 'Zone B', 'C': 'Zone C', 'D': 'Zone D', 'UNDETERMINED': 'Undetermined'} %}
+                  'B': 'Zone B', 'C': 'Zone C', 'D': 'Zone D', 'UNDETERMINED': 'Undetermined',
+                  'UNKNOWN': 'No FEMA Data Available'} %}
     <div id="zoneBadge" class="zone-badge">{{ _zl.get(data.flood_zone, data.flood_zone) }}</div>
     <div class="zone-info">
       <h3 id="zoneTitle">
