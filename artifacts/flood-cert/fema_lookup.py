@@ -16,6 +16,18 @@ _LOT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Matches addresses combining two house numbers into one ungeocodable string,
+# e.g. "1108 and 1110 S Main St" or "1108 & 1110 S Main St". This isn't a
+# geocoding precision issue — it's an invalid input string; no geocoder can
+# resolve "two house numbers" to one point. Confirmed against test data
+# (Reidsville, NC address returned completely empty across every lookup).
+# Keep just the first house number, since that's what a person would
+# reasonably expect the primary determination to be for.
+_DUAL_ADDRESS_PATTERN = re.compile(
+    r"^(\d+)\s*(?:and|&)\s*\d+([\w\-]*)(\s+.*)$",
+    re.IGNORECASE,
+)
+
 _STREET_TYPE_RE = re.compile(
     r"\b(Drive|Dr|Street|St|Avenue|Ave|Boulevard|Blvd|Road|Rd|Lane|Ln|"
     r"Court|Ct|Circle|Cir|Place|Pl|Way|Terrace|Ter|Trail|Trl|"
@@ -143,6 +155,13 @@ async def geocode_address(address: str) -> Optional[dict]:
     7. Minimal query (house number + city + state + ZIP)
     """
     geocode_q = re.sub(r"\s{2,}", " ", _LOT_PATTERN.sub("", address)).strip()
+
+    dual_match = _DUAL_ADDRESS_PATTERN.match(geocode_q)
+    if dual_match:
+        cleaned = f"{dual_match.group(1)}{dual_match.group(2)}{dual_match.group(3)}".strip()
+        print(f"[GEOCODE] Dual house-number address detected — using first "
+              f"address only: {geocode_q!r} -> {cleaned!r}")
+        geocode_q = cleaned
 
     # ── Attempt 0: ArcGIS World Geocoder — rooftop precision only ────────────
     # Tried FIRST, ahead of Census. The Census geocoder below does street
@@ -706,7 +725,28 @@ async def query_nfip_community(lat: float, lon: float, geocoded_city: str = "") 
     
     _COUNTY_WORDS = {"county", "parish", "borough", "unincorporated", "areas"}
     _JURIS_PREFIXES = ("city of ", "town of ", "village of ", "township of ")
-    
+
+    # Known, well-documented cases where the property's postal/geocoded city
+    # name is itself a real, separately-incorporated city that nonetheless
+    # is NOT the correct NFIP jurisdiction — because it sits inside a larger
+    # consolidated city-county government as a legally "excluded" enclave.
+    # Confirmed against test data: Beech Grove and Lawrence, IN are both
+    # long-standing excluded municipalities within Indianapolis/Marion
+    # County's 1970 Unigov consolidation — CoreLogic consistently assigns
+    # these to "City of Indianapolis," not the enclave city, even though
+    # the enclave city is the postal/geocoded city name. Ordinary
+    # geocoded-city-name matching can never fix this (the postal name IS
+    # the wrong answer), so this needs an explicit, verifiable override
+    # rather than more heuristics. Keyed by (enclave, correct) pairs; only
+    # fires when BOTH appear together as actual candidates at this point,
+    # so it can't misfire on an unrelated "Lawrence" elsewhere in the US.
+    _ENCLAVE_OVERRIDES = {
+        "beechgrove": "indianapolis",
+        "lawrence": "indianapolis",
+        "speedway": "indianapolis",
+        "southport": "indianapolis",
+    }
+
     def _is_city_level(name: str) -> bool:
         """Return True if this is a city/town/village — not a county."""
         n = name.lower()
@@ -779,9 +819,25 @@ async def query_nfip_community(lat: float, lon: float, geocoded_city: str = "") 
         # jurisdiction is correct — use it first. Only fall back to the
         # "prefer city" heuristic as a last resort, and flag that fallback
         # as low-confidence so it gets reviewed rather than silently trusted.
+        # Check known enclave overrides first — these are cases where the
+        # geocoded city name would otherwise "successfully" match the WRONG
+        # candidate (see _ENCLAVE_OVERRIDES above), so ordinary name-matching
+        # must not get first say here.
+        enclave_matched = None
+        for f in unique:
+            cand_norm = _normalize_juris_name(f["attributes"].get("POL_NAME1") or "")
+            correct_target = _ENCLAVE_OVERRIDES.get(cand_norm)
+            if correct_target:
+                for f2 in unique:
+                    if correct_target in _normalize_juris_name(f2["attributes"].get("POL_NAME1") or ""):
+                        enclave_matched = f2
+                        break
+            if enclave_matched:
+                break
+
         geo_city_norm = _normalize_juris_name(geocoded_city) if geocoded_city else ""
         name_matched = None
-        if geo_city_norm:
+        if enclave_matched is None and geo_city_norm:
             for f in unique:
                 cand_name = _normalize_juris_name(f["attributes"].get("POL_NAME1") or "")
                 if cand_name and (cand_name == geo_city_norm or
@@ -789,7 +845,9 @@ async def query_nfip_community(lat: float, lon: float, geocoded_city: str = "") 
                     name_matched = f
                     break
 
-        if name_matched is not None:
+        if enclave_matched is not None:
+            best = enclave_matched
+        elif name_matched is not None:
             best = name_matched
         else:
             city_features = [f for f in unique if _is_city_level(f["attributes"].get("POL_NAME1") or "")]
@@ -806,6 +864,25 @@ async def query_nfip_community(lat: float, lon: float, geocoded_city: str = "") 
                 f"the NFIP community against FEMA's Community Status Book "
                 f"before relying on it."
             )
+
+    # A non-numeric or non-standard CID (e.g. "48FED" for a federal military
+    # reservation) is inherently a red flag: it means the resolved
+    # "community" isn't a normal, independently-assigned NFIP jurisdiction.
+    # A residential street address is very unlikely to genuinely sit on a
+    # federal enclave (confirmed against test data: a normal city street
+    # address in Killeen, TX resolved to "FORT HOOD" / CID "48FED" instead
+    # of Killeen City) — flag it rather than presenting it with confidence.
+    best_cid = (best["attributes"].get("CID") or "").strip()
+    if best_cid and not re.fullmatch(r"\d{6}", best_cid):
+        community_confidence = "low"
+        community_confidence_note = (
+            f"The resolved NFIP community ID ({best_cid!r}) is non-standard "
+            f"— often indicating a federal enclave or reservation rather "
+            f"than an ordinary incorporated city or county. If this "
+            f"property is not actually located on federal land, recommend "
+            f"verifying the correct civilian jurisdiction against FEMA's "
+            f"Community Status Book."
+        )
     
     attrs = best["attributes"]
     ani_tf = (attrs.get("ANI_TF") or "F").upper().strip()
