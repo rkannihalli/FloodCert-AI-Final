@@ -2,6 +2,20 @@ import re
 import httpx
 from typing import Optional
 
+# Optional — used only to resolve genuine panel-tile-boundary ambiguity by
+# testing real point-in-polygon containment against fetched FIRM panel
+# geometry. If not installed, that specific disambiguation is skipped and
+# the existing low-confidence flagging behavior is used instead (no crash,
+# no regression — see query_firm_panel).
+try:
+    from shapely.geometry import Point as _ShapelyPoint, Polygon as _ShapelyPolygon
+    _SHAPELY_AVAILABLE = True
+except ImportError:
+    _SHAPELY_AVAILABLE = False
+    print("[PANEL-DEBUG] shapely not installed — panel tile-boundary geometry "
+          "disambiguation disabled, falling back to confidence flagging only. "
+          "Install with: pip install shapely --break-system-packages")
+
 CENSUS_GEO_URL  = "https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress"
 CENSUS_LOC_URL  = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
 ARCGIS_GEO_URL  = (
@@ -602,10 +616,13 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             results = []
-            for dlat, dlon in offsets:
+            center_result = None
+            for i, (dlat, dlon) in enumerate(offsets):
                 r = await _query_zone_at_point(client, lon + dlon, lat + dlat)
                 if r:
                     results.append(r)
+                    if i == 0:  # (0, 0) — the actual rooftop-geocoded point
+                        center_result = r
 
         if not results:
             # Every sample point came back with zero features from FEMA's
@@ -627,25 +644,47 @@ async def query_fema_nfhl(lat: float, lon: float) -> dict:
         print(f"[ZONE-DEBUG] lat={lat} lon={lon} per-point results: "
               f"{[(r.get('FLD_ZONE'), r.get('SFHA_TF')) for r in results]}")
 
-        # Majority vote with 60% threshold
-        # If >= 60% of sample points are non-SFHA, treat as non-SFHA (boundary case)
-        total = len(results)
-        non_sfha_pct = len(non_sfha_results) / total if total > 0 else 0
         # "boundary_case" flags any address where the samples didn't agree —
         # i.e. the geocoded point sits close enough to a zone line that
-        # nearby offsets land on different sides of it. When paired with a
-        # non-rooftop geocode (see geocode_precision), this is exactly the
-        # situation that produced false AE/X results: an imprecise point
-        # near a boundary can vote either way depending on where it happens
-        # to land.
+        # nearby offsets land on different sides of it. Used only for the
+        # confidence flag below, never to override the center point's own
+        # determination (see note above center_result).
         boundary_case = bool(sfha_results) and bool(non_sfha_results)
-        if non_sfha_pct >= 0.6:
-            best = non_sfha_results[0]
-            print(f"[NFHL] Boundary: {len(sfha_results)} SFHA vs {len(non_sfha_results)} non-SFHA ({non_sfha_pct:.0%}) — using non-SFHA")
-        elif sfha_results:
-            best = sfha_results[0]
+
+        # The center point (the actual rooftop-geocoded location) already
+        # got an exact ArcGIS point-in-polygon test — it's not an
+        # approximation. The old logic below (majority vote across all 9
+        # samples, weighted toward SFHA whenever >=40% of samples were
+        # SFHA) could override this precise, correct center result with a
+        # noisier reading from one of the ~30-65m offset points — which is
+        # exactly what produced false AE results at Clinton, MA and Isle of
+        # Palms, SC: the true rooftop point was genuinely Zone X, but a
+        # minority of nearby offset samples crossed into an adjacent AE
+        # zone and won the vote anyway. The center point's own answer must
+        # be authoritative whenever we have it; the offsets exist only to
+        # flag confidence, not to outvote the one sample we know is
+        # precisely located.
+        if center_result is not None:
+            best = center_result
+            if boundary_case:
+                print(f"[NFHL] Boundary case near center point — trusting center's own "
+                      f"determination ({center_result.get('FLD_ZONE')}) over "
+                      f"{len(sfha_results)} SFHA / {len(non_sfha_results)} non-SFHA offset votes")
         else:
-            best = results[0]
+            # Center point itself returned no data (a genuine edge case,
+            # e.g. sitting exactly on a shared boundary line) — fall back
+            # to the offset-majority approach since there's no single
+            # precise anchor point available.
+            total = len(results)
+            non_sfha_pct = len(non_sfha_results) / total if total > 0 else 0
+            if non_sfha_pct >= 0.6:
+                best = non_sfha_results[0]
+                print(f"[NFHL] No center result; boundary vote: {len(sfha_results)} SFHA vs "
+                      f"{len(non_sfha_results)} non-SFHA ({non_sfha_pct:.0%}) — using non-SFHA")
+            elif sfha_results:
+                best = sfha_results[0]
+            else:
+                best = results[0]
 
         return {
             "flood_zone": (best.get("FLD_ZONE") or "X").strip(),
@@ -1021,14 +1060,70 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "", commun
             panel_confidence = "high"
             panel_confidence_note = ""
             if len(distinct_panels) > 1:
-                panel_confidence = "low"
-                panel_confidence_note = (
-                    f"Property is near a FIRM panel tile boundary — {len(distinct_panels)} "
-                    f"distinct panels ({', '.join(sorted(distinct_panels))}) intersect this "
-                    f"location and the correct one could not be verified without full "
-                    f"polygon geometry. Recommend confirming the panel number against the "
-                    f"FEMA Map Service Center before relying on it."
-                )
+                # Genuine ambiguity: more than one FIRM panel tile actually
+                # intersects this point. Attribute-only queries can't tell
+                # us which one truly contains the point (vs. merely
+                # touching its shared boundary edge) — that requires real
+                # polygon geometry. Re-query the same location, this time
+                # asking for geometry, and test strict point-in-polygon
+                # containment directly instead of guessing.
+                resolved = False
+                if _SHAPELY_AVAILABLE:
+                    try:
+                        geom_params = {
+                            **q,
+                            "inSR": "4326",
+                            "spatialRel": "esriSpatialRelIntersects",
+                            "outFields": "FIRM_PAN,DFIRM_ID,PANEL_TYP",
+                            "returnGeometry": "true",
+                            "resultRecordCount": "10",
+                            "f": "json",
+                        }
+                        async with httpx.AsyncClient(timeout=12.0, verify=False) as client:
+                            geom_resp = await client.get(f"{NFHL_BASE}/3/query", params=geom_params)
+                            geom_resp.raise_for_status()
+                            geom_data = geom_resp.json()
+                        pt = _ShapelyPoint(lon, lat)
+                        containing_attrs = None
+                        for gf in geom_data.get("features", []):
+                            rings = (gf.get("geometry") or {}).get("rings")
+                            if not rings:
+                                continue
+                            try:
+                                poly = _ShapelyPolygon(rings[0], rings[1:] if len(rings) > 1 else None)
+                                if poly.is_valid and poly.contains(pt):
+                                    containing_attrs = gf["attributes"]
+                                    break
+                            except Exception as poly_err:
+                                print(f"[PANEL-DEBUG] Could not build polygon for one candidate: {poly_err}")
+                                continue
+                        if containing_attrs:
+                            attrs = containing_attrs
+                            print(f"[PANEL-DEBUG] Geometry check resolved tile-boundary ambiguity: "
+                                  f"point-in-polygon confirms FIRM_PAN="
+                                  f"{attrs.get('FIRM_PAN')!r}")
+                            resolved = True
+                        else:
+                            print(f"[PANEL-DEBUG] Geometry check found no strict containment among "
+                                  f"{len(distinct_panels)} candidates — point may sit exactly on a "
+                                  f"shared tile boundary. Keeping low-confidence flag.")
+                    except Exception as ge:
+                        print(f"[PANEL-DEBUG] Geometry-based panel disambiguation failed: {ge}")
+
+                if not resolved:
+                    panel_confidence = "low"
+                    panel_confidence_note = (
+                        f"Property is near a FIRM panel tile boundary — {len(distinct_panels)} "
+                        f"distinct panels ({', '.join(sorted(distinct_panels))}) intersect this "
+                        f"location and the correct one could not be verified. Recommend "
+                        f"confirming the panel number against the FEMA Map Service Center "
+                        f"before relying on it."
+                    )
+                    # Recompute raw/dfirm from the (unresolved) attrs already
+                    # selected above, unchanged from today's behavior.
+
+            raw = (attrs.get("FIRM_PAN") or "").strip()
+            dfirm = (attrs.get("DFIRM_ID") or "").strip()
 
             firm_pan = ""
             if raw:
