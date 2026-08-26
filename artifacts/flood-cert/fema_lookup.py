@@ -817,7 +817,7 @@ async def _query_nfhl_at_offset(lat: float, lon: float, dlat: float, dlon: float
         return {"flood_zone": "X", "in_sfha": False}
 
 
-async def query_nfip_community(lat: float, lon: float, geocoded_city: str = "") -> dict:
+async def query_nfip_community(lat: float, lon: float, geocoded_city: str = "", state_abbr: str = "") -> dict:
     """Query NFHL Layer 22 (Political Jurisdictions) for NFIP community name and CID.
     
     Strategy:
@@ -953,6 +953,23 @@ async def query_nfip_community(lat: float, lon: float, geocoded_city: str = "") 
                         break
             if enclave_matched:
                 break
+
+        # Independent cities (e.g. St. Louis city vs St. Louis County, MO;
+        # Baltimore city vs Baltimore County, MD; Virginia's 38 independent
+        # cities) are legally separate from any county -- including one
+        # that happens to share their name. The substring-based name match
+        # below ("stlouis" in "stlouiscounty") would otherwise select the
+        # namesake COUNTY whenever the geocoded city is itself an
+        # independent city, since the county's normalized name always
+        # contains the city's name as a prefix. Filter those collision
+        # candidates out first so the independent city itself gets picked.
+        if enclave_matched is None and state_abbr and geocoded_city and is_independent_city(geocoded_city, state_abbr):
+            _collision_filtered = [
+                f for f in unique
+                if not is_independent_city_county_collision(f["attributes"].get("POL_NAME1") or "", state_abbr)
+            ]
+            if _collision_filtered:
+                unique = _collision_filtered
 
         geo_city_norm = _normalize_juris_name(geocoded_city) if geocoded_city else ""
         name_matched = None
