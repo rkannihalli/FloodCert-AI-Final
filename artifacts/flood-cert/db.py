@@ -840,3 +840,14 @@ def init_loma_table():
                     looked_up_at TIMESTAMP DEFAULT NOW()
                 )
             """)
+        _run_migrations(conn, [
+            "ALTER TABLE loma_records ADD COLUMN IF NOT EXISTS project_category TEXT",
+            "ALTER TABLE loma_records ADD COLUMN IF NOT EXISTS status TEXT",
+            "ALTER TABLE loma_records ADD COLUMN IF NOT EXISTS outcome TEXT",
+            "ALTER TABLE loma_records ADD COLUMN IF NOT EXISTS reval_stat TEXT",
+            "ALTER TABLE loma_records ADD COLUMN IF NOT EXISTS community_id TEXT",
+            "ALTER TABLE loma_records ADD COLUMN IF NOT EXISTS community_name TEXT",
+            "ALTER TABLE loma_records ADD COLUMN IF NOT EXISTS date_ended TEXT",
+            "ALTER TABLE loma_records ADD COLUMN IF NOT EXISTS pdf_link TEXT",
+            "ALTER TABLE loma_records ADD COLUMN IF NOT EXISTS record_type TEXT",
+        ])

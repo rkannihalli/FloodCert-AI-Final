@@ -1779,27 +1779,112 @@ def determine_flood_info(merged: dict) -> dict:
 
 # ── LOMA / LOMR lookup ────────────────────────────────────────────────────────
 
+# Full-removal outcomes that are safe to auto-apply as an SFHA override --
+# anything else (partial removal, unknown, or a supersession/reevaluation
+# flag) must go to manual review instead. See REAL_LOMC field notes below.
+_LOMA_AUTO_REMOVAL_OUTCOMES = {"Property removed", "Property out as shown"}
+
+# REVAL_STAT values that mean this determination should NOT be trusted as
+# the final word on its own -- confirmed against live FEMA Layer 34 data.
+_LOMA_SUPERSEDED_REVAL_STATES = {"Superseded", "Reevaluated", "Contact Community"}
+
+
 async def check_loma_at_point(lat: float, lon: float) -> dict | None:
     """
-    Check for LOMA/LOMR at the given coordinates.
-    Strategy:
-      1. Check local loma_records DB cache first (handles manually entered LOMAs
-         and any previously fetched results) — zero latency, always wins.
-      2. Fall back to FEMA NFHL Layer 4 API (catches newly issued amendments).
-    Returns a dict if an effective removal from SFHA is found, None otherwise.
+    Check for a FEMA map-change determination at the given coordinates.
+
+    IMPORTANT -- confirmed against live FEMA NFHL data (Aug 2026): the field
+    names and layer this function used previously (Layer 4 "Base Index",
+    fields CASE_NO/STATUS/OUT_ZONE/EFF_DATE/AMEND_TYPE) do not exist on any
+    real NFHL layer -- Layer 4 is the DFIRM base-map file index, unrelated
+    to map changes. The correct layers, confirmed via FEMA's own MapServer
+    metadata, are:
+      - Layer 34 ("LOMAs"): actually covers LOMA, LOMR-F, LOMR-FW, and
+        LOMR-VZ determinations, discriminated by the PROJECTCATEGORY field.
+        Every sampled record has STATUS='Completed' -- CLOMRs (conditional,
+        not-yet-effective) are NOT present in this dataset at all, since
+        FEMA only publishes finalized determinations here. There is no
+        structured "revised zone" field (no OUT_ZONE-equivalent) -- OUTCOME
+        is free text, so this function never fabricates a specific zone
+        code; it only recommends a binary in/out-of-SFHA override, and only
+        for outcomes that are unambiguous.
+      - Layer 1 ("LOMRs"): revises the base FIRM directly. Once effective,
+        the current NFHL flood-zone layer (Layer 28, via query_fema_nfhl)
+        already reflects it -- so a LOMR match is informational evidence
+        only, never an override target here.
+
+    Returns a dict shaped:
+      {
+        "loma": {...} | None,   # LOMA/LOMR-F/LOMR-FW/LOMR-VZ match, if any
+        "lomr": {...} | None,   # LOMR match, if any (informational only)
+      }
+    or None if neither layer returned a match and the cache was empty.
+
+    "loma" dict fields (all straight from FEMA, nothing inferred beyond the
+    auto_removal_eligible flag):
+      case_number, project_category, status, outcome, reval_stat,
+      community_id, community_name, date_ended, pdf_link,
+      auto_removal_eligible (bool), supersession_flag (bool)
+
+    "lomr" dict fields:
+      case_number, status, eff_date, dfirm_id, note
     """
     from datetime import datetime, timezone
 
-    # ── 1. Local DB cache ─────────────────────────────────────────────────────
+    def _epoch_ms_to_iso(ms):
+        if not ms:
+            return None
+        try:
+            return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+        except Exception:
+            return None
+
+    def _build_loma_result(attrs: dict) -> dict:
+        outcome = (attrs.get("OUTCOME") or "").strip()
+        reval_stat = (attrs.get("REVAL_STAT") or "").strip()
+        case_no = attrs.get("CASENUMBER")
+        pdf_id = attrs.get("PDFHYPERLINKID")
+        supersession_flag = reval_stat in _LOMA_SUPERSEDED_REVAL_STATES
+        auto_eligible = (outcome in _LOMA_AUTO_REMOVAL_OUTCOMES) and not supersession_flag
+        return {
+            "case_number":       case_no,
+            "project_category":  attrs.get("PROJECTCATEGORY"),
+            "status":            attrs.get("STATUS"),
+            "outcome":           outcome or None,
+            "reval_stat":        reval_stat or None,
+            "community_id":      attrs.get("CID"),
+            "community_name":    attrs.get("COMMUNITYNAME"),
+            "date_ended":        _epoch_ms_to_iso(attrs.get("DATEENDED")),
+            "pdf_link": (
+                f"https://msc.fema.gov/portal/downloadProduct?productID={pdf_id}"
+                if pdf_id else None
+            ),
+            "auto_removal_eligible": auto_eligible,
+            "supersession_flag":     supersession_flag,
+        }
+
+    def _build_lomr_result(attrs: dict) -> dict:
+        return {
+            "case_number": attrs.get("CASE_NO"),
+            "status":      attrs.get("STATUS"),
+            "eff_date":    _epoch_ms_to_iso(attrs.get("EFF_DATE")),
+            "dfirm_id":    attrs.get("DFIRM_ID"),
+            "note": (
+                "This LOMR revises the base FIRM directly -- the current "
+                "flood zone determination already reflects it. Shown here "
+                "as supporting evidence, not applied as a separate override."
+            ),
+        }
+
+    # ── 1. Local DB cache (manually entered / previously fetched) ────────────
     try:
         from db import get_conn
         with get_conn() as conn:
             with conn.cursor() as cur:
-                # Match within ~500 metres (0.005 decimal degrees)
                 cur.execute("""
-                    SELECT case_number, outcome_zone, amendment_type,
-                           effective_date, original_zone,
-                           outcome_community_id, outcome_community_name
+                    SELECT case_number, project_category, status, outcome,
+                           reval_stat, community_id, community_name,
+                           date_ended, pdf_link, record_type
                     FROM loma_records
                     WHERE ABS(lat - %s) < 0.005
                       AND ABS(lon - %s) < 0.005
@@ -1809,81 +1894,103 @@ async def check_loma_at_point(lat: float, lon: float) -> dict | None:
                 row = cur.fetchone()
                 if row:
                     print(f"[LOMA] Cache hit: {row['case_number']} at ({lat},{lon})")
-                    return {
-                        "case_number":    row["case_number"],
-                        "status":         "Effective",
-                        "outcome_zone":   row["outcome_zone"],
-                        "effective_date": str(row["effective_date"]) if row["effective_date"] else None,
-                        "amendment_type": row["amendment_type"],
-                        "outcome_community_id":   row.get("outcome_community_id"),
-                        "outcome_community_name": row.get("outcome_community_name"),
+                    outcome = row.get("outcome") or ""
+                    reval_stat = row.get("reval_stat") or ""
+                    supersession_flag = reval_stat in _LOMA_SUPERSEDED_REVAL_STATES
+                    auto_eligible = (outcome in _LOMA_AUTO_REMOVAL_OUTCOMES) and not supersession_flag
+                    loma_result = {
+                        "case_number":       row["case_number"],
+                        "project_category":  row.get("project_category"),
+                        "status":            row.get("status"),
+                        "outcome":           outcome or None,
+                        "reval_stat":        reval_stat or None,
+                        "community_id":      row.get("community_id"),
+                        "community_name":    row.get("community_name"),
+                        "date_ended":        str(row["date_ended"]) if row.get("date_ended") else None,
+                        "pdf_link":          row.get("pdf_link"),
+                        "auto_removal_eligible": auto_eligible,
+                        "supersession_flag":     supersession_flag,
                     }
+                    return {"loma": loma_result, "lomr": None}
     except Exception as e:
         print(f"[LOMA] DB cache check failed (non-fatal): {e}")
 
-    # ── 2. FEMA NFHL Layer 4 API ──────────────────────────────────────────────
-    url = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/4/query"
-    params = {
-        "geometry": f"{lon},{lat}",
-        "geometryType": "esriGeometryPoint",
-        "spatialRel": "esriSpatialRelIntersects",
-        "outFields": "CASE_NO,STATUS,OUT_ZONE,EFF_DATE,AMEND_TYPE",
-        "returnGeometry": "false",
-        "f": "json",
-    }
+    # ── 2. Live FEMA NFHL API -- Layer 34 (LOMA/LOMR-F/LOMR-FW/LOMR-VZ) ──────
+    loma_result = None
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        url = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/34/query"
+        params = {
+            "geometry": f"{lon},{lat}",
+            "geometryType": "esriGeometryPoint",
+            "inSR": "4326",
+            "spatialRel": "esriSpatialRelIntersects",
+            "outFields": "CASENUMBER,STATUS,PROJECTCATEGORY,DATEENDED,CID,"
+                          "COMMUNITYNAME,REVAL_STAT,OUTCOME,PDFHYPERLINKID",
+            "returnGeometry": "false",
+            "f": "json",
+        }
+        async with httpx.AsyncClient(timeout=12, verify=False) as client:
             r = await client.get(url, params=params)
             data = r.json()
-
         features = data.get("features", [])
-        if not features:
-            return None
+        if features:
+            attrs = features[0]["attributes"]
+            loma_result = _build_loma_result(attrs)
+            print(f"[LOMA] Layer 34 result: {loma_result['case_number']} "
+                  f"category={loma_result['project_category']} "
+                  f"outcome={loma_result['outcome']!r} "
+                  f"auto_eligible={loma_result['auto_removal_eligible']}")
 
-        attrs = features[0]["attributes"]
-        eff_ms = attrs.get("EFF_DATE")
-        eff_date = None
-        if eff_ms:
-            try:
-                eff_date = datetime.fromtimestamp(
-                    eff_ms / 1000, tz=timezone.utc
-                ).strftime("%Y-%m-%d")
-            except Exception:
-                eff_date = None
-
-        result = {
-            "case_number":    attrs.get("CASE_NO"),
-            "status":         attrs.get("STATUS"),
-            "outcome_zone":   attrs.get("OUT_ZONE"),
-            "effective_date": eff_date,
-            "amendment_type": attrs.get("AMEND_TYPE"),
-        }
-
-        # Cache successful API results for future lookups
-        if result.get("case_number") and result.get("status") == "Effective":
-            try:
-                from db import get_conn
-                with get_conn() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("""
-                            INSERT INTO loma_records
-                                (case_number, lat, lon, outcome_zone,
-                                 amendment_type, effective_date, source)
-                            VALUES (%s, %s, %s, %s, %s, %s, 'FEMA_API')
-                            ON CONFLICT (case_number) DO NOTHING
-                        """, (
-                            result["case_number"], lat, lon,
-                            result["outcome_zone"], result["amendment_type"],
-                            result["effective_date"],
-                        ))
-            except Exception as e:
-                print(f"[LOMA] Cache write failed (non-fatal): {e}")
-
-        print(f"[LOMA] API result: {result.get('case_number')} "
-              f"status={result.get('status')} zone={result.get('outcome_zone')}")
-        return result
-
+            if loma_result.get("case_number"):
+                try:
+                    from db import get_conn
+                    with get_conn() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute("""
+                                INSERT INTO loma_records
+                                    (case_number, lat, lon, project_category,
+                                     status, outcome, reval_stat, community_id,
+                                     community_name, date_ended, pdf_link,
+                                     record_type, source)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'LOMA', 'FEMA_API')
+                                ON CONFLICT (case_number) DO NOTHING
+                            """, (
+                                loma_result["case_number"], lat, lon,
+                                loma_result["project_category"], loma_result["status"],
+                                loma_result["outcome"], loma_result["reval_stat"],
+                                loma_result["community_id"], loma_result["community_name"],
+                                loma_result["date_ended"], loma_result["pdf_link"],
+                            ))
+                except Exception as e:
+                    print(f"[LOMA] Cache write failed (non-fatal): {e}")
     except Exception as e:
-        print(f"[LOMA] FEMA API check failed: {e}")
+        print(f"[LOMA] Layer 34 API check failed: {e}")
+
+    # ── 3. Live FEMA NFHL API -- Layer 1 (LOMRs, informational only) ─────────
+    lomr_result = None
+    try:
+        url = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/1/query"
+        params = {
+            "geometry": f"{lon},{lat}",
+            "geometryType": "esriGeometryPoint",
+            "inSR": "4326",
+            "spatialRel": "esriSpatialRelIntersects",
+            "outFields": "CASE_NO,STATUS,EFF_DATE,DFIRM_ID",
+            "returnGeometry": "false",
+            "f": "json",
+        }
+        async with httpx.AsyncClient(timeout=12, verify=False) as client:
+            r = await client.get(url, params=params)
+            data = r.json()
+        features = data.get("features", [])
+        if features:
+            lomr_result = _build_lomr_result(features[0]["attributes"])
+            print(f"[LOMA] Layer 1 (LOMR) result: {lomr_result['case_number']} "
+                  f"eff_date={lomr_result['eff_date']}")
+    except Exception as e:
+        print(f"[LOMA] Layer 1 API check failed: {e}")
+
+    if loma_result is None and lomr_result is None:
         return None
+    return {"loma": loma_result, "lomr": lomr_result}
         
