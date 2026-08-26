@@ -160,13 +160,19 @@ async def _check_lol_record(mon: dict) -> None:
     if not lat or not lon:
         return
     try:
-        community_data = await query_nfip_community(float(lat), float(lon))
+        mon_city = mon.get("city", "")
+        mon_state_abbr = mon.get("state_abbr", "")
+        community_data = await query_nfip_community(float(lat), float(lon), mon_city, mon_state_abbr)
         zone_data, firm_data = await asyncio.gather(
             query_fema_nfhl(float(lat), float(lon)),
             query_firm_panel(float(lat), float(lon),
                 community_id=community_data.get("community_id", "")),
         )
-        new_info = determine_flood_info({**zone_data, **community_data, **firm_data})
+        new_info = determine_flood_info({
+            **zone_data, **community_data, **firm_data,
+            "geocoded_city": mon_city,
+            "state_abbr": mon_state_abbr,
+        })
 
         # Apply LOMA override if exists — prevents false alerts for LOMR properties
         loma = await check_loma_at_point(float(lat), float(lon))
@@ -1111,6 +1117,8 @@ async def generate(
         "lender_address": lender_address.strip(),
         "lender_email": lender_email.strip(),
         "lat": geo_lat, "lon": geo_lon,
+        "city": geo_result.get("city", ""),
+        "state_abbr": geo_result.get("state_abbr", ""),
         "flood_zone": flood_info["flood_zone"],
         "flood_zone_description": flood_info["flood_zone_description"],
         "sfha_status": flood_info["sfha_status"],
@@ -1299,12 +1307,18 @@ async def check_all_monitored(request: Request):
             errors += 1
             return
         try:
+            r_city = r.get("city", "")
+            r_state_abbr = r.get("state_abbr", "")
             zone_data, community_data, firm_data = await asyncio.gather(
                 query_fema_nfhl(float(lat), float(lon)),
-                query_nfip_community(float(lat), float(lon)),
+                query_nfip_community(float(lat), float(lon), r_city, r_state_abbr),
                 query_firm_panel(float(lat), float(lon)),
             )
-            new_info = determine_flood_info({**zone_data, **community_data, **firm_data})
+            new_info = determine_flood_info({
+                **zone_data, **community_data, **firm_data,
+                "geocoded_city": r_city,
+                "state_abbr": r_state_abbr,
+            })
             changed = (
                 r.get("flood_zone", "") != new_info.get("flood_zone", "") or
                 r.get("panel_effective_date", "") != new_info.get("panel_effective_date", "")
@@ -1359,12 +1373,18 @@ async def check_fema_update(record_id: int):
     if not lat or not lon:
         return JSONResponse({"error": "No coordinates stored for this record"}, status_code=400)
     try:
+        record_city = record.get("city", "")
+        record_state_abbr = record.get("state_abbr", "")
         zone_data, community_data, firm_data = await asyncio.gather(
             query_fema_nfhl(float(lat), float(lon)),
-            query_nfip_community(float(lat), float(lon)),
+            query_nfip_community(float(lat), float(lon), record_city, record_state_abbr),
             query_firm_panel(float(lat), float(lon)),
         )
-        new_info = determine_flood_info({**zone_data, **community_data, **firm_data})
+        new_info = determine_flood_info({
+            **zone_data, **community_data, **firm_data,
+            "geocoded_city": record_city,
+            "state_abbr": record_state_abbr,
+        })
     except Exception as exc:
         return JSONResponse({"error": str(exc)[:300]}, status_code=502)
 
@@ -1698,6 +1718,8 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str, company_id=N
         "determination_date_iso": det_date_iso,
         "company_id": company_id,
         "user_id": user_id,
+        "city": geo.get("city", ""),
+        "state_abbr": geo.get("state_abbr", ""),
     }
     record_id = save_determination(data)
     return {**data, "record_id": record_id}

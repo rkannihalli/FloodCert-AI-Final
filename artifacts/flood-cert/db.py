@@ -106,6 +106,8 @@ def init_db():
             """)
         _run_migrations(conn, [
             "ALTER TABLE determinations ADD COLUMN IF NOT EXISTS county TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE determinations ADD COLUMN IF NOT EXISTS city TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE determinations ADD COLUMN IF NOT EXISTS state_abbr TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE determinations ADD COLUMN IF NOT EXISTS loma_case_number TEXT",
             "ALTER TABLE determinations ADD COLUMN IF NOT EXISTS loma_amendment_type TEXT",
             "ALTER TABLE determinations ADD COLUMN IF NOT EXISTS loma_effective_date TEXT",
@@ -189,6 +191,8 @@ def save_determination(data: dict) -> int:
         "company_id": None,
         "user_id": None,
         "county": "",
+        "city": "",
+        "state_abbr": "",
         "nfip_participates": True,
         "loma_case_number": None,
         "loma_amendment_type": None,
@@ -218,6 +222,7 @@ def save_determination(data: dict) -> int:
                         determination_date=%(determination_date)s,
                         determination_date_iso=%(determination_date_iso)s,
                         created_at=%(created_at)s, county=%(county)s,
+                        city=%(city)s, state_abbr=%(state_abbr)s,
                         nfip_participates=%(nfip_participates)s,
                         loma_case_number=%(loma_case_number)s,
                         loma_amendment_type=%(loma_amendment_type)s,
@@ -235,7 +240,7 @@ def save_determination(data: dict) -> int:
                         flood_zone, flood_zone_description, sfha_status, insurance_required,
                         panel_number, panel_effective_date, community_number, community_name,
                         determination_date, determination_date_iso, created_at,
-                        company_id, user_id, county, nfip_participates,
+                        company_id, user_id, county, city, state_abbr, nfip_participates,
                         loma_case_number, loma_amendment_type, loma_effective_date,
                         loma_original_zone, loma_note
                     ) VALUES (
@@ -244,7 +249,7 @@ def save_determination(data: dict) -> int:
                         %(flood_zone)s, %(flood_zone_description)s, %(sfha_status)s, %(insurance_required)s,
                         %(panel_number)s, %(panel_effective_date)s, %(community_number)s, %(community_name)s,
                         %(determination_date)s, %(determination_date_iso)s, %(created_at)s,
-                        %(company_id)s, %(user_id)s, %(county)s, %(nfip_participates)s,
+                        %(company_id)s, %(user_id)s, %(county)s, %(city)s, %(state_abbr)s, %(nfip_participates)s,
                         %(loma_case_number)s, %(loma_amendment_type)s, %(loma_effective_date)s,
                         %(loma_original_zone)s, %(loma_note)s
                     ) RETURNING id
@@ -476,6 +481,10 @@ def init_lol_tables():
             """)
 
 
+        _run_migrations(conn, [
+            "ALTER TABLE lol_monitoring ADD COLUMN IF NOT EXISTS city TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE lol_monitoring ADD COLUMN IF NOT EXISTS state_abbr TEXT NOT NULL DEFAULT ''",
+        ])
 def upsert_lol_monitoring(det: dict) -> int:
     now = datetime.utcnow().isoformat()
     with get_conn() as conn:
@@ -503,12 +512,14 @@ def upsert_lol_monitoring(det: dict) -> int:
                         determination_id=%s,
                         baseline_panel_number=%s, baseline_effective_date=%s,
                         baseline_flood_zone=%s, baseline_community_number=%s,
+                        city=%s, state_abbr=%s,
                         status='Active', last_checked_at=%s
                     WHERE id=%s
                 """, (
                     det.get("id"),
                     det.get("community_number", ""), det.get("panel_effective_date", ""),
                     det.get("flood_zone", ""), det.get("panel_number", ""),
+                    det.get("city", ""), det.get("state_abbr", ""),
                     now, existing["id"],
                 ))
                 return existing["id"]
@@ -518,8 +529,8 @@ def upsert_lol_monitoring(det: dict) -> int:
                         company_id, user_id, determination_id, loan_id, borrower_name,
                         property_address, lat, lon, lender_name, lender_email,
                         baseline_panel_number, baseline_effective_date, baseline_flood_zone,
-                        baseline_community_number, status, created_at
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
+                        baseline_community_number, city, state_abbr, status, created_at
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
                 """, (
                     det.get("company_id"), det.get("user_id"), det.get("id"),
                     det.get("loan_id", ""), det.get("borrower_name", ""),
@@ -527,6 +538,7 @@ def upsert_lol_monitoring(det: dict) -> int:
                     det.get("lender_name", ""), det.get("lender_email", ""),
                     det.get("community_number", ""), det.get("panel_effective_date", ""),
                     det.get("flood_zone", ""), det.get("panel_number", ""),
+                    det.get("city", ""), det.get("state_abbr", ""),
                     "Active", now,
                 ))
                 return cur.fetchone()["id"]
