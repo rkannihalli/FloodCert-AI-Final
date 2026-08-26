@@ -1440,16 +1440,23 @@ async def history_detail(request: Request, record_id: int):
         if record.get("company_id") and record.get("company_id") != user.get("company_id"):
             raise HTTPException(403)
 
-    # Re-apply LOMA override if record has LOMA data saved
-    # This ensures saved records show the correct LOMA-overridden zone
+    # Re-apply LOMA/LOMR-F override display if the record has LOMA data saved.
+    # Previously this compared flood_zone against a fixed ("X","X500","X
+    # (Shaded)") tuple and, on mismatch, hardcoded "X500" by reading a
+    # "loma_outcome_zone" field that has never existed on this table -- it
+    # always evaluated to None and silently forced "X500". Worse, once the
+    # honest non-fabricated override label was introduced, flood_zone never
+    # matches that old tuple at all, so this branch misfired on every single
+    # view of any LOMA/LOMR-F-overridden record and overwrote the
+    # correctly-saved loma_original_zone with whatever was currently in
+    # flood_zone. Fixed to compare against the real override label, and to
+    # never touch loma_original_zone here (it's already saved correctly at
+    # generation time -- this block is display-only and must not mutate it).
     loma_case = record.get("loma_case_number")
     loma_zone = record.get("loma_original_zone")
     if loma_case and loma_zone:
-        # LOMA was applied — ensure display shows overridden zone
-        if record.get("flood_zone") not in ("X", "X500", "X (Shaded)"):
-            # Zone wasn't saved correctly — re-apply override
-            record["loma_original_zone"] = record["flood_zone"]
-            record["flood_zone"] = record.get("loma_outcome_zone") or "X500"
+        if record.get("flood_zone") != "X (per LOMA/LOMR-F -- shading subtype not specified in FEMA determination data)":
+            record["flood_zone"] = "X (per LOMA/LOMR-F -- shading subtype not specified in FEMA determination data)"
             record["sfha_status"] = "No"
             record["insurance_required"] = "No — Flood insurance is not federally required"
     elif record.get("lat") and record.get("lon"):
