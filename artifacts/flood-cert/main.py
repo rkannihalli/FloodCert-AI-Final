@@ -865,7 +865,7 @@ async def admin_live_test(request: Request):
 
         nfhl, community_data, tiger_data = await asyncio.gather(
             query_fema_nfhl(lat, lon),
-            query_nfip_community(lat, lon, geo.get("city", "")),
+            query_nfip_community(lat, lon, geo.get("city", ""), geo.get("state_abbr", "")),
             query_tigerweb_fips(lat, lon),
         )
         panel_data = await query_firm_panel(
@@ -1015,7 +1015,8 @@ async def generate(
     # Step 1: Get authoritative FIPS from TIGERweb
     zone_data, community_data, county_data, tiger_data = await asyncio.gather(
         query_fema_nfhl(geo_result["lat"], geo_result["lon"]),
-        query_nfip_community(geo_result["lat"], geo_result["lon"], geo_result.get("city", "")),
+        query_nfip_community(geo_result["lat"], geo_result["lon"], geo_result.get("city", ""),
+                             geo_result.get("state_abbr", "")),
         query_county_name(geo_result["lat"], geo_result["lon"]),
         query_tigerweb_fips(geo_result["lat"], geo_result["lon"]),
     )
@@ -1033,7 +1034,9 @@ async def generate(
         loma_lat = float(loma.get("lat", 0) or geo_result["lat"])
         loma_lon = float(loma.get("lon", 0) or geo_result["lon"])
         if loma_lat and loma_lon:
-            community_data_retry = await query_nfip_community(loma_lat, loma_lon, geo_result.get("city", ""))
+            community_data_retry = await query_nfip_community(
+                loma_lat, loma_lon, geo_result.get("city", ""), geo_result.get("state_abbr", "")
+            )
             if community_data_retry.get("community_id"):
                 print(f"[COMM] Layer 22 retry with LOMA coords: {community_data_retry}")
                 community_data = community_data_retry
@@ -1060,6 +1063,7 @@ async def generate(
         "county_fips": geo_result.get("county_fips", ""),
         "county_name": geo_result.get("county_name", ""),
         "geocode_precision": geo_result.get("geocode_precision", ""),
+        "state_abbr": geo_result.get("state_abbr", ""),
     })
     flood_info["nfip_participates"] = community_data.get("nfip_participates", True)
 
@@ -1635,7 +1639,7 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str, company_id=N
 
     zone_data, community_data, county_data, tiger_data = await asyncio.gather(
         query_fema_nfhl(geo["lat"], geo["lon"]),
-        query_nfip_community(geo["lat"], geo["lon"], geo.get("city", "")),
+        query_nfip_community(geo["lat"], geo["lon"], geo.get("city", ""), geo.get("state_abbr", "")),
         query_county_name(geo["lat"], geo["lon"]),
         query_tigerweb_fips(geo["lat"], geo["lon"]),
     )
@@ -1663,6 +1667,7 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str, company_id=N
         "county_fips": geo.get("county_fips", ""),
         "county_name": geo.get("county_name", ""),
         "geocode_precision": geo.get("geocode_precision", ""),
+        "state_abbr": geo.get("state_abbr", ""),
     })
     flood_info["nfip_participates"] = community_data.get("nfip_participates", True)
 

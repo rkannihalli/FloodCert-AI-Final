@@ -18,6 +18,86 @@ except ImportError:
 
 CENSUS_GEO_URL  = "https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress"
 CENSUS_LOC_URL  = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
+
+# ─────────────────────────────────────────────────────────────────────────
+# Independent cities: the 41 U.S. jurisdictions that are their own
+# county-equivalent, not part of any surrounding county. Used generically
+# throughout jurisdiction/county matching — never hard-code an individual
+# address's independent-city status; always resolve it through this table.
+#
+# Keys are bare, normalized city names (see _normalize_place_name) for the
+# state that holds them. "Carson City" is the one entry where "city" is
+# genuinely part of the jurisdiction's proper name (not a descriptive
+# suffix), so it's stored with "city" included; every other entry's bare
+# form omits "city"/"county" since those are added only as disambiguating
+# descriptors on top of the true place name (e.g. "Richmond" -> "City of
+# Richmond" to distinguish it from the separate, real Richmond County, VA).
+# ─────────────────────────────────────────────────────────────────────────
+INDEPENDENT_CITIES = {
+    "MD": {"baltimore"},
+    "MO": {"stlouis"},
+    "NV": {"carsoncity"},
+    "VA": {
+        "alexandria", "bristol", "buenavista", "charlottesville", "chesapeake",
+        "colonialheights", "covington", "danville", "emporia", "fairfax",
+        "fallschurch", "franklin", "fredericksburg", "galax", "hampton",
+        "harrisonburg", "hopewell", "lexington", "lynchburg", "manassas",
+        "manassaspark", "martinsville", "newportnews", "norfolk", "norton",
+        "petersburg", "poquoson", "portsmouth", "radford", "richmond",
+        "roanoke", "salem", "staunton", "suffolk", "virginiabeach",
+        "waynesboro", "williamsburg", "winchester",
+    },
+}
+
+_PLACE_PREFIXES = ("city of ", "town of ", "village of ", "township of ")
+_PLACE_SUFFIX_WORDS = ("county", "parish", "borough", "independentcity")
+
+
+def _normalize_place_name(name: str) -> str:
+    """Lowercase, strip prefixes/punctuation, and strip a trailing "city"
+    or "county" descriptor UNLESS the bare result wouldn't be a real place
+    on its own (see INDEPENDENT_CITIES docstring re: Carson City).
+    Reusable across jurisdiction matching, county-field display, and
+    independent-city detection — this is the one normalization function
+    all of those should share, so a name is always compared the same way.
+    """
+    n = (name or "").lower().strip()
+    for p in _PLACE_PREFIXES:
+        if n.startswith(p):
+            n = n[len(p):]
+    if n.endswith(", city") or n.endswith(", town") or n.endswith(", village"):
+        n = n.rsplit(",", 1)[0]
+    n = re.sub(r"[^a-z0-9]", "", n)
+    for suffix in _PLACE_SUFFIX_WORDS:
+        if n.endswith(suffix) and n != suffix:
+            n = n[: -len(suffix)]
+            break
+    if n.endswith("city") and n != "carsoncity":
+        n = n[:-4]
+    return n
+
+
+def is_independent_city(name: str, state_abbr: str) -> bool:
+    """True if `name` refers to a known U.S. independent city."""
+    sa = (state_abbr or "").strip().upper()
+    if sa not in INDEPENDENT_CITIES:
+        return False
+    if "county" in (name or "").lower():
+        return False
+    return _normalize_place_name(name) in INDEPENDENT_CITIES[sa]
+
+
+def is_independent_city_county_collision(candidate_name: str, state_abbr: str) -> bool:
+    """True if `candidate_name` is a namesake county of an independent city."""
+    sa = (state_abbr or "").strip().upper()
+    if sa not in INDEPENDENT_CITIES:
+        return False
+    n = (candidate_name or "").lower()
+    if "county" not in n:
+        return False
+    bare = _normalize_place_name(candidate_name)
+    return bare in INDEPENDENT_CITIES[sa]
+
 ARCGIS_GEO_URL  = (
     "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer"
     "/findAddressCandidates"
@@ -1631,6 +1711,15 @@ def determine_flood_info(merged: dict) -> dict:
     if not county_name:
         county_name = ""
 
+    # Independent cities are their own county-equivalent. FEMA/CoreLogic's
+    # SFHDF convention uses "INDEPENDENT CITY" for the county field.
+    county_name_raw = county_name
+    state_abbr_for_indep = (merged.get("state_abbr") or "").strip()
+    geocoded_city_for_indep = (merged.get("geocoded_city") or "").strip()
+    if (is_independent_city(county_name, state_abbr_for_indep)
+            or is_independent_city(geocoded_city_for_indep, state_abbr_for_indep)):
+        county_name = "INDEPENDENT CITY"
+
     if panel_effective_date_override:
         panel_effective_date = panel_effective_date_override
     elif isinstance(eff_date_raw, str) and eff_date_raw:
@@ -1653,6 +1742,7 @@ def determine_flood_info(merged: dict) -> dict:
         "community_number": map_number,
         "community_name": community_name_out,
         "county": county_name,
+        "county_raw": county_name_raw,
         "geocode_precision": geocode_precision or "unknown",
         "zone_confidence": zone_confidence,
         "zone_confidence_note": zone_confidence_note,
