@@ -174,13 +174,16 @@ async def _check_lol_record(mon: dict) -> None:
             "state_abbr": mon_state_abbr,
         })
 
-        # Apply LOMA override if exists — prevents false alerts for LOMR properties
-        loma = await check_loma_at_point(float(lat), float(lon))
-        if loma and loma.get("status") == "Effective" and loma.get("outcome_zone") in ("X", "X500", "X (Shaded)"):
-            new_info["flood_zone"] = loma.get("outcome_zone", "X500")
+        # Apply LOMA/LOMR-F override if exists — prevents false alerts for LOMC properties.
+        # Only auto-applies for unambiguous full-removal outcomes (see check_loma_at_point);
+        # partial/ambiguous/superseded determinations are left for manual review.
+        loma_result = await check_loma_at_point(float(lat), float(lon))
+        loma_data = loma_result.get("loma") if loma_result else None
+        if loma_data and loma_data.get("auto_removal_eligible"):
+            new_info["flood_zone"] = "X (per LOMA/LOMR-F -- shading subtype not specified in FEMA determination data)"
             new_info["sfha_status"] = "No"
             new_info["insurance_required"] = "No — Flood insurance is not federally required"
-            print(f"[LOL] LOMA override applied for monitoring_id={mon['id']}: {loma.get('case_number')}")
+            print(f"[LOL] LOMA/LOMR-F override applied for monitoring_id={mon['id']}: {loma_data.get('case_number')} ({loma_data.get('project_category')})")
     except Exception as exc:
         print(f"[LOL] FEMA query failed for monitoring_id={mon['id']}: {exc}")
         return
@@ -1016,7 +1019,8 @@ async def generate(
 
     # LOMA/LOMR lookup — must happen before it's referenced below (Layer 22 retry
     # and the Step 3 override both depend on it)
-    loma = await check_loma_at_point(geo_result["lat"], geo_result["lon"])
+    loma_result = await check_loma_at_point(geo_result["lat"], geo_result["lon"])
+    loma_data = loma_result.get("loma") if loma_result else None
 
     # Step 1: Get authoritative FIPS from TIGERweb
     zone_data, community_data, county_data, tiger_data = await asyncio.gather(
@@ -1036,9 +1040,9 @@ async def generate(
         print("Warning: no FIPS from Census or TIGERweb")
 
     # If Layer 22 returned empty, retry with LOMA coordinates if available
-    if not community_data.get("community_id") and loma:
-        loma_lat = float(loma.get("lat", 0) or geo_result["lat"])
-        loma_lon = float(loma.get("lon", 0) or geo_result["lon"])
+    if not community_data.get("community_id") and loma_result:
+        loma_lat = float(loma_result.get("lat", 0) or geo_result["lat"])
+        loma_lon = float(loma_result.get("lon", 0) or geo_result["lon"])
         if loma_lat and loma_lon:
             community_data_retry = await query_nfip_community(
                 loma_lat, loma_lon, geo_result.get("city", ""), geo_result.get("state_abbr", "")
@@ -1081,26 +1085,40 @@ async def generate(
     # (loma was already fetched earlier, before the Step 1 FIPS lookup)
     loma_note = None
     loma_original_zone = None
-    if loma and loma.get("status") == "Effective" and loma.get("outcome_zone") in ("X", "X500", "X (Shaded)"):
+    if loma_data and loma_data.get("auto_removal_eligible"):
         loma_original_zone = flood_info["flood_zone"]
-        flood_info["flood_zone"] = loma.get("outcome_zone", "X")
+        flood_info["flood_zone"] = "X (per LOMA/LOMR-F -- shading subtype not specified in FEMA determination data)"
         flood_info["sfha_status"] = "No"
         flood_info["insurance_required"] = "No"
-        # If this LOMA/LOMR record carries a community override (e.g. the property
+        # If this LOMA/LOMR-F record carries a community override (e.g. the property
         # was annexed into a different community than the NFHL boundary layer still
         # shows), apply that too — otherwise the certificate shows a corrected flood
         # zone next to a stale/wrong community number.
-        if loma.get("outcome_community_id"):
-            flood_info["panel_number"] = loma["outcome_community_id"]
-        if loma.get("outcome_community_name"):
-            flood_info["community_name"] = loma["outcome_community_name"]
+        if loma_data.get("community_id"):
+            flood_info["panel_number"] = loma_data["community_id"]
+        if loma_data.get("community_name"):
+            flood_info["community_name"] = loma_data["community_name"]
         loma_note = (
-            f"Removed from SFHA per FEMA {loma['amendment_type']} "
-            f"Case No. {loma['case_number']} "
-            f"(effective {loma['effective_date']}). "
-            f"Map shows {loma_original_zone} — LOMA overrides."
+            f"Removed from SFHA per FEMA {loma_data.get('project_category')} "
+            f"Case No. {loma_data['case_number']} "
+            f"(determination dated {loma_data.get('date_ended') or 'unknown'}). "
+            f"FEMA outcome: {loma_data.get('outcome')!r}. "
+            f"Map shows {loma_original_zone} — LOMA/LOMR-F overrides."
         )
-        print(f"[LOMA] Override applied: {loma['case_number']} at ({geo_lat},{geo_lon})")
+        print(f"[LOMA] Override applied: {loma_data['case_number']} ({loma_data.get('project_category')}) at ({geo_lat},{geo_lon})")
+    elif loma_data and not loma_data.get("auto_removal_eligible"):
+        # A map-change determination exists but isn't a clear-cut full removal --
+        # surface it for manual review rather than silently ignoring or guessing.
+        loma_note = (
+            f"A FEMA map-change determination exists at this location "
+            f"(Case No. {loma_data.get('case_number')}, "
+            f"{loma_data.get('project_category')}, outcome: {loma_data.get('outcome') or 'not specified'!r}) "
+            f"but does not meet the criteria for automatic SFHA removal -- "
+            f"recommend manual review against the source document."
+        )
+        if loma_data.get("pdf_link"):
+            loma_note += f" Source: {loma_data['pdf_link']}"
+        print(f"[LOMA] Determination found but not auto-applied (manual review): {loma_data.get('case_number')}")
 
     # Determine company_id and user_id from session
     s_company_id = session_user.get("company_id") if session_user else None
@@ -1139,9 +1157,9 @@ async def generate(
         "determination_date_iso": date.today().isoformat(),
         "company_id": s_company_id,
         "user_id": s_user_id,
-        "loma_case_number":    loma.get("case_number")    if loma else None,
-        "loma_amendment_type": loma.get("amendment_type") if loma else None,
-        "loma_effective_date": loma.get("effective_date") if loma else None,
+        "loma_case_number":    loma_data.get("case_number")    if loma_data else None,
+        "loma_amendment_type": loma_data.get("project_category") if loma_data else None,
+        "loma_effective_date": loma_data.get("date_ended") if loma_data else None,
         "loma_original_zone":  loma_original_zone,
         "loma_note":           loma_note,
         "nfip_participates":   flood_info.get("nfip_participates", True),
@@ -1438,26 +1456,30 @@ async def history_detail(request: Request, record_id: int):
         # No LOMA saved — check live for this record
         try:
             from fema_lookup import check_loma_at_point
-            loma = await check_loma_at_point(float(record["lat"]), float(record["lon"]))
-            if loma and loma.get("status") == "Effective" and loma.get("outcome_zone") in ("X", "X500", "X (Shaded)"):
+            loma_result = await check_loma_at_point(float(record["lat"]), float(record["lon"]))
+            loma_data = loma_result.get("loma") if loma_result else None
+            if loma_data and loma_data.get("auto_removal_eligible"):
                 original_zone = record["flood_zone"]
-                record["flood_zone"] = loma.get("outcome_zone", "X500")
+                record["flood_zone"] = "X (per LOMA/LOMR-F -- shading subtype not specified in FEMA determination data)"
                 record["sfha_status"] = "No"
                 record["insurance_required"] = "No — Flood insurance is not federally required"
-                record["loma_case_number"] = loma.get("case_number")
-                record["loma_amendment_type"] = loma.get("amendment_type")
-                record["loma_effective_date"] = loma.get("effective_date")
+                record["loma_case_number"] = loma_data.get("case_number")
+                record["loma_amendment_type"] = loma_data.get("project_category")
+                record["loma_effective_date"] = loma_data.get("date_ended")
                 record["loma_original_zone"] = original_zone
                 record["loma_note"] = (
-                    f"Removed from SFHA per FEMA {loma.get('amendment_type')} "
-                    f"Case No. {loma.get('case_number')} "
-                    f"(effective {loma.get('effective_date')}). "
-                    f"Map shows {original_zone} — LOMA overrides."
+                    f"Removed from SFHA per FEMA {loma_data.get('project_category')} "
+                    f"Case No. {loma_data.get('case_number')} "
+                    f"(determination dated {loma_data.get('date_ended') or 'unknown'}). "
+                    f"FEMA outcome: {loma_data.get('outcome')!r}. "
+                    f"Map shows {original_zone} — LOMA/LOMR-F overrides."
                 )
                 # Update saved record with correct data
                 from db import save_determination
                 save_determination(record)
-                print(f"[HISTORY] LOMA override applied and saved for record {record_id}")
+                print(f"[HISTORY] LOMA/LOMR-F override applied and saved for record {record_id}")
+            elif loma_data:
+                print(f"[HISTORY] Map-change determination found but not auto-applied (manual review): {loma_data.get('case_number')}")
         except Exception as e:
             print(f"[HISTORY] LOMA check error (non-fatal): {e}")
 
@@ -1480,20 +1502,22 @@ async def history_download_certificate(record_id: int):
     # Re-apply LOMA override if needed before PDF generation
     if not record.get("loma_case_number") and record.get("lat") and record.get("lon"):
         try:
-            loma = await check_loma_at_point(float(record["lat"]), float(record["lon"]))
-            if loma and loma.get("status") == "Effective" and loma.get("outcome_zone") in ("X","X500","X (Shaded)"):
+            loma_result = await check_loma_at_point(float(record["lat"]), float(record["lon"]))
+            loma_data = loma_result.get("loma") if loma_result else None
+            if loma_data and loma_data.get("auto_removal_eligible"):
                 record["loma_original_zone"] = record.get("flood_zone")
-                record["flood_zone"] = loma.get("outcome_zone","X500")
+                record["flood_zone"] = "X (per LOMA/LOMR-F -- shading subtype not specified in FEMA determination data)"
                 record["sfha_status"] = "No"
                 record["insurance_required"] = "No — Flood insurance is not federally required"
-                record["loma_case_number"] = loma.get("case_number")
-                record["loma_amendment_type"] = loma.get("amendment_type")
-                record["loma_effective_date"] = loma.get("effective_date")
+                record["loma_case_number"] = loma_data.get("case_number")
+                record["loma_amendment_type"] = loma_data.get("project_category")
+                record["loma_effective_date"] = loma_data.get("date_ended")
                 record["loma_note"] = (
-                    f"Removed from SFHA per FEMA {loma.get('amendment_type')} "
-                    f"Case No. {loma.get('case_number')} "
-                    f"(effective {loma.get('effective_date')}). "
-                    f"Map shows {record['loma_original_zone']} — LOMA overrides."
+                    f"Removed from SFHA per FEMA {loma_data.get('project_category')} "
+                    f"Case No. {loma_data.get('case_number')} "
+                    f"(determination dated {loma_data.get('date_ended') or 'unknown'}). "
+                    f"FEMA outcome: {loma_data.get('outcome')!r}. "
+                    f"Map shows {record['loma_original_zone']} — LOMA/LOMR-F overrides."
                 )
         except Exception as e:
             print(f"[PDF] LOMA check error (non-fatal): {e}")
