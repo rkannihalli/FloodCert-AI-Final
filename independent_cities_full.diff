@@ -1,0 +1,322 @@
+diff --git a/artifacts/flood-cert/fema_lookup.py b/artifacts/flood-cert/fema_lookup.py
+index aa64ae4..65a4546 100644
+--- a/artifacts/flood-cert/fema_lookup.py
++++ b/artifacts/flood-cert/fema_lookup.py
+@@ -18,6 +18,103 @@ except ImportError:
+ 
+ CENSUS_GEO_URL  = "https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress"
+ CENSUS_LOC_URL  = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
++
++# ─────────────────────────────────────────────────────────────────────────
++# Independent cities: the 41 U.S. jurisdictions that are their own
++# county-equivalent, not part of any surrounding county. Used generically
++# throughout jurisdiction/county matching — never hard-code an individual
++# address's independent-city status; always resolve it through this table.
++#
++# Keys are bare, normalized city names (see _normalize_place_name) for the
++# state that holds them. "Carson City" is the one entry where "city" is
++# genuinely part of the jurisdiction's proper name (not a descriptive
++# suffix), so it's stored with "city" included; every other entry's bare
++# form omits "city"/"county" since those are added only as disambiguating
++# descriptors on top of the true place name (e.g. "Richmond" -> "City of
++# Richmond" to distinguish it from the separate, real Richmond County, VA).
++# ─────────────────────────────────────────────────────────────────────────
++INDEPENDENT_CITIES = {
++    "MD": {"baltimore"},
++    "MO": {"stlouis"},
++    "NV": {"carsoncity"},
++    "VA": {
++        "alexandria", "bristol", "buenavista", "charlottesville", "chesapeake",
++        "colonialheights", "covington", "danville", "emporia", "fairfax",
++        "fallschurch", "franklin", "fredericksburg", "galax", "hampton",
++        "harrisonburg", "hopewell", "lexington", "lynchburg", "manassas",
++        "manassaspark", "martinsville", "newportnews", "norfolk", "norton",
++        "petersburg", "poquoson", "portsmouth", "radford", "richmond",
++        "roanoke", "salem", "staunton", "suffolk", "virginiabeach",
++        "waynesboro", "williamsburg", "winchester",
++    },
++}
++
++_PLACE_PREFIXES = ("city of ", "town of ", "village of ", "township of ")
++_PLACE_SUFFIX_WORDS = ("county", "parish", "borough", "independentcity")
++
++
++def _normalize_place_name(name: str) -> str:
++    """Lowercase, strip prefixes/punctuation, and strip a trailing "city"
++    or "county" descriptor UNLESS the bare result wouldn't be a real place
++    on its own (see INDEPENDENT_CITIES docstring re: Carson City).
++    Reusable across jurisdiction matching, county-field display, and
++    independent-city detection — this is the one normalization function
++    all of those should share, so a name is always compared the same way.
++    """
++    n = (name or "").lower().strip()
++    for p in _PLACE_PREFIXES:
++        if n.startswith(p):
++            n = n[len(p):]
++    if n.endswith(", city") or n.endswith(", town") or n.endswith(", village"):
++        n = n.rsplit(",", 1)[0]
++    n = re.sub(r"[^a-z0-9]", "", n)
++    for suffix in _PLACE_SUFFIX_WORDS:
++        if n.endswith(suffix) and n != suffix:
++            n = n[: -len(suffix)]
++            break
++    if n.endswith("city") and n != "carsoncity":
++        n = n[:-4]
++    return n
++
++
++def is_independent_city(name: str, state_abbr: str) -> bool:
++    """True if `name` (in any common variant — "Baltimore City", "City of
++    Baltimore", "Baltimore", "INDEPENDENT CITY" is handled by the caller
++    separately since it carries no place name) refers to one of the 41
++    U.S. independent cities, for the given state.
++
++    Explicitly rejects anything containing "county" up front — an
++    independent city's name never legitimately contains that word, so a
++    literal "Fairfax County" must never register as independent-city
++    "Fairfax" just because they share a normalized root (see
++    is_independent_city_county_collision for the inverse check).
++    """
++    sa = (state_abbr or "").strip().upper()
++    if sa not in INDEPENDENT_CITIES:
++        return False
++    if "county" in (name or "").lower():
++        return False
++    return _normalize_place_name(name) in INDEPENDENT_CITIES[sa]
++
++
++def is_independent_city_county_collision(candidate_name: str, state_abbr: str) -> bool:
++    """True if `candidate_name` is a *county* (not the independent city
++    itself) that shares a root name with one of the 41 independent cities
++    in this state — e.g. "Fairfax County" alongside independent "Fairfax",
++    or "Richmond County" alongside independent "Richmond". Used to make
++    sure jurisdiction-matching never treats these as interchangeable just
++    because their names overlap (see task requirement: Fairfax City must
++    never be matched to Fairfax County, etc.).
++    """
++    sa = (state_abbr or "").strip().upper()
++    if sa not in INDEPENDENT_CITIES:
++        return False
++    n = (candidate_name or "").lower()
++    if "county" not in n:
++        return False
++    bare = _normalize_place_name(candidate_name)
++    return bare in INDEPENDENT_CITIES[sa]
++
+ ARCGIS_GEO_URL  = (
+     "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer"
+     "/findAddressCandidates"
+@@ -737,7 +834,8 @@ async def _query_nfhl_at_offset(lat: float, lon: float, dlat: float, dlon: float
+         return {"flood_zone": "X", "in_sfha": False}
+ 
+ 
+-async def query_nfip_community(lat: float, lon: float, geocoded_city: str = "") -> dict:
++async def query_nfip_community(lat: float, lon: float, geocoded_city: str = "",
++                                state_abbr: str = "") -> dict:
+     """Query NFHL Layer 22 (Political Jurisdictions) for NFIP community name and CID.
+     
+     Strategy:
+@@ -745,7 +843,9 @@ async def query_nfip_community(lat: float, lon: float, geocoded_city: str = "")
+     2. Small envelope fallback — catches edge cases near boundaries
+     3. Disambiguate using the geocoded city name when multiple overlapping
+        jurisdictions are returned (see note below on why "prefer city" alone
+-       is not reliable)
++       is not reliable), with independent-city awareness (see
++       INDEPENDENT_CITIES) so e.g. Fairfax City, VA is never confused with
++       the separate Fairfax County, VA just because they share a root name.
+     """
+     queries = [
+         {
+@@ -874,11 +974,92 @@ async def query_nfip_community(lat: float, lon: float, geocoded_city: str = "")
+             if enclave_matched:
+                 break
+ 
++        # Real point-in-polygon geometry check — this is ground truth, more
++        # authoritative than name-matching. Confirmed against test data:
++        # the single most common jurisdiction mismatch (10+ of 62 test
++        # loans) is a property with a postal/mailing city name (e.g.
++        # "Royse City, TX", "Anna, TX", "Pflugerville, TX") that sits
++        # physically OUTSIDE that city's true limits, in unincorporated
++        # county territory — a very common pattern, especially in Texas,
++        # where USPS assigns the nearest post office's city name regardless
++        # of true municipal boundaries. Name-matching alone can never catch
++        # this: the postal city name IS the wrong answer, and it's also
++        # what a naive "prefer city" fallback would pick. Real geometry
++        # settles it definitively.
++        geometry_matched = None
++        if enclave_matched is None and _SHAPELY_AVAILABLE:
++            try:
++                geom_params = {
++                    **q,
++                    "inSR": "4326",
++                    "spatialRel": "esriSpatialRelIntersects",
++                    "outFields": "POL_NAME1,CID,ANI_TF,COMM_NO",
++                    "returnGeometry": "true",
++                    "resultRecordCount": "10",
++                    "f": "json",
++                }
++                async with httpx.AsyncClient(timeout=12.0, verify=False) as client:
++                    geom_resp = await client.get(f"{NFHL_BASE}/22/query", params=geom_params)
++                    geom_resp.raise_for_status()
++                    geom_data = geom_resp.json()
++                pt = _ShapelyPoint(lon, lat)
++                for gf in geom_data.get("features", []):
++                    rings = (gf.get("geometry") or {}).get("rings")
++                    if not rings:
++                        continue
++                    try:
++                        poly = _ShapelyPolygon(rings[0], rings[1:] if len(rings) > 1 else None)
++                        if poly.is_valid and poly.contains(pt):
++                            geometry_matched = gf
++                            break
++                    except Exception as poly_err:
++                        print(f"[COMM-DEBUG] Could not build polygon for one jurisdiction candidate: {poly_err}")
++                        continue
++                if geometry_matched:
++                    print(f"[COMM-DEBUG] Geometry check resolved jurisdiction: point-in-polygon "
++                          f"confirms {geometry_matched['attributes'].get('POL_NAME1')!r}")
++                else:
++                    print(f"[COMM-DEBUG] Geometry check found no strict containment among "
++                          f"{len(unique)} jurisdiction candidates — falling back to name matching")
++            except Exception as ge:
++                print(f"[COMM-DEBUG] Geometry-based jurisdiction disambiguation failed: {ge}")
++
+         geo_city_norm = _normalize_juris_name(geocoded_city) if geocoded_city else ""
++
++        # Independent-city protection (rule: an independent city must never
++        # be matched to a similarly-named county, e.g. Fairfax City vs
++        # Fairfax County, Richmond City vs Richmond County, Baltimore City
++        # vs Baltimore County, St. Louis City vs St. Louis County). The
++        # general substring name-match below is deliberately loose (it has
++        # to handle many postal-city naming variations), which means a bare
++        # postal city like "Fairfax" would satisfy a substring match
++        # against BOTH "Fairfax City" and "Fairfax County" — the geometry
++        # check above already resolves this correctly when available
++        # (independent cities are legally carved out of their namesake
++        # county, so a point can only ever truly be inside one or the
++        # other), but this tier protects the same case when geometry is
++        # unavailable or inconclusive.
++        independent_city_matched = None
++        if enclave_matched is None and geometry_matched is None and geo_city_norm:
++            for f in unique:
++                cand_name_raw = f["attributes"].get("POL_NAME1") or ""
++                if is_independent_city(cand_name_raw, state_abbr) and \
++                        is_independent_city(geocoded_city, state_abbr):
++                    independent_city_matched = f
++                    break
++
+         name_matched = None
+-        if enclave_matched is None and geo_city_norm:
++        if enclave_matched is None and geometry_matched is None and \
++                independent_city_matched is None and geo_city_norm:
+             for f in unique:
+                 cand_name = _normalize_juris_name(f["attributes"].get("POL_NAME1") or "")
++                # Skip candidates that are a county sharing a root name with
++                # a known independent city in this state (e.g. "Fairfax
++                # County" when the true answer is independent-city
++                # "Fairfax") — never let the loose substring match below
++                # pick the wrong one of this pair.
++                if is_independent_city_county_collision(f["attributes"].get("POL_NAME1") or "", state_abbr):
++                    continue
+                 if cand_name and (cand_name == geo_city_norm or
+                                    cand_name in geo_city_norm or geo_city_norm in cand_name):
+                     name_matched = f
+@@ -886,6 +1067,10 @@ async def query_nfip_community(lat: float, lon: float, geocoded_city: str = "")
+ 
+         if enclave_matched is not None:
+             best = enclave_matched
++        elif geometry_matched is not None:
++            best = geometry_matched
++        elif independent_city_matched is not None:
++            best = independent_city_matched
+         elif name_matched is not None:
+             best = name_matched
+         else:
+@@ -1631,6 +1816,22 @@ def determine_flood_info(merged: dict) -> dict:
+     if not county_name:
+         county_name = ""
+ 
++    # Independent cities (Baltimore MD, St. Louis MO, Carson City NV, and
++    # 38 Virginia cities) are their own county-equivalent — not part of any
++    # surrounding county. FEMA/CoreLogic's SFHDF convention shows
++    # "INDEPENDENT CITY" in the county field rather than the city's own
++    # name; matching that avoids a false "mismatch" on every one of these
++    # certs. Resolved generically via the INDEPENDENT_CITIES reference
++    # table (never hard-coded per address) — checked against both the
++    # resolved county name and the geocoded city, since either can carry
++    # the correct signal depending on which upstream source populated it.
++    county_name_raw = county_name
++    state_abbr_for_indep = (merged.get("state_abbr") or "").strip()
++    geocoded_city_for_indep = (merged.get("geocoded_city") or "").strip()
++    if (is_independent_city(county_name, state_abbr_for_indep)
++            or is_independent_city(geocoded_city_for_indep, state_abbr_for_indep)):
++        county_name = "INDEPENDENT CITY"
++
+     if panel_effective_date_override:
+         panel_effective_date = panel_effective_date_override
+     elif isinstance(eff_date_raw, str) and eff_date_raw:
+@@ -1653,6 +1854,7 @@ def determine_flood_info(merged: dict) -> dict:
+         "community_number": map_number,
+         "community_name": community_name_out,
+         "county": county_name,
++        "county_raw": county_name_raw,
+         "geocode_precision": geocode_precision or "unknown",
+         "zone_confidence": zone_confidence,
+         "zone_confidence_note": zone_confidence_note,
+diff --git a/artifacts/flood-cert/main.py b/artifacts/flood-cert/main.py
+index eeb012f..3b60bed 100644
+--- a/artifacts/flood-cert/main.py
++++ b/artifacts/flood-cert/main.py
+@@ -865,7 +865,7 @@ async def admin_live_test(request: Request):
+ 
+         nfhl, community_data, tiger_data = await asyncio.gather(
+             query_fema_nfhl(lat, lon),
+-            query_nfip_community(lat, lon, geo.get("city", "")),
++            query_nfip_community(lat, lon, geo.get("city", ""), geo.get("state_abbr", "")),
+             query_tigerweb_fips(lat, lon),
+         )
+         panel_data = await query_firm_panel(
+@@ -1015,7 +1015,8 @@ async def generate(
+     # Step 1: Get authoritative FIPS from TIGERweb
+     zone_data, community_data, county_data, tiger_data = await asyncio.gather(
+         query_fema_nfhl(geo_result["lat"], geo_result["lon"]),
+-        query_nfip_community(geo_result["lat"], geo_result["lon"], geo_result.get("city", "")),
++        query_nfip_community(geo_result["lat"], geo_result["lon"], geo_result.get("city", ""),
++                             geo_result.get("state_abbr", "")),
+         query_county_name(geo_result["lat"], geo_result["lon"]),
+         query_tigerweb_fips(geo_result["lat"], geo_result["lon"]),
+     )
+@@ -1033,7 +1034,8 @@ async def generate(
+         loma_lat = float(loma.get("lat", 0) or geo_result["lat"])
+         loma_lon = float(loma.get("lon", 0) or geo_result["lon"])
+         if loma_lat and loma_lon:
+-            community_data_retry = await query_nfip_community(loma_lat, loma_lon, geo_result.get("city", ""))
++            community_data_retry = await query_nfip_community(loma_lat, loma_lon, geo_result.get("city", ""),
++                                                                geo_result.get("state_abbr", ""))
+             if community_data_retry.get("community_id"):
+                 print(f"[COMM] Layer 22 retry with LOMA coords: {community_data_retry}")
+                 community_data = community_data_retry
+@@ -1060,6 +1062,7 @@ async def generate(
+         "county_fips": geo_result.get("county_fips", ""),
+         "county_name": geo_result.get("county_name", ""),
+         "geocode_precision": geo_result.get("geocode_precision", ""),
++        "state_abbr": geo_result.get("state_abbr", ""),
+     })
+     flood_info["nfip_participates"] = community_data.get("nfip_participates", True)
+ 
+@@ -1635,7 +1638,7 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str, company_id=N
+ 
+     zone_data, community_data, county_data, tiger_data = await asyncio.gather(
+         query_fema_nfhl(geo["lat"], geo["lon"]),
+-        query_nfip_community(geo["lat"], geo["lon"], geo.get("city", "")),
++        query_nfip_community(geo["lat"], geo["lon"], geo.get("city", ""), geo.get("state_abbr", "")),
+         query_county_name(geo["lat"], geo["lon"]),
+         query_tigerweb_fips(geo["lat"], geo["lon"]),
+     )
+@@ -1663,6 +1666,7 @@ async def _process_row(row: dict, det_date: str, det_date_iso: str, company_id=N
+         "county_fips": geo.get("county_fips", ""),
+         "county_name": geo.get("county_name", ""),
+         "geocode_precision": geo.get("geocode_precision", ""),
++        "state_abbr": geo.get("state_abbr", ""),
+     })
+     flood_info["nfip_participates"] = community_data.get("nfip_participates", True)
