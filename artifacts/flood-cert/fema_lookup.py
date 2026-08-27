@@ -1930,7 +1930,9 @@ async def check_loma_at_point(lat: float, lon: float) -> dict | None:
                 cur.execute("""
                     SELECT case_number, project_category, status, outcome,
                            reval_stat, community_id, community_name,
-                           date_ended, pdf_link, record_type
+                           date_ended, pdf_link, record_type,
+                           outcome_zone, amendment_type, effective_date,
+                           outcome_community_id, outcome_community_name
                     FROM loma_records
                     WHERE ABS(lat - %s) < 0.005
                       AND ABS(lon - %s) < 0.005
@@ -1942,11 +1944,38 @@ async def check_loma_at_point(lat: float, lon: float) -> dict | None:
                     print(f"[LOMA] Cache hit: {row['case_number']} at ({lat},{lon})")
                     outcome = row.get("outcome") or ""
                     reval_stat = row.get("reval_stat") or ""
+                    project_category = row.get("project_category")
+                    legacy_zone = row.get("outcome_zone")
+                    if not project_category and not outcome and not reval_stat and legacy_zone:
+                        # Legacy row predating the new schema columns. The old
+                        # live-fetch path queried a nonexistent FEMA layer and
+                        # always failed silently, so any row with outcome_zone
+                        # populated here can only have been entered by a human
+                        # who verified the actual LOMC document -- trust it,
+                        # and surface the real recorded zone code rather than
+                        # the generic non-fabricating label used for live
+                        # results (which genuinely lack a structured zone).
+                        print(f"[LOMA] Legacy cache row (pre-schema): {row['case_number']} zone={legacy_zone}")
+                        loma_result = {
+                            "case_number":       row["case_number"],
+                            "project_category":  row.get("amendment_type"),
+                            "status":            "Effective",
+                            "outcome":           None,
+                            "reval_stat":        None,
+                            "community_id":      row.get("outcome_community_id"),
+                            "community_name":    row.get("outcome_community_name"),
+                            "date_ended":        str(row["effective_date"]) if row.get("effective_date") else None,
+                            "pdf_link":          None,
+                            "auto_removal_eligible": True,
+                            "supersession_flag":     False,
+                            "legacy_zone_code":  legacy_zone,
+                        }
+                        return {"loma": loma_result, "lomr": None}
                     supersession_flag = reval_stat in _LOMA_SUPERSEDED_REVAL_STATES
                     auto_eligible = (outcome in _LOMA_AUTO_REMOVAL_OUTCOMES) and not supersession_flag
                     loma_result = {
                         "case_number":       row["case_number"],
-                        "project_category":  row.get("project_category"),
+                        "project_category":  project_category,
                         "status":            row.get("status"),
                         "outcome":           outcome or None,
                         "reval_stat":        reval_stat or None,
@@ -1956,6 +1985,7 @@ async def check_loma_at_point(lat: float, lon: float) -> dict | None:
                         "pdf_link":          row.get("pdf_link"),
                         "auto_removal_eligible": auto_eligible,
                         "supersession_flag":     supersession_flag,
+                        "legacy_zone_code":  None,
                     }
                     return {"loma": loma_result, "lomr": None}
     except Exception as e:

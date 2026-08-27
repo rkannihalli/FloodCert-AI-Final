@@ -180,7 +180,7 @@ async def _check_lol_record(mon: dict) -> None:
         loma_result = await check_loma_at_point(float(lat), float(lon))
         loma_data = loma_result.get("loma") if loma_result else None
         if loma_data and loma_data.get("auto_removal_eligible"):
-            new_info["flood_zone"] = "X (per LOMA/LOMR-F -- shading subtype not specified in FEMA determination data)"
+            new_info["flood_zone"] = loma_data.get("legacy_zone_code") or "X (per LOMA/LOMR-F -- shading subtype not specified in FEMA determination data)"
             new_info["sfha_status"] = "No"
             new_info["insurance_required"] = "No — Flood insurance is not federally required"
             print(f"[LOL] LOMA/LOMR-F override applied for monitoring_id={mon['id']}: {loma_data.get('case_number')} ({loma_data.get('project_category')})")
@@ -1093,7 +1093,7 @@ async def generate(
     loma_original_zone = None
     if loma_data and loma_data.get("auto_removal_eligible"):
         loma_original_zone = flood_info["flood_zone"]
-        flood_info["flood_zone"] = "X (per LOMA/LOMR-F -- shading subtype not specified in FEMA determination data)"
+        flood_info["flood_zone"] = loma_data.get("legacy_zone_code") or "X (per LOMA/LOMR-F -- shading subtype not specified in FEMA determination data)"
         flood_info["sfha_status"] = "No"
         flood_info["insurance_required"] = "No"
         # If this LOMA/LOMR-F record carries a community override (e.g. the property
@@ -1462,8 +1462,14 @@ async def history_detail(request: Request, record_id: int):
     loma_case = record.get("loma_case_number")
     loma_zone = record.get("loma_original_zone")
     if loma_case and loma_zone:
-        if record.get("flood_zone") != "X (per LOMA/LOMR-F -- shading subtype not specified in FEMA determination data)":
-            record["flood_zone"] = "X (per LOMA/LOMR-F -- shading subtype not specified in FEMA determination data)"
+        # LOMA/LOMR-F was applied at generation/recheck time (case number +
+        # original zone are saved). Only verify SFHA-status consistency here
+        # -- never touch flood_zone, since the correct value (either a real
+        # recorded zone code from a legacy verified cache row, or the
+        # generic non-fabricating label for live results) was already saved
+        # correctly at that time, and comparing against a single hardcoded
+        # string would wrongly overwrite whichever valid form doesn't match.
+        if record.get("sfha_status") != "No":
             record["sfha_status"] = "No"
             record["insurance_required"] = "No — Flood insurance is not federally required"
     elif record.get("lat") and record.get("lon"):
@@ -1474,7 +1480,7 @@ async def history_detail(request: Request, record_id: int):
             loma_data = loma_result.get("loma") if loma_result else None
             if loma_data and loma_data.get("auto_removal_eligible"):
                 original_zone = record["flood_zone"]
-                record["flood_zone"] = "X (per LOMA/LOMR-F -- shading subtype not specified in FEMA determination data)"
+                record["flood_zone"] = loma_data.get("legacy_zone_code") or "X (per LOMA/LOMR-F -- shading subtype not specified in FEMA determination data)"
                 record["sfha_status"] = "No"
                 record["insurance_required"] = "No — Flood insurance is not federally required"
                 record["loma_case_number"] = loma_data.get("case_number")
@@ -1520,7 +1526,7 @@ async def history_download_certificate(record_id: int):
             loma_data = loma_result.get("loma") if loma_result else None
             if loma_data and loma_data.get("auto_removal_eligible"):
                 record["loma_original_zone"] = record.get("flood_zone")
-                record["flood_zone"] = "X (per LOMA/LOMR-F -- shading subtype not specified in FEMA determination data)"
+                record["flood_zone"] = loma_data.get("legacy_zone_code") or "X (per LOMA/LOMR-F -- shading subtype not specified in FEMA determination data)"
                 record["sfha_status"] = "No"
                 record["insurance_required"] = "No — Flood insurance is not federally required"
                 record["loma_case_number"] = loma_data.get("case_number")
