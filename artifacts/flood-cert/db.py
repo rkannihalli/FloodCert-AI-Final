@@ -109,6 +109,9 @@ def init_db():
             "ALTER TABLE determinations ADD COLUMN IF NOT EXISTS city TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE determinations ADD COLUMN IF NOT EXISTS state_abbr TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE determinations ADD COLUMN IF NOT EXISTS nfip_program_type TEXT",
+            "ALTER TABLE determinations ADD COLUMN IF NOT EXISTS cbrs_unit TEXT",
+            "ALTER TABLE determinations ADD COLUMN IF NOT EXISTS cbrs_name TEXT",
+            "ALTER TABLE determinations ADD COLUMN IF NOT EXISTS cbrs_unit_type TEXT",
             "ALTER TABLE determinations ADD COLUMN IF NOT EXISTS loma_case_number TEXT",
             "ALTER TABLE determinations ADD COLUMN IF NOT EXISTS loma_amendment_type TEXT",
             "ALTER TABLE determinations ADD COLUMN IF NOT EXISTS loma_effective_date TEXT",
@@ -196,6 +199,9 @@ def save_determination(data: dict) -> int:
         "state_abbr": "",
         "nfip_participates": True,
         "nfip_program_type": None,
+        "cbrs_unit": None,
+        "cbrs_name": None,
+        "cbrs_unit_type": None,
         "loma_case_number": None,
         "loma_amendment_type": None,
         "loma_effective_date": None,
@@ -227,6 +233,9 @@ def save_determination(data: dict) -> int:
                         city=%(city)s, state_abbr=%(state_abbr)s,
                         nfip_participates=%(nfip_participates)s,
                         nfip_program_type=%(nfip_program_type)s,
+                        cbrs_unit=%(cbrs_unit)s,
+                        cbrs_name=%(cbrs_name)s,
+                        cbrs_unit_type=%(cbrs_unit_type)s,
                         loma_case_number=%(loma_case_number)s,
                         loma_amendment_type=%(loma_amendment_type)s,
                         loma_effective_date=%(loma_effective_date)s,
@@ -244,6 +253,7 @@ def save_determination(data: dict) -> int:
                         panel_number, panel_effective_date, community_number, community_name,
                         determination_date, determination_date_iso, created_at,
                         company_id, user_id, county, city, state_abbr, nfip_participates, nfip_program_type,
+                        cbrs_unit, cbrs_name, cbrs_unit_type,
                         loma_case_number, loma_amendment_type, loma_effective_date,
                         loma_original_zone, loma_note
                     ) VALUES (
@@ -253,6 +263,7 @@ def save_determination(data: dict) -> int:
                         %(panel_number)s, %(panel_effective_date)s, %(community_number)s, %(community_name)s,
                         %(determination_date)s, %(determination_date_iso)s, %(created_at)s,
                         %(company_id)s, %(user_id)s, %(county)s, %(city)s, %(state_abbr)s, %(nfip_participates)s, %(nfip_program_type)s,
+                        %(cbrs_unit)s, %(cbrs_name)s, %(cbrs_unit_type)s,
                         %(loma_case_number)s, %(loma_amendment_type)s, %(loma_effective_date)s,
                         %(loma_original_zone)s, %(loma_note)s
                     ) RETURNING id

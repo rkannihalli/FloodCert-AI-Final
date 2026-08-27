@@ -1835,6 +1835,62 @@ async def query_nfip_program_type(community_id: str) -> dict:
         return {"program_type": None, "participates": None}
 
 
+async def query_cbrs_at_point(lat: float, lon: float) -> dict:
+    """
+    Check whether a point falls within a Coastal Barrier Resources System
+    (CBRS) unit, via the U.S. Fish & Wildlife Service's live CBRS Units
+    layer. CBRS designation makes federal flood insurance largely
+    unavailable for new/substantially-improved construction, independent
+    of flood zone.
+
+    Confirmed against live data (Aug 2026): the Unit_Type field directly
+    distinguishes "System Unit" (CBRA) from "Otherwise Protected Area"
+    (OPA) -- no need to parse the "P" suffix on the Unit code, though it
+    matches (e.g. "NC-03P" / "Otherwise Protected Area" for Cape Hatteras,
+    confirmed live). There is no designation-date field anywhere in this
+    schema -- FWS's live spatial data does not expose one, so this
+    function never fabricates a date.
+
+    IMPORTANT: FWS's own documentation states these digital boundaries are
+    representations only and are not authoritative; official determinations
+    are recommended for properties within 20 feet of a CBRS boundary. This
+    function reports only whether the point falls inside a mapped unit --
+    it does not compute distance-to-boundary, so a "not in CBRS" result
+    for a boundary-adjacent property should not be treated as conclusive.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=12) as client:
+            r = await client.get(
+                "https://gis1.wim.usgs.gov/server/rest/services/CBRSMapper/"
+                "CoastalBarrierResourcesSystem/MapServer/3/query",
+                params={
+                    "geometry": f"{lon},{lat}",
+                    "geometryType": "esriGeometryPoint",
+                    "inSR": "4326",
+                    "spatialRel": "esriSpatialRelIntersects",
+                    "outFields": "Unit,Name,Unit_Type",
+                    "returnGeometry": "false",
+                    "f": "json",
+                },
+            )
+            data = r.json()
+        features = data.get("features", [])
+        if not features:
+            return {"in_cbrs": False, "unit": None, "name": None, "unit_type": None}
+        attrs = features[0]["attributes"]
+        result = {
+            "in_cbrs": True,
+            "unit": attrs.get("Unit"),
+            "name": attrs.get("Name"),
+            "unit_type": attrs.get("Unit_Type"),
+        }
+        print(f"[CBRS] Match: {result['unit']} ({result['name']}) type={result['unit_type']}")
+        return result
+    except Exception as e:
+        print(f"[CBRS] Lookup failed (non-fatal): {e}")
+        return {"in_cbrs": None, "unit": None, "name": None, "unit_type": None}
+
+
 async def check_loma_at_point(lat: float, lon: float) -> dict | None:
     """
     Check for a FEMA map-change determination at the given coordinates.

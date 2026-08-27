@@ -36,6 +36,7 @@ def generate_flood_certificate_pdf(data: dict) -> bytes:
     render_data["nfip_not_available"] = participates is not None and not participates
     render_data["nfip_regular"] = bool(participates) and program_type == "Regular"
     render_data["nfip_emergency"] = bool(participates) and program_type == "Emergency"
+    render_data["cbra_opa_checked"] = bool(render_data.get("cbrs_unit_type"))
 
     cert_bytes = _render_pdf("certificate_pdf.html", render_data)
     

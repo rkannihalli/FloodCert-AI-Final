@@ -212,10 +212,14 @@
     </tr>
     <tr>
       <td class="sfhdf-num">3.</td>
-      <td class="sfhdf-chk-cell"><span class="sfhdf-chk"></span></td>
+      <td class="sfhdf-chk-cell"><span class="sfhdf-chk">{% if cbra_opa_checked %}&#10005;{% endif %}</span></td>
       <td class="sfhdf-text">
         Building/Mobile Home is in a Coastal Barrier Resources Area (CBRA) or Otherwise Protected Area (OPA). Federal Flood Insurance may not be available.<br />
-        <span style="padding-left:4pt;">CBRA/OPA Designation Date: ___________</span>
+        {% if cbra_opa_checked %}
+        <span style="padding-left:4pt;">Unit: {{ cbrs_unit }} ({{ cbrs_unit_type }}) &mdash; {{ cbrs_name }}</span><br />
+        {% endif %}
+        <span style="padding-left:4pt;">CBRA/OPA Designation Date: Not available via automated lookup &mdash; verify at fws.gov/cbra</span><br />
+        <span style="padding-left:4pt; font-size:8pt; font-style:italic;">Determined via U.S. Fish &amp; Wildlife Service CBRS boundary data (representational, not authoritative). Properties within 20 feet of a mapped CBRS boundary should obtain an official determination from FWS.</span>
       </td>
     </tr>
   </table>

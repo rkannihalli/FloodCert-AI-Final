@@ -1083,6 +1083,14 @@ async def generate(
     nfip_program_info = await query_nfip_program_type(community_data.get("community_id", ""))
     nfip_program_type = nfip_program_info.get("program_type")
 
+    # CBRA/OPA -- confirmed via U.S. Fish & Wildlife Service's live CBRS
+    # Units layer; see query_cbrs_at_point docstring for field/limitation notes.
+    from fema_lookup import query_cbrs_at_point
+    cbrs_info = await query_cbrs_at_point(geo_result["lat"], geo_result["lon"])
+    cbrs_unit = cbrs_info.get("unit")
+    cbrs_name = cbrs_info.get("name")
+    cbrs_unit_type = cbrs_info.get("unit_type")
+
     geo_lat = geo_result["lat"]
     geo_lon = geo_result["lon"]
     geo_matched = geo_result.get("matched_address", property_address)
@@ -1144,6 +1152,9 @@ async def generate(
         "city": geo_result.get("city", ""),
         "state_abbr": geo_result.get("state_abbr", ""),
         "nfip_program_type": nfip_program_type,
+        "cbrs_unit": cbrs_unit,
+        "cbrs_name": cbrs_name,
+        "cbrs_unit_type": cbrs_unit_type,
         "flood_zone": flood_info["flood_zone"],
         "flood_zone_description": flood_info["flood_zone_description"],
         "sfha_status": flood_info["sfha_status"],
@@ -1230,10 +1241,14 @@ async def download_certificate(
     state_abbr: str = Form(default=""),
     nfip_participates: str = Form(default=""),
     nfip_program_type: str = Form(default=""),
+    cbrs_unit: str = Form(default=""),
+    cbrs_name: str = Form(default=""),
+    cbrs_unit_type: str = Form(default=""),
 ):
     data = dict(locals())
-    # Convert empty strings to None for loma fields
-    for f in ("loma_case_number","loma_amendment_type","loma_effective_date","loma_original_zone","loma_note"):
+    # Convert empty strings to None for loma/cbrs fields
+    for f in ("loma_case_number","loma_amendment_type","loma_effective_date","loma_original_zone","loma_note",
+              "cbrs_unit","cbrs_name","cbrs_unit_type"):
         if not data.get(f):
             data[f] = None
     # These arrive as submitted strings (HTML forms have no native bool/None
@@ -1289,10 +1304,14 @@ async def download_notice(
     state_abbr: str = Form(default=""),
     nfip_participates: str = Form(default=""),
     nfip_program_type: str = Form(default=""),
+    cbrs_unit: str = Form(default=""),
+    cbrs_name: str = Form(default=""),
+    cbrs_unit_type: str = Form(default=""),
 ):
     data = dict(locals())
-    # Convert empty strings to None for loma fields
-    for f in ("loma_case_number","loma_amendment_type","loma_effective_date","loma_original_zone","loma_note"):
+    # Convert empty strings to None for loma/cbrs fields
+    for f in ("loma_case_number","loma_amendment_type","loma_effective_date","loma_original_zone","loma_note",
+              "cbrs_unit","cbrs_name","cbrs_unit_type"):
         if not data.get(f):
             data[f] = None
     # These arrive as submitted strings (HTML forms have no native bool/None
