@@ -303,6 +303,10 @@
         <input type="hidden" name="loma_effective_date" value="{{ data.loma_effective_date or '' }}" />
         <input type="hidden" name="loma_original_zone"  value="{{ data.loma_original_zone or '' }}" />
         <input type="hidden" name="loma_note"           value="{{ data.loma_note or '' }}" />
+        <input type="hidden" name="city"                value="{{ data.city or '' }}" />
+        <input type="hidden" name="state_abbr"          value="{{ data.state_abbr or '' }}" />
+        <input type="hidden" name="nfip_participates"   value="{{ data.nfip_participates }}" />
+        <input type="hidden" name="nfip_program_type"   value="{{ data.nfip_program_type or '' }}" />
         <input type="hidden" name="cert_number"         value="{{ data.cert_number or '' }}" />
         <button type="submit" class="btn-download">📄 Download Flood Certificate (PDF)</button>
       </form>

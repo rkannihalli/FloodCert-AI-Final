@@ -1226,12 +1226,21 @@ async def download_certificate(
     loma_original_zone: str = Form(default=""),
     loma_note: str = Form(default=""),
     cert_number: str = Form(default=""),
+    city: str = Form(default=""),
+    state_abbr: str = Form(default=""),
+    nfip_participates: str = Form(default=""),
+    nfip_program_type: str = Form(default=""),
 ):
     data = dict(locals())
     # Convert empty strings to None for loma fields
     for f in ("loma_case_number","loma_amendment_type","loma_effective_date","loma_original_zone","loma_note"):
         if not data.get(f):
             data[f] = None
+    # These arrive as submitted strings (HTML forms have no native bool/None
+    # types) -- convert back to the real types generate_flood_certificate_pdf
+    # expects, matching what certificate_data/the DB record actually hold.
+    data["nfip_participates"] = nfip_participates in ("True", "true", "1")
+    data["nfip_program_type"] = nfip_program_type or None
     try:
         data["map_image_b64"] = await generate_map_image(float(lat), float(lon))
     except Exception as e:
@@ -1276,12 +1285,21 @@ async def download_notice(
     loma_original_zone: str = Form(default=""),
     loma_note: str = Form(default=""),
     cert_number: str = Form(default=""),
+    city: str = Form(default=""),
+    state_abbr: str = Form(default=""),
+    nfip_participates: str = Form(default=""),
+    nfip_program_type: str = Form(default=""),
 ):
     data = dict(locals())
     # Convert empty strings to None for loma fields
     for f in ("loma_case_number","loma_amendment_type","loma_effective_date","loma_original_zone","loma_note"):
         if not data.get(f):
             data[f] = None
+    # These arrive as submitted strings (HTML forms have no native bool/None
+    # types) -- convert back to the real types generate_flood_certificate_pdf
+    # expects, matching what certificate_data/the DB record actually hold.
+    data["nfip_participates"] = nfip_participates in ("True", "true", "1")
+    data["nfip_program_type"] = nfip_program_type or None
     data["map_image_b64"] = await generate_map_image(float(lat), float(lon))
     pdf_bytes = generate_borrower_notice_pdf(data)
     filename = f"borrower_notice_{loan_id}.pdf".replace(" ", "_")
