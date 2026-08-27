@@ -26,21 +26,32 @@ NFHL_EXPORT_URL = (
 
 MAP_WIDTH = 800
 MAP_HEIGHT = 480
-BBOX_PAD = 0.006   # ~650m half-width — tighter zoom for precise property location
+BBOX_PAD = 0.006   # ~650m half-width — general flood-zone context view
+BBOX_PAD_TIGHT = 0.001  # ~222m total width — parcel-level view, used when a
+                        # building footprint is found (at the wider zoom, a
+                        # single building is only a handful of pixels across)
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 BUILDING_SEARCH_RADIUS_M = 60  # search radius for nearest building footprint
 
 
-def _bbox(lat: float, lon: float) -> str:
-    return f"{lon - BBOX_PAD},{lat - BBOX_PAD},{lon + BBOX_PAD},{lat + BBOX_PAD}"
+def _bbox(lat: float, lon: float, pad: float = BBOX_PAD) -> str:
+    return f"{lon - pad},{lat - pad},{lon + pad},{lat + pad}"
 
 
 async def generate_map_image(lat: float, lon: float) -> Optional[str]:
     """
-    Return base64-encoded JPEG of composited imagery + NFHL + pin, or None on failure.
+    Return base64-encoded JPEG of composited imagery + NFHL + pin, or None on
+    failure. Zoom level adapts: if a building footprint is found nearby, the
+    map renders at a tighter, parcel-level zoom so the footprint is actually
+    visible (at the default wider zoom, a single building is only a handful
+    of pixels across); otherwise it stays at the wider flood-zone-context
+    zoom, which is more useful when there's no footprint detail to show.
     """
-    bbox = _bbox(lat, lon)
+    footprint = await _fetch_building_footprint(lat, lon)
+    pad = BBOX_PAD_TIGHT if footprint else BBOX_PAD
+
+    bbox = _bbox(lat, lon, pad)
     size_str = f"{MAP_WIDTH},{MAP_HEIGHT}"
     common = {"bbox": bbox, "bboxSR": "4326", "size": size_str, "imageSR": "4326", "f": "image"}
 
@@ -71,9 +82,8 @@ async def generate_map_image(lat: float, lon: float) -> Optional[str]:
         else:
             composite = base_img
 
-        footprint = await _fetch_building_footprint(lat, lon)
         if footprint:
-            _draw_footprint(composite, lat, lon, footprint)
+            _draw_footprint(composite, lat, lon, footprint, pad)
 
         _draw_pin(composite, MAP_WIDTH // 2, MAP_HEIGHT // 2)
         _draw_coord_label(composite, lat, lon)
@@ -127,12 +137,12 @@ async def _fetch_building_footprint(lat: float, lon: float) -> "Optional[list]":
         return None
 
 
-def _draw_footprint(img, center_lat, center_lon, footprint):
+def _draw_footprint(img, center_lat, center_lon, footprint, pad):
     """Draw the building footprint polygon outline (and light fill) on the
     composite image, using the same linear bbox-to-pixel mapping the ArcGIS
     export services already use for this image (bboxSR=4326, unprojected)."""
     draw = ImageDraw.Draw(img, "RGBA")
-    half = BBOX_PAD
+    half = pad
     pts = []
     for flat, flon in footprint:
         x = (flon - (center_lon - half)) / (2 * half) * MAP_WIDTH
