@@ -1789,6 +1789,52 @@ _LOMA_AUTO_REMOVAL_OUTCOMES = {"Property removed", "Property out as shown"}
 _LOMA_SUPERSEDED_REVAL_STATES = {"Superseded", "Reevaluated", "Contact Community"}
 
 
+async def query_nfip_program_type(community_id: str) -> dict:
+    """
+    Look up whether an NFIP community participates under the Regular Program
+    or the Emergency Program, via FEMA's Community Status Book API.
+
+    Confirmed against live data (Aug 2026): FEMA's regularEmergencyProgramDate
+    field has no separate boolean/category field -- it's a plain date string
+    (e.g. "05/01/92") for Regular Program communities, and carries a literal
+    "(E)" suffix (e.g. "02/13/24(E)") for Emergency Program communities. That
+    suffix is the only signal for this distinction in the API.
+    """
+    cid = (community_id or "").strip()
+    if not cid:
+        return {"program_type": None, "participates": None}
+    try:
+        async with httpx.AsyncClient(timeout=12) as client:
+            r = await client.get(
+                "https://www.fema.gov/api/open/v1/NfipCommunityStatusBook",
+                params={
+                    "$filter": f"communityIdNumber eq '{cid}'",
+                    "$top": 1,
+                    "$format": "json",
+                },
+            )
+            data = r.json()
+        records = data.get("NfipCommunityStatusBook", [])
+        if not records:
+            return {"program_type": None, "participates": None}
+        rec = records[0]
+        participates = rec.get("participatingInNFIP")
+        date_str = (rec.get("regularEmergencyProgramDate") or "").strip()
+        if not participates:
+            program_type = None
+        elif date_str.endswith("(E)"):
+            program_type = "Emergency"
+        elif date_str:
+            program_type = "Regular"
+        else:
+            program_type = None
+        print(f"[NFIP-CSB] {cid}: participates={participates} program_type={program_type}")
+        return {"program_type": program_type, "participates": participates}
+    except Exception as e:
+        print(f"[NFIP-CSB] Program type lookup failed (non-fatal): {e}")
+        return {"program_type": None, "participates": None}
+
+
 async def check_loma_at_point(lat: float, lon: float) -> dict | None:
     """
     Check for a FEMA map-change determination at the given coordinates.

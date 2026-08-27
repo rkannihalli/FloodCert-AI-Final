@@ -1077,6 +1077,12 @@ async def generate(
     })
     flood_info["nfip_participates"] = community_data.get("nfip_participates", True)
 
+    # NFIP Regular vs Emergency Program -- confirmed via FEMA's Community
+    # Status Book API; see query_nfip_program_type docstring for field notes.
+    from fema_lookup import query_nfip_program_type
+    nfip_program_info = await query_nfip_program_type(community_data.get("community_id", ""))
+    nfip_program_type = nfip_program_info.get("program_type")
+
     geo_lat = geo_result["lat"]
     geo_lon = geo_result["lon"]
     geo_matched = geo_result.get("matched_address", property_address)
@@ -1137,6 +1143,7 @@ async def generate(
         "lat": geo_lat, "lon": geo_lon,
         "city": geo_result.get("city", ""),
         "state_abbr": geo_result.get("state_abbr", ""),
+        "nfip_program_type": nfip_program_type,
         "flood_zone": flood_info["flood_zone"],
         "flood_zone_description": flood_info["flood_zone_description"],
         "sfha_status": flood_info["sfha_status"],

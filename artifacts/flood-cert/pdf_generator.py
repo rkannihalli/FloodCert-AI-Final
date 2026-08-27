@@ -24,7 +24,20 @@ def _render_pdf(template_name: str, data: dict) -> bytes:
 
 def generate_flood_certificate_pdf(data: dict) -> bytes:
     """Generate flood certificate PDF, appending LOMA summary page if LOMA exists."""
-    cert_bytes = _render_pdf("certificate_pdf.html", data)
+    # Derive the four Section-C checkbox flags here, once, so every call site
+    # (generation, history recheck, PDF regen) renders consistently. These
+    # template variables (nfip_ok, nfip_not_available) were previously never
+    # set anywhere in the codebase, so Section C silently rendered blank on
+    # every certificate regardless of actual NFIP participation status.
+    render_data = dict(data)
+    participates = render_data.get("nfip_participates")
+    program_type = render_data.get("nfip_program_type")
+    render_data["nfip_ok"] = bool(participates)
+    render_data["nfip_not_available"] = participates is not None and not participates
+    render_data["nfip_regular"] = bool(participates) and program_type == "Regular"
+    render_data["nfip_emergency"] = bool(participates) and program_type == "Emergency"
+
+    cert_bytes = _render_pdf("certificate_pdf.html", render_data)
     
     # Append LOMA summary page if this property has a LOMA/LOMR
     if data.get("loma_case_number"):

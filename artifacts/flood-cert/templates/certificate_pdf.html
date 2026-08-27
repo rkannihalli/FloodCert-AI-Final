@@ -198,10 +198,10 @@
       <td class="sfhdf-text">
         Federal Flood Insurance is available (community participates in the NFIP).
         &nbsp;&nbsp;
-        <span class="sfhdf-chk">{% if nfip_ok %}&#10005;{% endif %}</span>
+        <span class="sfhdf-chk">{% if nfip_regular %}&#10005;{% endif %}</span>
         <strong>Regular Program</strong>
         &nbsp;&nbsp;&nbsp;
-        <span class="sfhdf-chk"></span>
+        <span class="sfhdf-chk">{% if nfip_emergency %}&#10005;{% endif %}</span>
         Emergency Program of NFIP
       </td>
     </tr>
