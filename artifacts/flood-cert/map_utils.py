@@ -28,6 +28,9 @@ MAP_WIDTH = 800
 MAP_HEIGHT = 480
 BBOX_PAD = 0.006   # ~650m half-width — tighter zoom for precise property location
 
+OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+BUILDING_SEARCH_RADIUS_M = 60  # search radius for nearest building footprint
+
 
 def _bbox(lat: float, lon: float) -> str:
     return f"{lon - BBOX_PAD},{lat - BBOX_PAD},{lon + BBOX_PAD},{lat + BBOX_PAD}"
@@ -68,6 +71,10 @@ async def generate_map_image(lat: float, lon: float) -> Optional[str]:
         else:
             composite = base_img
 
+        footprint = await _fetch_building_footprint(lat, lon)
+        if footprint:
+            _draw_footprint(composite, lat, lon, footprint)
+
         _draw_pin(composite, MAP_WIDTH // 2, MAP_HEIGHT // 2)
         _draw_coord_label(composite, lat, lon)
 
@@ -78,6 +85,61 @@ async def generate_map_image(lat: float, lon: float) -> Optional[str]:
     except Exception as exc:
         logger.warning("Map image generation failed: %s", exc)
         return None
+
+
+async def _fetch_building_footprint(lat: float, lon: float) -> "Optional[list]":
+    """
+    Query OpenStreetMap (via the Overpass API) for the building footprint
+    nearest the given point, within a small search radius. Returns a list
+    of (lat, lon) tuples forming the closed polygon, or None if no building
+    is found nearby or the lookup fails.
+
+    Non-fatal by design, matching the NFHL-overlay fallback already used in
+    this module: OSM building coverage is inconsistent, especially in rural
+    areas, so a None result here is common and expected, not an error -- the
+    map still renders correctly without a footprint overlay.
+    """
+    query = (
+        '[out:json][timeout:15];'
+        'way["building"](around:%s,%s,%s);'
+        'out geom;'
+    ) % (BUILDING_SEARCH_RADIUS_M, lat, lon)
+    try:
+        async with httpx.AsyncClient(timeout=18.0) as client:
+            resp = await client.post(OVERPASS_URL, data={"data": query})
+            data = resp.json()
+        elements = [el for el in data.get("elements", []) if el.get("geometry")]
+        if not elements:
+            return None
+
+        def _centroid(geom):
+            lats = [n["lat"] for n in geom]
+            lons = [n["lon"] for n in geom]
+            return (sum(lats) / len(lats), sum(lons) / len(lons))
+
+        def _dist2(pt):
+            return (pt[0] - lat) ** 2 + (pt[1] - lon) ** 2
+
+        best = min(elements, key=lambda el: _dist2(_centroid(el["geometry"])))
+        return [(n["lat"], n["lon"]) for n in best["geometry"]]
+    except Exception as e:
+        logger.info("Building footprint lookup failed (non-fatal): %s", e)
+        return None
+
+
+def _draw_footprint(img, center_lat, center_lon, footprint):
+    """Draw the building footprint polygon outline (and light fill) on the
+    composite image, using the same linear bbox-to-pixel mapping the ArcGIS
+    export services already use for this image (bboxSR=4326, unprojected)."""
+    draw = ImageDraw.Draw(img, "RGBA")
+    half = BBOX_PAD
+    pts = []
+    for flat, flon in footprint:
+        x = (flon - (center_lon - half)) / (2 * half) * MAP_WIDTH
+        y = (half + center_lat - flat) / (2 * half) * MAP_HEIGHT
+        pts.append((x, y))
+    if len(pts) >= 3:
+        draw.polygon(pts, fill=(255, 215, 0, 60), outline=(255, 215, 0, 255), width=3)
 
 
 def _draw_pin(img: Image.Image, cx: int, cy: int) -> None:
