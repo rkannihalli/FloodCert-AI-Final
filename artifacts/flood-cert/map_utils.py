@@ -31,7 +31,15 @@ BBOX_PAD_TIGHT = 0.001  # ~222m total width — parcel-level view, used when a
                         # building footprint is found (at the wider zoom, a
                         # single building is only a handful of pixels across)
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+# overpass-api.de was confirmed (live testing, Aug 2026) to consistently
+# reject requests from this deployment's IP range with 406 Not Acceptable,
+# reproducible across multiple attempts and unrelated to headers/User-Agent.
+# overpass.osm.ch and the maps.mail.ru mirror both returned valid data from
+# the same IP, so those are used instead, in order, with automatic fallback.
+OVERPASS_URLS = [
+    "https://overpass.osm.ch/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+]
 BUILDING_SEARCH_RADIUS_M = 60  # search radius for nearest building footprint
 
 
@@ -114,27 +122,33 @@ async def _fetch_building_footprint(lat: float, lon: float) -> "Optional[list]":
         'way["building"](around:%s,%s,%s);'
         'out geom;'
     ) % (BUILDING_SEARCH_RADIUS_M, lat, lon)
-    try:
-        async with httpx.AsyncClient(timeout=18.0) as client:
-            resp = await client.post(OVERPASS_URL, data={"data": query})
-            data = resp.json()
-        elements = [el for el in data.get("elements", []) if el.get("geometry")]
-        if not elements:
-            return None
 
-        def _centroid(geom):
-            lats = [n["lat"] for n in geom]
-            lons = [n["lon"] for n in geom]
-            return (sum(lats) / len(lats), sum(lons) / len(lons))
+    def _centroid(geom):
+        lats = [n["lat"] for n in geom]
+        lons = [n["lon"] for n in geom]
+        return (sum(lats) / len(lats), sum(lons) / len(lons))
 
-        def _dist2(pt):
-            return (pt[0] - lat) ** 2 + (pt[1] - lon) ** 2
+    def _dist2(pt):
+        return (pt[0] - lat) ** 2 + (pt[1] - lon) ** 2
 
-        best = min(elements, key=lambda el: _dist2(_centroid(el["geometry"])))
-        return [(n["lat"], n["lon"]) for n in best["geometry"]]
-    except Exception as e:
-        logger.info("Building footprint lookup failed (non-fatal): %s", e)
-        return None
+    for url in OVERPASS_URLS:
+        try:
+            async with httpx.AsyncClient(timeout=18.0) as client:
+                resp = await client.post(url, data={"data": query})
+                data = resp.json()
+            elements = [el for el in data.get("elements", []) if el.get("geometry")]
+            if not elements:
+                # A working mirror gave a real (empty) answer -- trust it;
+                # no need to ask the other mirrors the same question.
+                return None
+            best = min(elements, key=lambda el: _dist2(_centroid(el["geometry"])))
+            return [(n["lat"], n["lon"]) for n in best["geometry"]]
+        except Exception as e:
+            logger.info("Overpass mirror %s failed (trying next, non-fatal): %s", url, e)
+            continue
+
+    logger.info("Building footprint lookup failed on all mirrors (non-fatal)")
+    return None
 
 
 def _draw_footprint(img, center_lat, center_lon, footprint, pad):
