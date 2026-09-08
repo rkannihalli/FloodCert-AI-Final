@@ -1259,12 +1259,32 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "", commun
             # suffix (e.g. "37067C 6867J"). FEMA's NFHL schema commonly
             # carries the panel digits and suffix in separate PANEL/SUFFIX
             # attributes alongside FIRM_PAN. If present and populated, use
-            # them to build the traditional format directly. This is safe
-            # by construction: if these fields are absent or don't produce
-            # a plausible value, firm_pan is left as computed above
-            # (today's existing behavior) rather than being overwritten
-            # with something worse.
-            if dfirm:
+            # them to build the traditional format directly.
+            #
+            # IMPORTANT -- confirmed against real test data (High Point, NC
+            # / Guilford County, Aug 2026): this reconstruction can produce
+            # a specific WRONG panel number, not just a worse placeholder.
+            # For that address, FIRM_PAN was "3710780000K" (internal
+            # statewide numbering, correctly discarded above as a county
+            # mismatch against DFIRM_ID "37081C"), and this fallback then
+            # combined that SAME unreliable record's PANEL="7800"/SUFFIX="K"
+            # with DFIRM_ID to build "37081C 7800K" -- a panel number that
+            # does not appear anywhere in FEMA's own effective, historic, or
+            # preliminary product catalog for that jurisdiction (confirmed
+            # via FEMA's Map Service Center). The genuinely effective panel
+            # there is "3710780000J", under the OLD internal numbering
+            # scheme, dated 2007 -- not the DFIRM-prefixed format this
+            # fallback constructs. PANEL/SUFFIX come from the identical
+            # record whose FIRM_PAN just failed the mismatch check above, so
+            # they are not independently more trustworthy.
+            #
+            # Fixed to: (1) only run as a true fallback, when the primary
+            # FIRM_PAN path produced nothing at all -- never silently
+            # override an already-valid firm_pan; (2) always mark the
+            # result low-confidence with a verification note, since this is
+            # a best-effort reconstruction that has now been confirmed
+            # wrong in at least one real case, not a verified FEMA value.
+            if dfirm and not firm_pan:
                 panel_num = str(attrs.get("PANEL") or attrs.get("PANEL_NO") or
                                  attrs.get("PANEL_NUM") or "").strip()
                 suffix = str(attrs.get("SUFFIX") or attrs.get("SUFF") or
@@ -1272,8 +1292,20 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "", commun
                 if panel_num and suffix and panel_num.isdigit() and len(suffix) == 1 and suffix.isalpha():
                     candidate = f"{dfirm.strip().upper()} {panel_num.zfill(4)}{suffix.upper()}"
                     print(f"[PANEL-DEBUG] Constructed candidate from PANEL/SUFFIX fields: {candidate!r} "
-                          f"(previous firm_pan was {firm_pan!r})")
+                          f"(previous firm_pan was {firm_pan!r}) -- flagging low confidence, unverified")
                     firm_pan = candidate
+                    panel_confidence = "low"
+                    panel_confidence_note = (
+                        f"This panel number ({candidate}) was reconstructed from separate "
+                        f"PANEL/SUFFIX fields because FEMA's primary panel identifier for "
+                        f"this location uses an internal numbering scheme that doesn't "
+                        f"match the standard format -- a known anomaly on some "
+                        f"'Statewide, Panel Printed' NFHL records. This reconstruction is "
+                        f"unverified and has been confirmed incorrect in at least one real "
+                        f"case. Recommend confirming the panel number and effective date "
+                        f"directly against the FEMA Map Service Center (msc.fema.gov) "
+                        f"before relying on it."
+                    )
 
             print(f"[PANEL-DEBUG] Final firm_panel_l3={firm_pan!r}")
             return {
