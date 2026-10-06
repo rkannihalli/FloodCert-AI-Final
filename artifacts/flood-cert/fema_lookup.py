@@ -147,7 +147,7 @@ CT_PLANNING_REGION_TO_COUNTY: dict[str, str] = {
     "western connecticut planning region":           "Fairfield County",
 }
 
-FEMA_CSB_URL = "https://www.fema.gov/api/open/v2/fimaNfipCommunities"
+FEMA_CSB_URL = "https://www.fema.gov/api/open/v1/NfipCommunityStatusBook"
 
 _X500_SUBTYPES = frozenset({
     "0.2 PCT ANNUAL CHANCE FLOOD HAZARD",
@@ -1580,29 +1580,36 @@ async def query_nfip_community_csb(
 
     # ── 2. FEMA CSB API fallback ──────────────────────────────────────────────
     try:
-        params = {
-            "$filter": f"stateAbbreviation eq '{sa}' and countyFips eq '{county_fips}'",
-            "$select": "communityNumber,communityName,countyName",
-            "$top": "200",
-        }
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        if cid_wanted:
+            params = {
+                "$filter": f"communityIdNumber eq '{cid_wanted}'",
+                "$top": "5",
+            }
+        else:
+            city_upper = city.strip().upper()
+            if not city_upper:
+                return empty
+            params = {
+                "$filter": f"state eq '{sa}' and contains(communityName,'{city_upper}')",
+                "$top": "20",
+            }
+        async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(FEMA_CSB_URL, params=params)
             resp.raise_for_status()
             data = resp.json()
-        communities_api = data.get("fimaNfipCommunities", [])
-        if cid_wanted:
-            for c in communities_api:
-                if (c.get("communityNumber") or "").strip() == cid_wanted:
-                    return {"csb_community_id": c.get("communityNumber", ""),
-                            "csb_community_name": c.get("communityName", "")}
+        communities_api = data.get("NfipCommunityStatusBook", [])
+        if cid_wanted and communities_api:
+            c = communities_api[0]
+            return {"csb_community_id": c.get("communityIdNumber", ""),
+                    "csb_community_name": c.get("communityName", "")}
         city_norm = city.lower().strip()
         for c in communities_api:
             c_name = (c.get("communityName") or "").lower()
-            if city_norm and (c_name == city_norm or city_norm in c_name):
-                return {"csb_community_id": c.get("communityNumber", ""),
+            if city_norm and city_norm in c_name:
+                return {"csb_community_id": c.get("communityIdNumber", ""),
                         "csb_community_name": c.get("communityName", "")}
         if len(communities_api) == 1:
-            return {"csb_community_id": communities_api[0].get("communityNumber", ""),
+            return {"csb_community_id": communities_api[0].get("communityIdNumber", ""),
                     "csb_community_name": communities_api[0].get("communityName", "")}
     except Exception as e:
         print(f"FEMA CSB API fallback error: {e}")
