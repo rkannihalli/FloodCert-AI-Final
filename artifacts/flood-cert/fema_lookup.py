@@ -943,18 +943,28 @@ async def query_nfip_community(lat: float, lon: float, geocoded_city: str = "", 
             "resultRecordCount": "10",
             "f": "json",
         }
-        try:
-            async with httpx.AsyncClient(timeout=12.0, verify=False) as client:
-                resp = await client.get(f"{NFHL_BASE}/22/query", params=params)
-                resp.raise_for_status()
-                data = resp.json()
-            features = data.get("features", [])
-            if features:
-                all_features.extend(features)
-                break  # Got results, stop trying wider queries
-        except Exception as e:
-            print(f"NFIP community query (Layer 22) error ({q['geometryType']}): {e}")
-            continue
+        # Retry each query attempt once before giving up on it. FEMA's
+        # Layer 22 endpoint was confirmed (5/5 live test runs on one real
+        # address) to time out intermittently with a 12s timeout and no
+        # retry, producing a total lookup failure (empty community, which
+        # then cascades into "zone UNKNOWN" / "panel Not Available"
+        # downstream) even though the location itself has nothing unusual
+        # about it -- ordinary endpoint flakiness, not a real data gap.
+        features = []
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=25.0, verify=False) as client:
+                    resp = await client.get(f"{NFHL_BASE}/22/query", params=params)
+                    resp.raise_for_status()
+                    data = resp.json()
+                features = data.get("features", [])
+                break
+            except Exception as e:
+                print(f"NFIP community query (Layer 22) error ({q['geometryType']}, "
+                      f"attempt {attempt + 1}/2): {e}")
+        if features:
+            all_features.extend(features)
+            break  # Got results, stop trying wider queries
     
     if not all_features:
         return {}
