@@ -237,6 +237,56 @@ _PHOTON_OK_KEYS = frozenset({"building", "highway", "place", "addr"})
 
 
 async def geocode_address(address: str) -> Optional[dict]:
+    """Caching wrapper around _geocode_address_live.
+
+    The same address should always resolve to the same coordinates. Without
+    this cache, every call re-queries up to 7 different live geocoding
+    services in sequence (see _geocode_address_live below), and which one
+    succeeds -- and which coordinates come back -- can vary run-to-run due
+    to ordinary network conditions (timeouts, rate limits, which backend
+    node answers), especially right at the ArcGIS score>=90 rooftop
+    threshold. That was confirmed to produce visibly different
+    zone/panel/county results for the identical address across repeated
+    runs. Caching the first successful result and reusing it on every later
+    lookup makes results stable and cuts load on these free public services.
+    """
+    address_key = re.sub(r"\s+", " ", address).strip().upper()
+
+    try:
+        from db import get_cached_geocode
+        cached = get_cached_geocode(address_key)
+        if cached:
+            print(f"[GEOCODE] Cache hit for {address_key!r} -> "
+                  f"({cached.get('lat')}, {cached.get('lon')}) "
+                  f"source={cached.get('geocode_source')!r}")
+            return {
+                "lat": cached["lat"],
+                "lon": cached["lon"],
+                "matched_address": cached["matched_address"],
+                "city": cached["city"],
+                "state_abbr": cached["state_abbr"],
+                "state_fips": cached["state_fips"],
+                "county_fips": cached["county_fips"],
+                "county_name": cached["county_name"],
+                "geocode_precision": cached["geocode_precision"],
+                "geocode_source": cached["geocode_source"],
+            }
+    except Exception as e:
+        print(f"[GEOCODE] Cache lookup failed (non-fatal, proceeding live): {e}")
+
+    result = await _geocode_address_live(address)
+
+    if result:
+        try:
+            from db import save_geocode_cache
+            save_geocode_cache(address_key, address, result)
+        except Exception as e:
+            print(f"[GEOCODE] Cache save failed (non-fatal): {e}")
+
+    return result
+
+
+async def _geocode_address_live(address: str) -> Optional[dict]:
     """Geocode a US address to lat/lon + county FIPS.
 
     Fallback chain:

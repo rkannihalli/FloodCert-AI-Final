@@ -40,7 +40,7 @@ from db import (
     get_user_by_reset_token, set_reset_token, clear_reset_token,
     init_companies, get_or_create_company, get_company_by_id, list_companies,
     init_audit_tables, log_admin_deletion, list_admin_deletion_log,
-    init_lol_tables, init_loma_table, upsert_lol_monitoring, get_lol_monitoring,
+    init_lol_tables, init_loma_table, init_geocode_cache_table, upsert_lol_monitoring, get_lol_monitoring,
     list_lol_monitoring, list_active_lol_monitoring,
     close_lol_monitoring, update_lol_last_checked,
     create_lol_alert, list_lol_alerts, count_failed_lol_alerts,
@@ -262,6 +262,7 @@ async def startup():
     init_audit_tables()
     init_lol_tables()
     init_loma_table()
+    init_geocode_cache_table()
 
     admin_pw = os.getenv("ADMIN_PASSWORD", "")
     existing_admin = get_user_by_email(SUPER_ADMIN_EMAIL)

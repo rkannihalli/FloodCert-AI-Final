@@ -865,3 +865,77 @@ def init_loma_table():
             "ALTER TABLE loma_records ADD COLUMN IF NOT EXISTS pdf_link TEXT",
             "ALTER TABLE loma_records ADD COLUMN IF NOT EXISTS record_type TEXT",
         ])
+
+
+# -- Geocode cache --------------------------------------------------------------
+# Geocoding hits up to 7 different live third-party services in a fallback
+# chain (ArcGIS, Census x2, Photon, Nominatim x3). Which one succeeds, and
+# which coordinates come back, can vary between calls for the identical
+# address due to ordinary network conditions (timeouts, rate limits, which
+# backend node answers) -- confirmed to produce different zone/panel/county
+# results for the same address on different runs. Caching the first
+# successful geocode and reusing it on every later lookup of that address
+# makes results stable.
+
+def init_geocode_cache_table():
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS geocode_cache (
+                    id SERIAL PRIMARY KEY,
+                    address_key TEXT UNIQUE NOT NULL,
+                    original_address TEXT,
+                    lat DOUBLE PRECISION,
+                    lon DOUBLE PRECISION,
+                    matched_address TEXT,
+                    city TEXT,
+                    state_abbr TEXT,
+                    state_fips TEXT,
+                    county_fips TEXT,
+                    county_name TEXT,
+                    geocode_precision TEXT,
+                    geocode_source TEXT,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+
+
+def get_cached_geocode(address_key: str) -> Optional[dict]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM geocode_cache WHERE address_key = %s",
+                (address_key,),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+
+def save_geocode_cache(address_key: str, original_address: str, result: dict) -> None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO geocode_cache (
+                    address_key, original_address, lat, lon, matched_address,
+                    city, state_abbr, state_fips, county_fips, county_name,
+                    geocode_precision, geocode_source
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (address_key) DO NOTHING
+                """,
+                (
+                    address_key,
+                    original_address,
+                    result.get("lat"),
+                    result.get("lon"),
+                    result.get("matched_address"),
+                    result.get("city"),
+                    result.get("state_abbr"),
+                    result.get("state_fips"),
+                    result.get("county_fips"),
+                    result.get("county_name"),
+                    result.get("geocode_precision"),
+                    result.get("geocode_source"),
+                ),
+            )
