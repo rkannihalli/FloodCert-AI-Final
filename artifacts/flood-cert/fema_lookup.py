@@ -1482,9 +1482,17 @@ async def query_nfip_community_csb(
     """Look up NFIP community name and number.
     Priority:
       1. Authoritative community_id_from_layer22 (from the actual FEMA NFHL
-         spatial point-in-polygon query) — direct CID lookup, no guessing.
-      2. Local nfip_communities_db.json, scoped to the correct county only.
-      3. FEMA CSB API (fallback, may be unavailable)
+         spatial point-in-polygon query) -- direct CID lookup, no guessing.
+      2. Local nfip_communities_db.json name match (exact/partial city name).
+      3. FEMA CSB API (live, authoritative for city-specific lookups the
+         local DB does not have an exact name match for).
+      4. Local nfip_communities_db.json county/unincorporated or
+         single-entry fallback -- last resort. A bare "county" name or a
+         lone leftover entry is a guess, not a verified city match (see
+         Pharr, TX: the local DB's only Hidalgo County entry is literally
+         named "Hidalgo County", which used to short-circuit here before
+         the CSB API ever got a chance to find the correct
+         "PHARR, CITY OF" / 480347 record).
     """
     import os, json as _json
     empty: dict = {"csb_community_id": "", "csb_community_name": ""}
@@ -1496,18 +1504,16 @@ async def query_nfip_community_csb(
         return empty
 
     cid_wanted = (community_id_from_layer22 or "").strip()
+    communities = []
+    scoped_to_county = False
+    city_norm = city.lower().strip()
 
-    # ── 1. Local JSON DB ─────────────────────────────────────────────────────
+    # -- 1. Local JSON DB: authoritative CID match + city name match --------
     try:
         db_path = os.path.join(os.path.dirname(__file__), "nfip_communities_db.json")
         with open(db_path) as f:
             nfip_db = _json.load(f)
 
-        # 1a. Authoritative CID match — the spatial query already told us
-        # exactly which community polygon the point falls in. Trust that
-        # over any name-based guessing. This must come first: it is the
-        # only lookup here that is actually tied to the property's real
-        # location rather than a text match on city name.
         if cid_wanted:
             for k, v in nfip_db.items():
                 if not k.startswith(f"{sa}_"):
@@ -1519,28 +1525,17 @@ async def query_nfip_community_csb(
                                 "csb_panel": c.get("panel", ""),
                                 "csb_panel_date": c.get("panel_date", "")}
 
-        # Try exact county key: STATE_COUNTYCODE
         cfips = county_fips.zfill(3) if county_fips else ""
         key = f"{sa}_{cfips}" if cfips else None
         communities = nfip_db.get(key, []) if key else []
-        # Whether this list is correctly scoped to the property's actual
-        # county. Only a scoped list is safe input for the loose
-        # "county/unincorporated" fallback below — an unscoped, merged,
-        # state-wide list can match an unrelated county hundreds of miles
-        # away just because its name contains "county".
         scoped_to_county = bool(communities)
 
-        # If not found by exact county key, broaden the search — but only
-        # for name matching, never for the loose county/unincorporated catch-all.
         if not communities and sa:
             for k, v in nfip_db.items():
                 if k.startswith(f"{sa}_"):
                     communities.extend(v)
 
-        city_norm = city.lower().strip()
-
         if communities and city_norm:
-            # Exact match first
             for c in communities:
                 c_name = (c.get("name") or "").lower()
                 if c_name == city_norm or c_name.startswith(city_norm + ","):
@@ -1548,7 +1543,6 @@ async def query_nfip_community_csb(
                             "csb_community_name": c.get("name", ""),
                             "csb_panel": c.get("panel", ""),
                             "csb_panel_date": c.get("panel_date", "")}
-            # Partial match
             for c in communities:
                 c_name = (c.get("name") or "").lower()
                 if city_norm in c_name:
@@ -1556,30 +1550,12 @@ async def query_nfip_community_csb(
                             "csb_community_name": c.get("name", ""),
                             "csb_panel": c.get("panel", ""),
                             "csb_panel_date": c.get("panel_date", "")}
-        if communities and scoped_to_county:
-            # County/unincorporated fallback — only safe when `communities`
-            # is the correct county's own list (exact key match). If we had
-            # to fall back to the whole state, skip this: picking "the first
-            # entry with 'county' in its name" from a merged multi-county
-            # list is a coin flip on the wrong county, not a real match.
-            for c in communities:
-                c_name = (c.get("name") or "").lower()
-                if "county" in c_name or "unincorporated" in c_name:
-                    return {"csb_community_id": c.get("cid", ""),
-                            "csb_community_name": c.get("name", ""),
-                            "csb_panel": c.get("panel", ""),
-                            "csb_panel_date": c.get("panel_date", "")}
-            # Single result in the correctly-scoped county list
-            if len(communities) == 1:
-                return {"csb_community_id": communities[0].get("cid", ""),
-                        "csb_community_name": communities[0].get("name", ""),
-                        "csb_panel": communities[0].get("panel", ""),
-                        "csb_panel_date": communities[0].get("panel_date", "")}
     except Exception as e:
         print(f"NFIP local DB lookup error: {e}")
 
-    # ── 2. FEMA CSB API fallback ──────────────────────────────────────────────
+    # -- 2. FEMA CSB API (live, before the weaker local-DB fallbacks) -------
     try:
+        params = None
         if cid_wanted:
             params = {
                 "$filter": f"communityIdNumber eq '{cid_wanted}'",
@@ -1587,32 +1563,48 @@ async def query_nfip_community_csb(
             }
         else:
             city_upper = city.strip().upper()
-            if not city_upper:
-                return empty
-            params = {
-                "$filter": f"state eq '{sa}' and contains(communityName,'{city_upper}')",
-                "$top": "20",
-            }
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(FEMA_CSB_URL, params=params)
-            resp.raise_for_status()
-            data = resp.json()
-        communities_api = data.get("NfipCommunityStatusBook", [])
-        if cid_wanted and communities_api:
-            c = communities_api[0]
-            return {"csb_community_id": c.get("communityIdNumber", ""),
-                    "csb_community_name": c.get("communityName", "")}
-        city_norm = city.lower().strip()
-        for c in communities_api:
-            c_name = (c.get("communityName") or "").lower()
-            if city_norm and city_norm in c_name:
+            if city_upper:
+                params = {
+                    "$filter": f"state eq '{sa}' and contains(communityName,'{city_upper}')",
+                    "$top": "20",
+                }
+        if params:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(FEMA_CSB_URL, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+            communities_api = data.get("NfipCommunityStatusBook", [])
+            if cid_wanted and communities_api:
+                c = communities_api[0]
                 return {"csb_community_id": c.get("communityIdNumber", ""),
                         "csb_community_name": c.get("communityName", "")}
-        if len(communities_api) == 1:
-            return {"csb_community_id": communities_api[0].get("communityIdNumber", ""),
-                    "csb_community_name": communities_api[0].get("communityName", "")}
+            for c in communities_api:
+                c_name = (c.get("communityName") or "").lower()
+                if city_norm and city_norm in c_name:
+                    return {"csb_community_id": c.get("communityIdNumber", ""),
+                            "csb_community_name": c.get("communityName", "")}
+            if len(communities_api) == 1:
+                return {"csb_community_id": communities_api[0].get("communityIdNumber", ""),
+                        "csb_community_name": communities_api[0].get("communityName", "")}
     except Exception as e:
         print(f"FEMA CSB API fallback error: {e}")
+
+    # -- 3. Local JSON DB: county/unincorporated or single-entry fallback ---
+    # Last resort only -- used only after both the local DB name match and
+    # the live CSB API have failed to find anything city-specific.
+    if communities and scoped_to_county:
+        for c in communities:
+            c_name = (c.get("name") or "").lower()
+            if "county" in c_name or "unincorporated" in c_name:
+                return {"csb_community_id": c.get("cid", ""),
+                        "csb_community_name": c.get("name", ""),
+                        "csb_panel": c.get("panel", ""),
+                        "csb_panel_date": c.get("panel_date", "")}
+        if len(communities) == 1:
+            return {"csb_community_id": communities[0].get("cid", ""),
+                    "csb_community_name": communities[0].get("name", ""),
+                    "csb_panel": communities[0].get("panel", ""),
+                    "csb_panel_date": communities[0].get("panel_date", "")}
 
     return empty
 
