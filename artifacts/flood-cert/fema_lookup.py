@@ -1117,10 +1117,27 @@ async def query_firm_panel(lat: float, lon: float, county_fips: str = "", commun
             "f": "json",
         }
         try:
-            async with httpx.AsyncClient(timeout=12.0, verify=False) as client:
-                resp = await client.get(f"{NFHL_BASE}/3/query", params=params)
-                resp.raise_for_status()
-                data = resp.json()
+            # Retry the live fetch once before giving up on this query.
+            # Confirmed live (Concord Township, OH) that this endpoint times
+            # out on both point and envelope attempts with the old 12s/no-
+            # retry setup, producing a total panel failure even though
+            # TIGERweb and Layer 22 both succeeded for the same point --
+            # ordinary endpoint flakiness, not a real data gap.
+            data = None
+            last_exc = None
+            for attempt in range(2):
+                try:
+                    async with httpx.AsyncClient(timeout=25.0, verify=False) as client:
+                        resp = await client.get(f"{NFHL_BASE}/3/query", params=params)
+                        resp.raise_for_status()
+                        data = resp.json()
+                    break
+                except Exception as retry_exc:
+                    last_exc = retry_exc
+                    print(f"[PANEL-DEBUG] Layer 3 query ({q['geometryType']}) attempt "
+                          f"{attempt + 1}/2 failed: {retry_exc!r}")
+            if data is None:
+                raise last_exc
             features = data.get("features", [])
             if not features:
                 print(f"[PANEL-DEBUG] Layer 3 query ({q['geometryType']}) returned 0 features "
