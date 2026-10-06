@@ -1760,14 +1760,24 @@ def determine_flood_info(merged: dict) -> dict:
     if not county_name:
         county_name = ""
 
-    # Independent cities are their own county-equivalent. FEMA/CoreLogic's
-    # SFHDF convention uses "INDEPENDENT CITY" for the county field.
+    # Independent cities are their own county-equivalent (e.g. Baltimore
+    # City, St. Louis, Newport News City). TIGERweb already returns the
+    # city's own name in county_name for these locations, and that name
+    # IS the correct county-equivalent value -- confirmed against
+    # CoreLogic's reference data, which shows the real name (e.g.
+    # "Baltimore City", "St. Louis", "Newport News City"), never a
+    # generic placeholder. This block previously overwrote that correct,
+    # already-populated name with the literal string "INDEPENDENT CITY",
+    # discarding real data for no reason. Now we only fall back to the
+    # geocoded city name, and only when county_name came back empty --
+    # never substitute a placeholder over an already-correct value.
     county_name_raw = county_name
     state_abbr_for_indep = (merged.get("state_abbr") or "").strip()
     geocoded_city_for_indep = (merged.get("geocoded_city") or "").strip()
-    if (is_independent_city(county_name, state_abbr_for_indep)
-            or is_independent_city(geocoded_city_for_indep, state_abbr_for_indep)):
-        county_name = "INDEPENDENT CITY"
+    if not county_name and geocoded_city_for_indep and is_independent_city(
+            geocoded_city_for_indep, state_abbr_for_indep):
+        county_name = geocoded_city_for_indep
+        county_name_raw = county_name
 
     if panel_effective_date_override:
         panel_effective_date = panel_effective_date_override
